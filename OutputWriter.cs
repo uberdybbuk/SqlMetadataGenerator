@@ -31,31 +31,40 @@ public sealed class OutputWriter
     }
 
     /// <summary>
-    /// Bir script'i ilgili kategori klasörüne "schema.name.sql" olarak yazar.
-    /// Geçersiz karakterler temizlenir, çakışmalar kategori içinde benzersizleştirilir.
-    /// Yazılan dosya adını (uzantı dâhil) döndürür — snapshot'ta saklamak için.
+    /// Bir script'i {category}/{schema} klasörüne "ad.sql" olarak yazar.
+    /// Şema ayrı parametredir (string'e gömülmez), böylece içindeki '/' gibi karakterler de
+    /// ekstra dizine bölünmeden güvenle temizlenir. Snapshot için yazılan kaydı döndürür.
     /// </summary>
-    public async Task<string> WriteAsync(string category, string objectName, string script, CancellationToken ct = default)
+    public async Task<WrittenFile> WriteAsync(
+        string category, string? schema, string objectName, string script, CancellationToken ct = default)
     {
-        // category "Programmability/Stored Procedures" gibi alt klasör içerebilir;
-        // '/' ayraçlarını platform bağımsız şekilde birleştir.
-        string[] segments = category.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        // Sabit kategori ("Programmability/Stored Procedures") + (varsa) şema → güvenli segmentler.
+        var segments = category.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(SafeFileName.MakeSafe)
+            .ToList();
+        if (schema is not null)
+            segments.Add(SafeFileName.MakeSafe(schema));
+
         string dir = Path.Combine([DatabaseRoot, .. segments]);
         Directory.CreateDirectory(dir);
 
-        if (!_namersByCategory.TryGetValue(category, out var namer))
+        // Çakışma çözümü kategori+şema bazında ayrı (farklı şemadaki aynı ad çakışmaz).
+        string safeCategory = string.Join('/', segments);
+        if (!_namersByCategory.TryGetValue(safeCategory, out var namer))
         {
             namer = new SafeFileName();
-            _namersByCategory[category] = namer;
+            _namersByCategory[safeCategory] = namer;
         }
 
         string fileName = namer.Reserve(objectName) + ".sql";
-        string path = Path.Combine(dir, fileName);
-        await File.WriteAllTextAsync(path, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), ct);
-        return fileName;
+        await File.WriteAllTextAsync(Path.Combine(dir, fileName), script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), ct);
+        return new WrittenFile(safeCategory, fileName);
     }
 
-    /// <summary>Snapshot'taki bir kayda karşılık gelen dosyayı siler (varsa).</summary>
+    /// <summary>
+    /// Snapshot'taki bir kayda karşılık gelen dosyayı siler (varsa).
+    /// category zaten güvenli segmentlerden oluşur (WrittenFile.Category), bölünmesi güvenlidir.
+    /// </summary>
     public void DeleteFile(string category, string fileName)
     {
         string[] segments = category.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -64,3 +73,6 @@ public sealed class OutputWriter
             File.Delete(path);
     }
 }
+
+/// <summary>Yazılan bir dosyanın snapshot'ta saklanacak konumu (güvenli kategori yolu + dosya adı).</summary>
+public readonly record struct WrittenFile(string Category, string File);

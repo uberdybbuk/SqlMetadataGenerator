@@ -120,3 +120,10 @@ public sealed class SynonymInfo
     /// <summary>sys.synonyms.base_object_name — hedef nesnenin (çok parçalı) adı.</summary>
     public required string BaseObjectName { get; init; }
 }
+
+public sealed class SchemaInfo
+{
+    public required string Name { get; init; }
+    /// <summary>Şema sahibi (principal). dbo ise AUTHORIZATION yazılmaz (varsayılan).</summary>
+    public required string Owner { get; init; }
+}

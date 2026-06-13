@@ -12,6 +12,7 @@ public sealed class SnapshotEntry
     public required string Category { get; set; }
     public required string File { get; set; }
     /// <summary>Modüllerde modify_date ("o" formatı); tablo/synonym'de null (her zaman yeniden çekilir).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ModifyDate { get; set; }
 }
 

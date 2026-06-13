@@ -41,14 +41,16 @@ try
         (isUnchanged ? unchanged : changed).Add(h);
     }
 
-    // Tablolar/synonym'ler her zaman tam çekilir; sadece değişen modüllerin tanımı çekilir.
+    // Tablolar/synonym'ler/şemalar her zaman tam çekilir; sadece değişen modüllerin tanımı çekilir.
     var collationTask = reader.ReadDatabaseCollationAsync();
+    var schemasTask = reader.ReadSchemasAsync();
     var tablesTask = reader.ReadTablesAsync();
     var synonymsTask = reader.ReadSynonymsAsync();
     var modulesTask = reader.ReadModuleDefinitionsAsync(changed);
-    await Task.WhenAll(collationTask, tablesTask, synonymsTask, modulesTask);
+    await Task.WhenAll(collationTask, schemasTask, tablesTask, synonymsTask, modulesTask);
 
     string? dbCollation = await collationTask;
+    var schemas = await schemasTask;
     var tables = await tablesTask;
     var synonyms = await synonymsTask;
     var modules = await modulesTask;
@@ -58,24 +60,32 @@ try
 
     var newSnapshot = new Snapshot();
 
-    // Tablolar
+    // Şemalar (en başta — diğer nesneler bunlara bağlı). Şema kendisi alt dizinsiz.
+    foreach (var schema in schemas)
+    {
+        var wf = await writer.WriteAsync("Security/Schemas", null, schema.Name, SchemaScripter.Script(schema, fmt));
+        newSnapshot.Objects[schema.Name] = new SnapshotEntry { Category = wf.Category, File = wf.File };
+    }
+    Console.WriteLine($"Şemalar: {schemas.Count} script yazıldı.");
+
+    // Tablolar — şema bazlı alt dizin: Tables/{şema}/{ad}.sql
     foreach (var table in tables)
     {
-        string file = await writer.WriteAsync("Tables", table.Name.FileBaseName, TableScripter.Script(table, fmt));
-        newSnapshot.Objects[table.Name.FileBaseName] = new SnapshotEntry { Category = "Tables", File = file };
+        var wf = await writer.WriteAsync("Tables", table.Name.Schema, table.Name.Name, TableScripter.Script(table, fmt));
+        newSnapshot.Objects[table.Name.FileBaseName] = new SnapshotEntry { Category = wf.Category, File = wf.File };
     }
     Console.WriteLine($"Tablolar: {tables.Count} script yazıldı.");
 
-    // Değişen modüller (view / stored procedure / function / trigger)
+    // Değişen modüller (view / stored procedure / function / trigger) — kategori altında şema alt dizini
     var changedModifyByKey = changed.ToDictionary(h => h.Name.FileBaseName, h => h.ModifyDate.ToString("o"));
     foreach (var module in modules)
     {
         string key = module.Name.FileBaseName;
-        string file = await writer.WriteAsync(module.CategoryFolder, key, ModuleScripter.Script(module.Definition, fmt));
+        var wf = await writer.WriteAsync(module.CategoryFolder, module.Name.Schema, module.Name.Name, ModuleScripter.Script(module.Definition, fmt));
         newSnapshot.Objects[key] = new SnapshotEntry
         {
-            Category = module.CategoryFolder,
-            File = file,
+            Category = wf.Category,
+            File = wf.File,
             ModifyDate = changedModifyByKey[key],
         };
     }
@@ -88,11 +98,11 @@ try
     foreach (var group in moduleHeaders.GroupBy(m => m.CategoryFolder).OrderBy(g => g.Key))
         Console.WriteLine($"{group.Key}: {group.Count()} nesne ({changed.Count(c => c.CategoryFolder == group.Key)} yeniden çekildi).");
 
-    // Synonyms
+    // Synonyms — Synonyms/{şema}/{ad}.sql
     foreach (var synonym in synonyms)
     {
-        string file = await writer.WriteAsync("Synonyms", synonym.Name.FileBaseName, SynonymScripter.Script(synonym, fmt));
-        newSnapshot.Objects[synonym.Name.FileBaseName] = new SnapshotEntry { Category = "Synonyms", File = file };
+        var wf = await writer.WriteAsync("Synonyms", synonym.Name.Schema, synonym.Name.Name, SynonymScripter.Script(synonym, fmt));
+        newSnapshot.Objects[synonym.Name.FileBaseName] = new SnapshotEntry { Category = wf.Category, File = wf.File };
     }
     Console.WriteLine($"Synonyms: {synonyms.Count} script yazıldı.");
 

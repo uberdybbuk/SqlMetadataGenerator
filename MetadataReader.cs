@@ -563,6 +563,29 @@ public sealed class MetadataReader(string connectionString)
         _ => "Programmability",
     };
 
+    /// <summary>
+    /// Kullanıcı tanımlı şemaları okur. Yerleşik şemalar (dbo/guest/sys/INFORMATION_SCHEMA ve
+    /// sabit veritabanı rolü şemaları) hariç tutulur — bunlar schema_id aralığıyla ayrılır.
+    /// </summary>
+    public async Task<List<SchemaInfo>> ReadSchemasAsync(CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT s.name, dp.name AS owner_name
+            FROM sys.schemas s
+            JOIN sys.database_principals dp ON s.principal_id = dp.principal_id
+            WHERE s.schema_id BETWEEN 5 AND 16383
+            ORDER BY s.name;
+            """;
+
+        var schemas = new List<SchemaInfo>();
+        await using var conn = await OpenConnectionAsync(ct);
+        await using var cmd = new SqlCommand(sql, conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            schemas.Add(new SchemaInfo { Name = reader.GetString(0), Owner = reader.GetString(1) });
+        return schemas;
+    }
+
     public async Task<List<SynonymInfo>> ReadSynonymsAsync(CancellationToken ct = default)
     {
         const string sql = """
