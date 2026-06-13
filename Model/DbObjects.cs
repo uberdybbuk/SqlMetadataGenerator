@@ -99,6 +99,8 @@ public sealed class ModuleHeader
     public required int ObjectId { get; init; }
     public required ObjectName Name { get; init; }
     public required string CategoryFolder { get; init; }
+    /// <summary>Filtre tipi: views | procedures | functions | triggers.</summary>
+    public required string Kind { get; init; }
     public required DateTime ModifyDate { get; init; }
 }
 

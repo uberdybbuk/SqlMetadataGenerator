@@ -30,8 +30,13 @@ try
         ? "Mod: tam çekme (--full)."
         : oldSnapshot.Objects.Count > 0 ? "Mod: incremental." : "Mod: ilk çalıştırma (tam).");
 
-    // Modül başlıklarını önce çek (hafif), incremental kararını ver.
-    var moduleHeaders = await reader.ReadModuleHeadersAsync();
+    var filter = options.Filter;
+
+    // Modül başlıklarını önce çek (hafif), filtre uygula, incremental kararını ver.
+    var allHeaders = filter.HasAnyModuleType ? await reader.ReadModuleHeadersAsync() : [];
+    var moduleHeaders = allHeaders
+        .Where(h => filter.IncludesType(h.Kind) && filter.IncludesObject(h.Name.Schema, h.Name.Name))
+        .ToList();
     var changed = new List<ModuleHeader>();
     var unchanged = new List<ModuleHeader>();
     foreach (var h in moduleHeaders)
@@ -62,6 +67,8 @@ try
         {
             // ---- Okuma fazı (paralel) ----
             var tblMetaTask = ctx.AddTask("[green]Tablo metadatası[/]", maxValue: 7);
+            if (!filter.IncludesType("tables"))
+                tblMetaTask.Value = tblMetaTask.MaxValue;
             int batchCount = MetadataReader.BatchCount(changed.Count);
             var modDefTask = ctx.AddTask("[green]Modül tanımları[/]", maxValue: Math.Max(batchCount, 1));
             if (batchCount == 0)
@@ -70,17 +77,19 @@ try
             var tblProgress = new Progress<int>(_ => tblMetaTask.Increment(1));
             var modProgress = new Progress<int>(_ => modDefTask.Increment(1));
 
+            // Tip bazlı dışlamada ilgili sorgu hiç çalışmaz.
             var collationTask = reader.ReadDatabaseCollationAsync();
-            var schemasTask = reader.ReadSchemasAsync();
-            var synonymsTask = reader.ReadSynonymsAsync();
-            var tablesTask = reader.ReadTablesAsync(tblProgress);
+            var schemasTask = filter.IncludesType("schemas") ? reader.ReadSchemasAsync() : Task.FromResult(new List<SchemaInfo>());
+            var synonymsTask = filter.IncludesType("synonyms") ? reader.ReadSynonymsAsync() : Task.FromResult(new List<SynonymInfo>());
+            var tablesTask = filter.IncludesType("tables") ? reader.ReadTablesAsync(tblProgress) : Task.FromResult(new List<TableInfo>());
             var modulesTask = reader.ReadModuleDefinitionsAsync(changed, modProgress);
             await Task.WhenAll(collationTask, schemasTask, synonymsTask, tablesTask, modulesTask);
 
             dbCollation = await collationTask;
-            schemas = await schemasTask;
-            synonyms = await synonymsTask;
-            tables = await tablesTask;
+            // Şema/isim bazlı dışlamayı uygula.
+            schemas = (await schemasTask).Where(s => filter.IncludesObject(s.Name, s.Name)).ToList();
+            synonyms = (await synonymsTask).Where(s => filter.IncludesObject(s.Name.Schema, s.Name.Name)).ToList();
+            tables = (await tablesTask).Where(t => filter.IncludesObject(t.Name.Schema, t.Name.Name)).ToList();
             modules = await modulesTask;
             var fmt = options.ToScriptFormat(dbCollation);
 

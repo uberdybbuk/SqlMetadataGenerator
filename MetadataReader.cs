@@ -508,11 +508,13 @@ public sealed class MetadataReader(string connectionString)
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
+            string type = reader.GetString(3).Trim();
             headers.Add(new ModuleHeader
             {
                 ObjectId = reader.GetInt32(0),
                 Name = new ObjectName(reader.GetString(1), reader.GetString(2)),
-                CategoryFolder = CategoryForType(reader.GetString(3).Trim()),
+                CategoryFolder = CategoryForType(type),
+                Kind = KindForType(type),
                 ModifyDate = reader.GetDateTime(4),
             });
         }
@@ -578,6 +580,16 @@ public sealed class MetadataReader(string connectionString)
         "IF" or "TF" => "Programmability/Functions/TableFunctions",
         "TR" => "Programmability/Triggers",
         _ => "Programmability",
+    };
+
+    /// <summary>Tip kodunu exclusion filtresinin anladığı kind'e çevirir.</summary>
+    private static string KindForType(string type) => type switch
+    {
+        "V" => "views",
+        "P" => "procedures",
+        "FN" or "IF" or "TF" => "functions",
+        "TR" => "triggers",
+        _ => "",
     };
 
     /// <summary>

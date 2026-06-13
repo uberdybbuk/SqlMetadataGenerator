@@ -29,6 +29,8 @@ public sealed class CommandLineOptions
     public IReadOnlySet<string>? AuditColumns { get; init; }
     /// <summary>true ise snapshot yok sayılır ve tüm nesneler yeniden çekilir.</summary>
     public bool FullRefresh { get; init; }
+    /// <summary>Tip/şema/isim bazlı dışlama filtresi.</summary>
+    public ObjectFilter Filter { get; init; } = ObjectFilter.Empty;
 
     public ScriptFormat ToScriptFormat(string? databaseCollation = null) => new()
     {
@@ -91,6 +93,7 @@ public sealed class CommandLineOptions
         bool emitSetOptions = false;
         IReadOnlySet<string>? auditColumns = null;
         bool fullRefresh = false;
+        string[] excludeTypes = [], excludeSchemas = [], excludeNames = [];
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -154,6 +157,21 @@ public sealed class CommandLineOptions
                 case "--full":
                     fullRefresh = true;
                     break;
+                case "--exclude":
+                    excludeTypes = SplitList(Next());
+                    foreach (var t in excludeTypes)
+                        if (!ObjectFilter.ValidTypes.Contains(t))
+                        {
+                            err = $"Geçersiz --exclude tipi: '{t}'. Geçerli: {string.Join(", ", ObjectFilter.ValidTypes)}";
+                            break;
+                        }
+                    break;
+                case "--exclude-schema":
+                    excludeSchemas = SplitList(Next());
+                    break;
+                case "--exclude-name":
+                    excludeNames = SplitList(Next());
+                    break;
                 case "--audit-columns":
                     string? list = Next();
                     if (list is not null)
@@ -209,8 +227,14 @@ public sealed class CommandLineOptions
             EmitSetOptions = emitSetOptions,
             AuditColumns = auditColumns,
             FullRefresh = fullRefresh,
+            Filter = new ObjectFilter(excludeTypes, excludeSchemas, excludeNames),
         };
     }
+
+    private static string[] SplitList(string? value) =>
+        value is null
+            ? []
+            : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     public static string UsageText =>
         """
@@ -238,5 +262,11 @@ public sealed class CommandLineOptions
                                       UpdatedBy,UpdatedCorrelationId,UpdatedChannelCode
           --full                      Snapshot'ı yok say, tüm nesneleri yeniden çek
                                       (varsayılan: snapshot varsa incremental)
+
+        Dışlama (exclusion):
+          --exclude <tipler>          Dışlanan tipler: schemas,tables,views,
+                                      procedures,functions,triggers,synonyms
+          --exclude-schema <şemalar>  Bu şemalardaki tüm nesneleri atla
+          --exclude-name <metinler>   Adında bu metinlerden biri geçen nesneleri atla
         """;
 }
