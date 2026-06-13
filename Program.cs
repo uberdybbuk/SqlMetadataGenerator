@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using Spectre.Console;
 using SqlMetadataGenerator;
 using SqlMetadataGenerator.Model;
 using SqlMetadataGenerator.Scripting;
@@ -41,70 +42,99 @@ try
         (isUnchanged ? unchanged : changed).Add(h);
     }
 
-    // Tablolar/synonym'ler/şemalar her zaman tam çekilir; sadece değişen modüllerin tanımı çekilir.
-    var collationTask = reader.ReadDatabaseCollationAsync();
-    var schemasTask = reader.ReadSchemasAsync();
-    var tablesTask = reader.ReadTablesAsync();
-    var synonymsTask = reader.ReadSynonymsAsync();
-    var modulesTask = reader.ReadModuleDefinitionsAsync(changed);
-    await Task.WhenAll(collationTask, schemasTask, tablesTask, synonymsTask, modulesTask);
-
-    string? dbCollation = await collationTask;
-    var schemas = await schemasTask;
-    var tables = await tablesTask;
-    var synonyms = await synonymsTask;
-    var modules = await modulesTask;
-
-    var fmt = options.ToScriptFormat(dbCollation);
-    Console.WriteLine($"Veritabanı collation: {dbCollation ?? "(okunamadı)"}");
-
+    // Lambda içinde doldurulup dışında raporlanacak değerler.
+    List<SchemaInfo> schemas = [];
+    List<TableInfo> tables = [];
+    List<RoutineInfo> modules = [];
+    List<SynonymInfo> synonyms = [];
+    string? dbCollation = null;
     var newSnapshot = new Snapshot();
 
-    // Şemalar (en başta — diğer nesneler bunlara bağlı). Şema kendisi alt dizinsiz.
-    foreach (var schema in schemas)
-    {
-        var wf = await writer.WriteAsync("Security/Schemas", null, schema.Name, SchemaScripter.Script(schema, fmt));
-        newSnapshot.Objects[schema.Name] = new SnapshotEntry { Category = wf.Category, File = wf.File };
-    }
-    Console.WriteLine($"Şemalar: {schemas.Count} script yazıldı.");
-
-    // Tablolar — şema bazlı alt dizin: Tables/{şema}/{ad}.sql
-    foreach (var table in tables)
-    {
-        var wf = await writer.WriteAsync("Tables", table.Name.Schema, table.Name.Name, TableScripter.Script(table, fmt));
-        newSnapshot.Objects[table.Name.FileBaseName] = new SnapshotEntry { Category = wf.Category, File = wf.File };
-    }
-    Console.WriteLine($"Tablolar: {tables.Count} script yazıldı.");
-
-    // Değişen modüller (view / stored procedure / function / trigger) — kategori altında şema alt dizini
-    var changedModifyByKey = changed.ToDictionary(h => h.Name.FileBaseName, h => h.ModifyDate.ToString("o"));
-    foreach (var module in modules)
-    {
-        string key = module.Name.FileBaseName;
-        var wf = await writer.WriteAsync(module.CategoryFolder, module.Name.Schema, module.Name.Name, ModuleScripter.Script(module.Definition, fmt));
-        newSnapshot.Objects[key] = new SnapshotEntry
+    await AnsiConsole.Progress()
+        .AutoClear(false)
+        .Columns(
+            new SpinnerColumn(),
+            new TaskDescriptionColumn(),
+            new ProgressBarColumn(),
+            new PercentageColumn(),
+            new RemainingTimeColumn())
+        .StartAsync(async ctx =>
         {
-            Category = wf.Category,
-            File = wf.File,
-            ModifyDate = changedModifyByKey[key],
-        };
-    }
+            // ---- Okuma fazı (paralel) ----
+            var tblMetaTask = ctx.AddTask("[green]Tablo metadatası[/]", maxValue: 7);
+            int batchCount = MetadataReader.BatchCount(changed.Count);
+            var modDefTask = ctx.AddTask("[green]Modül tanımları[/]", maxValue: Math.Max(batchCount, 1));
+            if (batchCount == 0)
+                modDefTask.Value = modDefTask.MaxValue;
 
-    // Değişmeyen modüller: dosya zaten diskte, eski snapshot kaydını taşı.
-    foreach (var h in unchanged)
-        if (oldSnapshot.Objects.TryGetValue(h.Name.FileBaseName, out var prev))
-            newSnapshot.Objects[h.Name.FileBaseName] = prev;
+            var tblProgress = new Progress<int>(_ => tblMetaTask.Increment(1));
+            var modProgress = new Progress<int>(_ => modDefTask.Increment(1));
 
+            var collationTask = reader.ReadDatabaseCollationAsync();
+            var schemasTask = reader.ReadSchemasAsync();
+            var synonymsTask = reader.ReadSynonymsAsync();
+            var tablesTask = reader.ReadTablesAsync(tblProgress);
+            var modulesTask = reader.ReadModuleDefinitionsAsync(changed, modProgress);
+            await Task.WhenAll(collationTask, schemasTask, synonymsTask, tablesTask, modulesTask);
+
+            dbCollation = await collationTask;
+            schemas = await schemasTask;
+            synonyms = await synonymsTask;
+            tables = await tablesTask;
+            modules = await modulesTask;
+            var fmt = options.ToScriptFormat(dbCollation);
+
+            // ---- Yazma fazı ----
+            int totalWrite = schemas.Count + tables.Count + modules.Count + synonyms.Count;
+            var writeTask = ctx.AddTask("[blue]Script yazılıyor[/]", maxValue: Math.Max(totalWrite, 1));
+            if (totalWrite == 0)
+                writeTask.Value = writeTask.MaxValue;
+
+            // Şemalar (en başta — diğer nesneler bunlara bağlı). Şema kendisi alt dizinsiz.
+            foreach (var schema in schemas)
+            {
+                var wf = await writer.WriteAsync("Security/Schemas", null, schema.Name, SchemaScripter.Script(schema, fmt));
+                newSnapshot.Objects[schema.Name] = new SnapshotEntry { Category = wf.Category, File = wf.File };
+                writeTask.Increment(1);
+            }
+
+            // Tablolar — Tables/{şema}/{ad}.sql
+            foreach (var table in tables)
+            {
+                var wf = await writer.WriteAsync("Tables", table.Name.Schema, table.Name.Name, TableScripter.Script(table, fmt));
+                newSnapshot.Objects[table.Name.FileBaseName] = new SnapshotEntry { Category = wf.Category, File = wf.File };
+                writeTask.Increment(1);
+            }
+
+            // Değişen modüller (view / stored procedure / function / trigger)
+            var changedModifyByKey = changed.ToDictionary(h => h.Name.FileBaseName, h => h.ModifyDate.ToString("o"));
+            foreach (var module in modules)
+            {
+                string key = module.Name.FileBaseName;
+                var wf = await writer.WriteAsync(module.CategoryFolder, module.Name.Schema, module.Name.Name, ModuleScripter.Script(module.Definition, fmt));
+                newSnapshot.Objects[key] = new SnapshotEntry { Category = wf.Category, File = wf.File, ModifyDate = changedModifyByKey[key] };
+                writeTask.Increment(1);
+            }
+
+            // Değişmeyen modüller: dosya zaten diskte, eski snapshot kaydını taşı.
+            foreach (var h in unchanged)
+                if (oldSnapshot.Objects.TryGetValue(h.Name.FileBaseName, out var prev))
+                    newSnapshot.Objects[h.Name.FileBaseName] = prev;
+
+            // Synonyms — Synonyms/{şema}/{ad}.sql
+            foreach (var synonym in synonyms)
+            {
+                var wf = await writer.WriteAsync("Synonyms", synonym.Name.Schema, synonym.Name.Name, SynonymScripter.Script(synonym, fmt));
+                newSnapshot.Objects[synonym.Name.FileBaseName] = new SnapshotEntry { Category = wf.Category, File = wf.File };
+                writeTask.Increment(1);
+            }
+        });
+
+    // ---- Özet (progress sonrası) ----
+    Console.WriteLine($"Veritabanı collation: {dbCollation ?? "(okunamadı)"}");
+    Console.WriteLine($"Şemalar: {schemas.Count} | Tablolar: {tables.Count} | Synonyms: {synonyms.Count}");
     foreach (var group in moduleHeaders.GroupBy(m => m.CategoryFolder).OrderBy(g => g.Key))
         Console.WriteLine($"{group.Key}: {group.Count()} nesne ({changed.Count(c => c.CategoryFolder == group.Key)} yeniden çekildi).");
-
-    // Synonyms — Synonyms/{şema}/{ad}.sql
-    foreach (var synonym in synonyms)
-    {
-        var wf = await writer.WriteAsync("Synonyms", synonym.Name.Schema, synonym.Name.Name, SynonymScripter.Script(synonym, fmt));
-        newSnapshot.Objects[synonym.Name.FileBaseName] = new SnapshotEntry { Category = wf.Category, File = wf.File };
-    }
-    Console.WriteLine($"Synonyms: {synonyms.Count} script yazıldı.");
 
     // Silinen nesneler: eski snapshot'ta olup yenisinde olmayanların dosyalarını sil.
     int deleted = 0;

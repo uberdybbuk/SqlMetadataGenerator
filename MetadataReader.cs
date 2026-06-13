@@ -32,16 +32,25 @@ public sealed class MetadataReader(string connectionString)
         return result is null or DBNull ? null : (string)result;
     }
 
-    public async Task<List<TableInfo>> ReadTablesAsync(CancellationToken ct = default)
+    /// <summary>Tablo metadatasını okur. progress verilirse her tamamlanan alt sorgu için 1 raporlar (toplam 7).</summary>
+    public async Task<List<TableInfo>> ReadTablesAsync(IProgress<int>? progress = null, CancellationToken ct = default)
     {
+        // Bir alt sorgu tamamlandığında ilerleme raporla.
+        async Task<T> Tracked<T>(Task<T> task)
+        {
+            T result = await task;
+            progress?.Report(1);
+            return result;
+        }
+
         // Bağımsız metadata sorgularını aynı anda çalıştır (her biri kendi bağlantısını açar).
-        var namesTask = ReadTableNamesAsync(ct);
-        var columnsTask = ReadColumnsAsync(ct);
-        var pkTask = ReadPrimaryKeysAsync(ct);
-        var uniqueTask = ReadUniqueConstraintsAsync(ct);
-        var indexTask = ReadIndexesAsync(ct);
-        var checkTask = ReadCheckConstraintsAsync(ct);
-        var fkTask = ReadForeignKeysAsync(ct);
+        var namesTask = Tracked(ReadTableNamesAsync(ct));
+        var columnsTask = Tracked(ReadColumnsAsync(ct));
+        var pkTask = Tracked(ReadPrimaryKeysAsync(ct));
+        var uniqueTask = Tracked(ReadUniqueConstraintsAsync(ct));
+        var indexTask = Tracked(ReadIndexesAsync(ct));
+        var checkTask = Tracked(ReadCheckConstraintsAsync(ct));
+        var fkTask = Tracked(ReadForeignKeysAsync(ct));
         await Task.WhenAll(namesTask, columnsTask, pkTask, uniqueTask, indexTask, checkTask, fkTask);
 
         var names = await namesTask;
@@ -514,8 +523,9 @@ public sealed class MetadataReader(string connectionString)
     /// Verilen başlıkların tanımlarını object_id'ye göre 1000'lik paketler hâlinde paralel çeker.
     /// Tek dev result set'in ağ/bellek maliyetinden kaçınır; sonuç başlık sırasını korur.
     /// </summary>
+    /// <summary>progress verilirse her tamamlanan paket için 1 raporlar (toplam = paket sayısı).</summary>
     public async Task<List<RoutineInfo>> ReadModuleDefinitionsAsync(
-        IReadOnlyList<ModuleHeader> headers, CancellationToken ct = default)
+        IReadOnlyList<ModuleHeader> headers, IProgress<int>? progress = null, CancellationToken ct = default)
     {
         var batches = new List<List<ModuleHeader>>();
         for (int i = 0; i < headers.Count; i += ModuleBatchSize)
@@ -527,10 +537,17 @@ public sealed class MetadataReader(string connectionString)
         await Parallel.ForEachAsync(
             Enumerable.Range(0, batches.Count),
             ct,
-            async (i, token) => byBatch[i] = await ReadDefinitionsForBatchAsync(batches[i], token));
+            async (i, token) =>
+            {
+                byBatch[i] = await ReadDefinitionsForBatchAsync(batches[i], token);
+                progress?.Report(1);
+            });
 
         return byBatch.SelectMany(b => b).ToList();
     }
+
+    /// <summary>Verilen başlık sayısı için kaç paket (sorgu) çalışacağını döndürür — progress maxValue'su için.</summary>
+    public static int BatchCount(int headerCount) => (headerCount + ModuleBatchSize - 1) / ModuleBatchSize;
 
     private async Task<List<RoutineInfo>> ReadDefinitionsForBatchAsync(List<ModuleHeader> batch, CancellationToken ct)
     {
