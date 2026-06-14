@@ -7,31 +7,41 @@ public enum AuthMode
 {
     Sql,
     Integrated,
-    AzureAd
 }
 
-/// <summary>
-/// Komut satırı argümanlarından oluşan bağlantı ve çıktı ayarları.
-/// </summary>
+// Komut satırı argümanları. Property'ler kullanım grubuna göre düzenlenmiştir.
 public sealed class CommandLineOptions
 {
+    // --- Bağlantı, kimlik doğrulama ve güvenlik ---
     public required string Server { get; init; }
     public required string Database { get; init; }
     public AuthMode AuthMode { get; init; } = AuthMode.Sql;
     public string? User { get; init; }
     public string? Password { get; init; }
-    public bool TrustServerCertificate { get; init; }
+    // Varsayılan olarak sunucu sertifikasına güvenilir (geliştirme ortamı kolaylığı); --no-trust ile kapatılır.
+    public bool TrustServerCertificate { get; init; } = true;
     public bool Encrypt { get; init; } = true;
+
+    // --- Script üretimi (çıktı + biçim) ---
     public string OutputRoot { get; init; } = "./output";
     public KeywordCase KeywordCase { get; init; } = KeywordCase.Lower;
     public bool EmitSetOptions { get; init; }
     public bool GroupColumns { get; init; } = true;
-    /// <summary>null ise ScriptFormat'ın varsayılan audit kolon listesi kullanılır.</summary>
+    // null ise ScriptFormat'ın varsayılan audit kolon listesi kullanılır.
     public IReadOnlySet<string>? AuditColumns { get; init; }
-    /// <summary>true ise snapshot yok sayılır ve tüm nesneler yeniden çekilir.</summary>
+
+    // --- Incremental ---
+    // true ise snapshot yok sayılır ve tüm nesneler yeniden çekilir.
     public bool FullRefresh { get; init; }
-    /// <summary>Tip/şema/isim bazlı dışlama filtresi.</summary>
+
+    // --- Dışlama ---
     public ObjectFilter Filter { get; init; } = ObjectFilter.Empty;
+
+    // --- Deploy ---
+    // true ise script üretmek yerine kaynak dosyaları hedef DB'ye uygular.
+    public bool Deploy { get; init; }
+    // Deploy modunda kaynak database-root dizini (Tables/, Views/ ... içeren).
+    public string? SourceDir { get; init; }
 
     public ScriptFormat ToScriptFormat(string? databaseCollation = null) => new()
     {
@@ -62,41 +72,34 @@ public sealed class CommandLineOptions
             case AuthMode.Integrated:
                 builder.IntegratedSecurity = true;
                 break;
-            case AuthMode.AzureAd:
-                // İnteraktif Azure AD; kullanıcı/parola verildiyse password akışı kullanılır.
-#pragma warning disable CS0618 // ActiveDirectoryPassword obsolete; kullanıcı/parola verildiyse hâlâ tek seçenek
-                builder.Authentication = string.IsNullOrEmpty(User)
-                    ? SqlAuthenticationMethod.ActiveDirectoryInteractive
-                    : SqlAuthenticationMethod.ActiveDirectoryPassword;
-#pragma warning restore CS0618
-                if (!string.IsNullOrEmpty(User))
-                {
-                    builder.UserID = User;
-                    builder.Password = Password ?? string.Empty;
-                }
-                break;
         }
 
         return builder.ConnectionString;
     }
 
-    /// <summary>
-    /// Argümanları parse eder. Hata varsa <paramref name="error"/> dolar ve null döner.
-    /// </summary>
+    // Argümanları parse eder. Hata varsa error dolar ve null döner.
     public static CommandLineOptions? Parse(string[] args, out string? error)
     {
         error = null;
         string? err = null;
+
+        // Bağlantı, kimlik doğrulama ve güvenlik
         string? server = null, database = null, user = null, password = null;
         var authMode = AuthMode.Sql;
-        bool trust = false, encrypt = true, authExplicit = false;
+        bool trust = true, encrypt = true, authExplicit = false;
+        // Script üretimi
         string output = "./output";
         var keywordCase = KeywordCase.Lower;
         bool emitSetOptions = false;
         bool groupColumns = true;
         IReadOnlySet<string>? auditColumns = null;
+        // Incremental
         bool fullRefresh = false;
+        // Dışlama
         string[] excludeTypes = [], excludeSchemas = [], excludeNames = [];
+        // Deploy
+        bool deploy = false;
+        string? sourceDir = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -113,6 +116,7 @@ public sealed class CommandLineOptions
 
             switch (arg)
             {
+                // Bağlantı, kimlik doğrulama ve güvenlik
                 case "-s" or "--server":
                     server = Next();
                     break;
@@ -125,33 +129,37 @@ public sealed class CommandLineOptions
                 case "-p" or "--password":
                     password = Next();
                     break;
-                case "-o" or "--output":
-                    output = Next() ?? output;
-                    break;
                 case "--integrated":
                     authMode = AuthMode.Integrated;
                     authExplicit = true;
                     break;
-                case "--azure-ad":
-                    authMode = AuthMode.AzureAd;
-                    authExplicit = true;
-                    break;
-                case "--trust-server-certificate" or "--trust":
-                    trust = true;
+                case "--no-trust":
+                    trust = false;
                     break;
                 case "--no-encrypt":
                     encrypt = false;
+                    break;
+
+                // Script üretimi
+                case "-o" or "--output":
+                    output = Next() ?? output;
                     break;
                 case "--keyword-case":
                     string? kc = Next();
                     if (kc is not null)
                     {
                         if (kc.Equals("upper", StringComparison.OrdinalIgnoreCase))
+                        {
                             keywordCase = KeywordCase.Upper;
+                        }
                         else if (kc.Equals("lower", StringComparison.OrdinalIgnoreCase))
+                        {
                             keywordCase = KeywordCase.Lower;
+                        }
                         else
+                        {
                             err = $"--keyword-case 'lower' veya 'upper' olmalı (verilen: {kc}).";
+                        }
                     }
                     break;
                 case "--set-options":
@@ -160,17 +168,28 @@ public sealed class CommandLineOptions
                 case "--no-group-columns":
                     groupColumns = false;
                     break;
+                case "--audit-columns":
+                    auditColumns = SplitList(Next()) is { Length: > 0 } cols
+                        ? new HashSet<string>(cols, StringComparer.OrdinalIgnoreCase)
+                        : null;
+                    break;
+
+                // Incremental
                 case "--full":
                     fullRefresh = true;
                     break;
+
+                // Dışlama
                 case "--exclude":
                     excludeTypes = SplitList(Next());
                     foreach (var t in excludeTypes)
+                    {
                         if (!ObjectFilter.ValidTypes.Contains(t))
                         {
                             err = $"Geçersiz --exclude tipi: '{t}'. Geçerli: {string.Join(", ", ObjectFilter.ValidTypes)}";
                             break;
                         }
+                    }
                     break;
                 case "--exclude-schema":
                     excludeSchemas = SplitList(Next());
@@ -178,15 +197,15 @@ public sealed class CommandLineOptions
                 case "--exclude-name":
                     excludeNames = SplitList(Next());
                     break;
-                case "--audit-columns":
-                    string? list = Next();
-                    if (list is not null)
-                    {
-                        var cols = list
-                            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                        auditColumns = new HashSet<string>(cols, StringComparer.OrdinalIgnoreCase);
-                    }
+
+                // Deploy
+                case "--deploy":
+                    deploy = true;
                     break;
+                case "--source":
+                    sourceDir = Next();
+                    break;
+
                 default:
                     err = $"Bilinmeyen argüman: {arg}";
                     break;
@@ -201,7 +220,9 @@ public sealed class CommandLineOptions
 
         // Auth açıkça verilmediyse ama kullanıcı/parola varsa SQL auth varsay.
         if (!authExplicit && (user is not null || password is not null))
+        {
             authMode = AuthMode.Sql;
+        }
 
         if (string.IsNullOrWhiteSpace(server))
         {
@@ -215,7 +236,12 @@ public sealed class CommandLineOptions
         }
         if (authMode == AuthMode.Sql && string.IsNullOrWhiteSpace(user))
         {
-            error = "SQL auth için --user (ve --password) gereklidir. Windows auth için --integrated, Azure AD için --azure-ad kullanın.";
+            error = "SQL auth için --user (ve --password) gereklidir. Windows auth için --integrated kullanın.";
+            return null;
+        }
+        if (deploy && string.IsNullOrWhiteSpace(sourceDir))
+        {
+            error = "--deploy için --source <dizin> gereklidir (kaynak database-root klasörü).";
             return null;
         }
 
@@ -235,6 +261,8 @@ public sealed class CommandLineOptions
             AuditColumns = auditColumns,
             FullRefresh = fullRefresh,
             Filter = new ObjectFilter(excludeTypes, excludeSchemas, excludeNames),
+            Deploy = deploy,
+            SourceDir = sourceDir,
         };
     }
 
@@ -248,34 +276,37 @@ public sealed class CommandLineOptions
         Kullanım:
           dotnet run -- --server <sunucu> --database <db> [seçenekler]
 
-        Zorunlu:
+        Bağlantı, kimlik doğrulama ve güvenlik:
           -s, --server <ad>           SQL Server adı/adresi (örn. localhost,1433)
           -d, --database <ad>         Veritabanı adı
-
-        Kimlik doğrulama (biri):
           -u, --user <ad>             SQL auth kullanıcı adı (varsayılan mod)
-          -p, --password <parola>     SQL auth / Azure AD parolası
+          -p, --password <parola>     SQL auth parolası
           --integrated                Windows Integrated Security
-          --azure-ad                  Azure AD (kullanıcı yoksa interaktif)
-
-        Diğer:
-          -o, --output <yol>          Çıktı kök dizini (varsayılan: ./output)
-          --trust, --trust-server-certificate   Sunucu sertifikasına güven
+          --no-trust                  Sunucu sertifikasını doğrula (varsayılan: güven)
           --no-encrypt                Şifrelemeyi kapat
+
+        Script üretimi:
+          -o, --output <yol>          Çıktı kök dizini (varsayılan: ./output)
           --keyword-case <lower|upper>  Anahtar kelime büyük/küçük harfi (varsayılan: lower)
           --set-options               SET ANSI_NULLS / QUOTED_IDENTIFIER bloklarını ekle
-          --no-group-columns          Kolonları ortak kelimeye göre boş satırla gruplama
-                                      (varsayılan: açık)
+          --no-group-columns          Kolonları ortak kelimeye göre gruplama (varsayılan: açık)
           --audit-columns "a,b,c"     Audit kolonları (ardışık grup boş satırla ayrılır).
                                       Varsayılan: CreatedAt,CreatedBy,IsActive,UpdatedAt,
                                       UpdatedBy,UpdatedCorrelationId,UpdatedChannelCode
+
+        Incremental:
           --full                      Snapshot'ı yok say, tüm nesneleri yeniden çek
                                       (varsayılan: snapshot varsa incremental)
 
-        Dışlama (exclusion):
-          --exclude <tipler>          Dışlanan tipler: schemas,tables,views,
+        Dışlama:
+          --exclude <tipler>          schemas,sequences,types,tables,views,
                                       procedures,functions,triggers,synonyms
           --exclude-schema <şemalar>  Bu şemalardaki tüm nesneleri atla
           --exclude-name <metinler>   Adında bu metinlerden biri geçen nesneleri atla
+
+        Deploy (dosyalardan veritabanı oluşturma):
+          --deploy                    Script üretmek yerine kaynak dosyaları hedefe uygula
+          --source <dizin>            Kaynak database-root klasörü (Tables/, Views/ ...)
+                                      Hedef yine --server/--database/--user ile verilir.
         """;
 }

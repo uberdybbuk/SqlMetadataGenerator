@@ -3,10 +3,8 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator.Scripting;
 
-/// <summary>
-/// PK/unique-constraint olmayan index'ler için CREATE INDEX T-SQL'i üretir.
-/// INCLUDE kolonları ve filtered index WHERE koşulu desteklenir.
-/// </summary>
+// PK/unique-constraint olmayan index'ler için CREATE INDEX T-SQL'i üretir.
+// INCLUDE kolonları ve filtered index WHERE koşulu desteklenir.
 public static class IndexScripter
 {
     public static string Script(ObjectName table, IndexInfo index, ScriptFormat fmt)

@@ -3,10 +3,8 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator.Scripting;
 
-/// <summary>
-/// CHECK constraint'ler için ALTER TABLE ... ADD CONSTRAINT ... CHECK T-SQL'i üretir.
-/// FK'lerde olduğu gibi: önce kısıtı ekle, sonra ayrı ALTER ile CHECK/NOCHECK durumunu uygula.
-/// </summary>
+// CHECK constraint'ler için ALTER TABLE ... ADD CONSTRAINT ... CHECK T-SQL'i üretir.
+// FK'lerde olduğu gibi: önce kısıtı ekle, sonra ayrı ALTER ile CHECK/NOCHECK durumunu uygula.
 public static class CheckConstraintScripter
 {
     public static string Script(ObjectName table, CheckConstraintInfo check, ScriptFormat fmt)

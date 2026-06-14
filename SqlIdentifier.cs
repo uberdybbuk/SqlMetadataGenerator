@@ -1,10 +1,8 @@
 namespace SqlMetadataGenerator;
 
-/// <summary>
-/// SQL Server tanımlayıcılarını yalnızca gerektiğinde köşeli parantezle sarar.
-/// SSMS her zaman [..] kullanır; biz yalnızca gerçekten gerekli olduğunda kullanırız
-/// (rezerve kelime, düzenli tanımlayıcı kurallarına uymayan ad, vb.) — aksi hâlde çıplak yazarız.
-/// </summary>
+// SQL Server tanımlayıcılarını yalnızca gerektiğinde köşeli parantezle sarar.
+// SSMS her zaman [..] kullanır; biz yalnızca gerçekten gerekli olduğunda kullanırız
+// (rezerve kelime, düzenli tanımlayıcı kurallarına uymayan ad, vb.) — aksi hâlde çıplak yazarız.
 public static class SqlIdentifier
 {
     // Microsoft "Reserved Keywords (Transact-SQL)" resmi listesi.
@@ -36,35 +34,43 @@ public static class SqlIdentifier
         "WRITETEXT",
     };
 
-    /// <summary>Tanımlayıcıyı gerekiyorsa [..] ile sarar, gerekmiyorsa olduğu gibi döndürür.</summary>
+    // Tanımlayıcıyı gerekiyorsa [..] ile sarar, gerekmiyorsa olduğu gibi döndürür.
     public static string Quote(string name) =>
         NeedsQuoting(name) ? $"[{name.Replace("]", "]]")}]" : name;
 
     private static bool NeedsQuoting(string name)
     {
         if (string.IsNullOrEmpty(name))
+        {
             return true;
+        }
+
         if (Reserved.Contains(name))
+        {
             return true;
+        }
+
         return !IsRegularIdentifier(name);
     }
 
-    /// <summary>
-    /// SQL Server "düzenli tanımlayıcı" kuralları: ilk karakter harf (Unicode) veya '_';
-    /// sonraki karakterler harf, rakam, '_', '@', '$' veya '#'.
-    /// '@'/'#' ile başlayanlar (değişken/temp tablo anlamı) güvenlik için tırnaklanır.
-    /// </summary>
+    // SQL Server "düzenli tanımlayıcı" kuralları: ilk karakter harf (Unicode) veya '_';
+    // sonraki karakterler harf, rakam, '_', '@', '$' veya '#'.
+    // '@'/'#' ile başlayanlar (değişken/temp tablo anlamı) güvenlik için tırnaklanır.
     private static bool IsRegularIdentifier(string name)
     {
         char first = name[0];
         if (!char.IsLetter(first) && first != '_')
+        {
             return false;
+        }
 
         for (int i = 1; i < name.Length; i++)
         {
             char c = name[i];
             if (!char.IsLetterOrDigit(c) && c is not ('_' or '@' or '$' or '#'))
+            {
                 return false;
+            }
         }
         return true;
     }

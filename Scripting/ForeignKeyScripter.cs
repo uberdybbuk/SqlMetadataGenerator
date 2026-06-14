@@ -3,10 +3,8 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator.Scripting;
 
-/// <summary>
-/// Foreign key'ler için ALTER TABLE ... ADD CONSTRAINT T-SQL'i üretir.
-/// SSMS düzenini izler: önce kısıtı ekle, sonra ayrı bir ALTER ile CHECK/NOCHECK durumunu uygula.
-/// </summary>
+// Foreign key'ler için ALTER TABLE ... ADD CONSTRAINT T-SQL'i üretir.
+// SSMS düzenini izler: önce kısıtı ekle, sonra ayrı bir ALTER ile CHECK/NOCHECK durumunu uygula.
 public static class ForeignKeyScripter
 {
     public static string Script(ObjectName table, ForeignKeyInfo fk, ScriptFormat fmt)
@@ -26,14 +24,20 @@ public static class ForeignKeyScripter
 
         string? onDelete = ReferentialAction(fk.DeleteAction, fmt);
         if (onDelete is not null)
+        {
             sb.Append($"\n{fmt.Kw("ON DELETE")} {onDelete}");
+        }
 
         string? onUpdate = ReferentialAction(fk.UpdateAction, fmt);
         if (onUpdate is not null)
+        {
             sb.Append($"\n{fmt.Kw("ON UPDATE")} {onUpdate}");
+        }
 
         if (fk.IsNotForReplication)
+        {
             sb.Append($"\n{fmt.Kw("NOT FOR REPLICATION")}");
+        }
 
         sb.AppendLine();
         sb.AppendLine("GO");
@@ -50,11 +54,14 @@ public static class ForeignKeyScripter
         return sb.ToString();
     }
 
-    /// <summary>NO_ACTION ise null (yazılmaz); aksi hâlde "CASCADE" / "SET NULL" / "SET DEFAULT".</summary>
+    // NO_ACTION ise null (yazılmaz); aksi hâlde "CASCADE" / "SET NULL" / "SET DEFAULT".
     private static string? ReferentialAction(string actionDesc, ScriptFormat fmt)
     {
         if (string.Equals(actionDesc, "NO_ACTION", StringComparison.OrdinalIgnoreCase))
+        {
             return null;
+        }
+
         return fmt.Kw(actionDesc.Replace('_', ' '));
     }
 }

@@ -2,10 +2,8 @@ using System.Text;
 
 namespace SqlMetadataGenerator.Scripting;
 
-/// <summary>
-/// sys.sql_modules tabanlı nesneler (view, stored procedure, function, trigger) için ortak script üretimi.
-/// Tanım sunucudan tam CREATE metni olarak geldiği için olduğu gibi sarılır.
-/// </summary>
+// sys.sql_modules tabanlı nesneler (view, stored procedure, function, trigger) için ortak script üretimi.
+// Tanım sunucudan tam CREATE metni olarak geldiği için olduğu gibi sarılır.
 public static class ModuleScripter
 {
     public static string Script(string definition, ScriptFormat fmt)

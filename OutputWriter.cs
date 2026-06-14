@@ -2,13 +2,11 @@ using System.Text;
 
 namespace SqlMetadataGenerator;
 
-/// <summary>
-/// SSMS'teki gibi dizin yapısını oluşturur ve script dosyalarını yazar.
-/// Yapı: {outputRoot}/{server}/{database}/{Tables|Views|Synonyms|Programmability}
-/// </summary>
+// SSMS'teki gibi dizin yapısını oluşturur ve script dosyalarını yazar.
+// Yapı: {outputRoot}/{server}/{database}/{Tables|Views|Synonyms|Programmability}
 public sealed class OutputWriter
 {
-    /// <summary>SSMS Object Explorer altındaki standart klasör adları.</summary>
+    // SSMS Object Explorer altındaki standart klasör adları.
     public static readonly string[] CategoryFolders =
         ["Tables", "Views", "Synonyms", "Programmability"];
 
@@ -27,14 +25,14 @@ public sealed class OutputWriter
         DatabaseRoot = Path.Combine(ServerRoot, dbDir);
 
         foreach (var folder in CategoryFolders)
+        {
             Directory.CreateDirectory(Path.Combine(DatabaseRoot, folder));
+        }
     }
 
-    /// <summary>
-    /// Bir script'i {category}/{schema} klasörüne "ad.sql" olarak yazar.
-    /// Şema ayrı parametredir (string'e gömülmez), böylece içindeki '/' gibi karakterler de
-    /// ekstra dizine bölünmeden güvenle temizlenir. Snapshot için yazılan kaydı döndürür.
-    /// </summary>
+    // Bir script'i {category}/{schema} klasörüne "ad.sql" olarak yazar.
+    // Şema ayrı parametredir (string'e gömülmez), böylece içindeki '/' gibi karakterler de
+    // ekstra dizine bölünmeden güvenle temizlenir. Snapshot için yazılan kaydı döndürür.
     public async Task<WrittenFile> WriteAsync(
         string category, string? schema, string objectName, string script, CancellationToken ct = default)
     {
@@ -43,7 +41,9 @@ public sealed class OutputWriter
             .Select(SafeFileName.MakeSafe)
             .ToList();
         if (schema is not null)
+        {
             segments.Add(SafeFileName.MakeSafe(schema));
+        }
 
         string dir = Path.Combine([DatabaseRoot, .. segments]);
         Directory.CreateDirectory(dir);
@@ -61,18 +61,18 @@ public sealed class OutputWriter
         return new WrittenFile(safeCategory, fileName);
     }
 
-    /// <summary>
-    /// Snapshot'taki bir kayda karşılık gelen dosyayı siler (varsa).
-    /// category zaten güvenli segmentlerden oluşur (WrittenFile.Category), bölünmesi güvenlidir.
-    /// </summary>
+    // Snapshot'taki bir kayda karşılık gelen dosyayı siler (varsa).
+    // category zaten güvenli segmentlerden oluşur (WrittenFile.Category), bölünmesi güvenlidir.
     public void DeleteFile(string category, string fileName)
     {
         string[] segments = category.Split('/', StringSplitOptions.RemoveEmptyEntries);
         string path = Path.Combine([DatabaseRoot, .. segments, fileName]);
         if (File.Exists(path))
+        {
             File.Delete(path);
+        }
     }
 }
 
-/// <summary>Yazılan bir dosyanın snapshot'ta saklanacak konumu (güvenli kategori yolu + dosya adı).</summary>
+// Yazılan bir dosyanın snapshot'ta saklanacak konumu (güvenli kategori yolu + dosya adı).
 public readonly record struct WrittenFile(string Category, string File);

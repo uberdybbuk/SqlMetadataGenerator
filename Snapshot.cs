@@ -3,23 +3,19 @@ using System.Text.Json.Serialization;
 
 namespace SqlMetadataGenerator;
 
-/// <summary>
-/// Bir nesnenin önceki çalıştırmada yazılan durumunu temsil eder.
-/// Anahtar olarak "schema.ad" (FileBaseName) kullanılır — bir şemada isim benzersizdir.
-/// </summary>
+// Bir nesnenin önceki çalıştırmada yazılan durumunu temsil eder.
+// Anahtar olarak "schema.ad" (FileBaseName) kullanılır — bir şemada isim benzersizdir.
 public sealed class SnapshotEntry
 {
     public required string Category { get; set; }
     public required string File { get; set; }
-    /// <summary>Modüllerde modify_date ("o" formatı); tablo/synonym'de null (her zaman yeniden çekilir).</summary>
+    // Modüllerde modify_date ("o" formatı); tablo/synonym'de null (her zaman yeniden çekilir).
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ModifyDate { get; set; }
 }
 
-/// <summary>
-/// Önceki çalıştırmanın çıktısını tanımlayan manifest. Incremental karşılaştırma ve
-/// silinen nesnelerin tespiti için kullanılır.
-/// </summary>
+// Önceki çalıştırmanın çıktısını tanımlayan manifest. Incremental karşılaştırma ve
+// silinen nesnelerin tespiti için kullanılır.
 public sealed class Snapshot
 {
     public Dictionary<string, SnapshotEntry> Objects { get; set; } = new();
@@ -31,12 +27,15 @@ public static class SnapshotStore
 
     public static string PathFor(string databaseRoot) => Path.Combine(databaseRoot, FileName);
 
-    /// <summary>Snapshot'ı yükler; yoksa veya bozuksa boş bir snapshot döner.</summary>
+    // Snapshot'ı yükler; yoksa veya bozuksa boş bir snapshot döner.
     public static Snapshot Load(string databaseRoot)
     {
         string path = PathFor(databaseRoot);
         if (!File.Exists(path))
+        {
             return new Snapshot();
+        }
+
         try
         {
             string json = File.ReadAllText(path);
