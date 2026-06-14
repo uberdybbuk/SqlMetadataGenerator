@@ -1,0 +1,5 @@
+root = true
+
+[*.cs]
+# Her zaman küme parantezi (tek satırlık bloklarda bile)
+csharp_prefer_braces = true:warning

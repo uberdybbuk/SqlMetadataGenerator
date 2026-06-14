@@ -3,7 +3,7 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator.Scripting;
 
-/// <summary>Synonym'ler için CREATE SYNONYM T-SQL'i üretir.</summary>
+// Synonym'ler için CREATE SYNONYM T-SQL'i üretir.
 public static class SynonymScripter
 {
     public static string Script(SynonymInfo synonym, ScriptFormat fmt)

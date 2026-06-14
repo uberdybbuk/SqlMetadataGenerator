@@ -3,13 +3,10 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator;
 
-/// <summary>
-/// SQL Server sistem katalog view'larından tablo, view ve modül metadatasını okur.
-///
-/// Paralellik: her okuma kendi bağlantısını açar (SqlConnection thread-safe değildir), böylece
-/// bağımsız sorgular aynı anda çalışabilir. Modül tanımları (view/sp/function/trigger) tek dev
-/// result set yerine object_id'ye göre paketler hâlinde, paralel çekilir.
-/// </summary>
+// SQL Server sistem katalog view'larından tablo, view ve modül metadatasını okur.
+// Paralellik: her okuma kendi bağlantısını açar (SqlConnection thread-safe değildir), böylece
+// bağımsız sorgular aynı anda çalışabilir. Modül tanımları (view/sp/function/trigger) tek dev
+// result set yerine object_id'ye göre paketler hâlinde, paralel çekilir.
 public sealed class MetadataReader(string connectionString)
 {
     private const int ModuleBatchSize = 1000;
@@ -22,7 +19,7 @@ public sealed class MetadataReader(string connectionString)
         return conn;
     }
 
-    /// <summary>Veritabanının varsayılan collation'ı (DB default ile eşleşen kolonlarda COLLATE yazmamak için).</summary>
+    // Veritabanının varsayılan collation'ı (DB default ile eşleşen kolonlarda COLLATE yazmamak için).
     public async Task<string?> ReadDatabaseCollationAsync(CancellationToken ct = default)
     {
         const string sql = "SELECT CONVERT(nvarchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation'));";
@@ -32,7 +29,7 @@ public sealed class MetadataReader(string connectionString)
         return result is null or DBNull ? null : (string)result;
     }
 
-    /// <summary>Tablo metadatasını okur. progress verilirse her tamamlanan alt sorgu için 1 raporlar (toplam 7).</summary>
+    // Tablo metadatasını okur. progress verilirse her tamamlanan alt sorgu için 1 raporlar (toplam 7).
     public async Task<List<TableInfo>> ReadTablesAsync(IProgress<int>? progress = null, CancellationToken ct = default)
     {
         // Bir alt sorgu tamamlandığında ilerleme raporla.
@@ -94,7 +91,10 @@ public sealed class MetadataReader(string connectionString)
         await using var cmd = new SqlCommand(sql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
+        {
             names.Add((reader.GetInt32(0), new ObjectName(reader.GetString(1), reader.GetString(2))));
+        }
+
         return names;
     }
 
@@ -135,36 +135,37 @@ public sealed class MetadataReader(string connectionString)
         while (await reader.ReadAsync(ct))
         {
             int objectId = reader.GetInt32(0);
-            var col = new ColumnInfo
-            {
-                Name = reader.GetString(1),
-                ColumnId = reader.GetInt32(2),
-                TypeName = reader.GetString(3),
-                IsUserDefinedType = reader.GetBoolean(4),
-                MaxLength = reader.GetInt16(5),
-                Precision = reader.GetByte(6),
-                Scale = reader.GetByte(7),
-                IsNullable = reader.GetBoolean(8),
-                IsIdentity = reader.GetBoolean(9),
-                IdentitySeed = reader.IsDBNull(10) ? null : Convert.ToInt64(reader.GetValue(10)),
-                IdentityIncrement = reader.IsDBNull(11) ? null : Convert.ToInt64(reader.GetValue(11)),
-                ComputedDefinition = reader.IsDBNull(12) ? null : reader.GetString(12),
-                IsComputed = !reader.IsDBNull(12),
-                DefaultConstraintName = reader.IsDBNull(13) ? null : reader.GetString(13),
-                DefaultDefinition = reader.IsDBNull(14) ? null : reader.GetString(14),
-                CollationName = reader.IsDBNull(15) ? null : reader.GetString(15),
-            };
-
             if (!map.TryGetValue(objectId, out var list))
             {
                 list = [];
                 map[objectId] = list;
             }
-            list.Add(col);
+            list.Add(MapColumn(reader));
         }
 
         return map;
     }
+
+    // ReadColumnsAsync ve table type kolon sorgusu ile aynı SELECT sırasını bekler (1..15).
+    private static ColumnInfo MapColumn(SqlDataReader reader) => new()
+    {
+        Name = reader.GetString(1),
+        ColumnId = reader.GetInt32(2),
+        TypeName = reader.GetString(3),
+        IsUserDefinedType = reader.GetBoolean(4),
+        MaxLength = reader.GetInt16(5),
+        Precision = reader.GetByte(6),
+        Scale = reader.GetByte(7),
+        IsNullable = reader.GetBoolean(8),
+        IsIdentity = reader.GetBoolean(9),
+        IdentitySeed = reader.IsDBNull(10) ? null : Convert.ToInt64(reader.GetValue(10)),
+        IdentityIncrement = reader.IsDBNull(11) ? null : Convert.ToInt64(reader.GetValue(11)),
+        ComputedDefinition = reader.IsDBNull(12) ? null : reader.GetString(12),
+        IsComputed = !reader.IsDBNull(12),
+        DefaultConstraintName = reader.IsDBNull(13) ? null : reader.GetString(13),
+        DefaultDefinition = reader.IsDBNull(14) ? null : reader.GetString(14),
+        CollationName = reader.IsDBNull(15) ? null : reader.GetString(15),
+    };
 
     private async Task<Dictionary<int, PrimaryKeyInfo>> ReadPrimaryKeysAsync(CancellationToken ct)
     {
@@ -315,9 +316,13 @@ public sealed class MetadataReader(string connectionString)
             bool included = reader.GetBoolean(7);
             string columnName = reader.GetString(9);
             if (included)
+            {
                 entry.Builder.IncludedColumns.Add(columnName);
+            }
             else
+            {
                 entry.Builder.KeyColumns.Add((columnName, reader.GetBoolean(8)));
+            }
         }
 
         var map = new Dictionary<int, List<IndexInfo>>();
@@ -488,10 +493,8 @@ public sealed class MetadataReader(string connectionString)
         return map;
     }
 
-    /// <summary>
-    /// Tüm modüllerin (view/sp/function/trigger) hafif başlıklarını okur — definition YOK.
-    /// Incremental karşılaştırma ve silme tespiti bu listeden yapılır.
-    /// </summary>
+    // Tüm modüllerin (view/sp/function/trigger) hafif başlıklarını okur — definition YOK.
+    // Incremental karşılaştırma ve silme tespiti bu listeden yapılır.
     public async Task<List<ModuleHeader>> ReadModuleHeadersAsync(CancellationToken ct = default)
     {
         const string sql = """
@@ -521,17 +524,17 @@ public sealed class MetadataReader(string connectionString)
         return headers;
     }
 
-    /// <summary>
-    /// Verilen başlıkların tanımlarını object_id'ye göre 1000'lik paketler hâlinde paralel çeker.
-    /// Tek dev result set'in ağ/bellek maliyetinden kaçınır; sonuç başlık sırasını korur.
-    /// </summary>
-    /// <summary>progress verilirse her tamamlanan paket için 1 raporlar (toplam = paket sayısı).</summary>
+    // Verilen başlıkların tanımlarını object_id'ye göre 1000'lik paketler hâlinde paralel çeker.
+    // Tek dev result set'in ağ/bellek maliyetinden kaçınır; sonuç başlık sırasını korur.
+    // progress verilirse her tamamlanan paket için 1 raporlar (toplam = paket sayısı).
     public async Task<List<RoutineInfo>> ReadModuleDefinitionsAsync(
         IReadOnlyList<ModuleHeader> headers, IProgress<int>? progress = null, CancellationToken ct = default)
     {
         var batches = new List<List<ModuleHeader>>();
         for (int i = 0; i < headers.Count; i += ModuleBatchSize)
+        {
             batches.Add(headers.Skip(i).Take(ModuleBatchSize).ToList());
+        }
 
         // Paralellik derecesini framework belirler (MaxDegreeOfParallelism verilmedi);
         // sıra korunur çünkü sonuçlar batch indeksiyle toplanır.
@@ -548,7 +551,7 @@ public sealed class MetadataReader(string connectionString)
         return byBatch.SelectMany(b => b).ToList();
     }
 
-    /// <summary>Verilen başlık sayısı için kaç paket (sorgu) çalışacağını döndürür — progress maxValue'su için.</summary>
+    // Verilen başlık sayısı için kaç paket (sorgu) çalışacağını döndürür — progress maxValue'su için.
     public static int BatchCount(int headerCount) => (headerCount + ModuleBatchSize - 1) / ModuleBatchSize;
 
     private async Task<List<RoutineInfo>> ReadDefinitionsForBatchAsync(List<ModuleHeader> batch, CancellationToken ct)
@@ -562,7 +565,9 @@ public sealed class MetadataReader(string connectionString)
         await using var cmd = new SqlCommand(sql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
+        {
             defByObject[reader.GetInt32(0)] = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+        }
 
         return batch.Select(h => new RoutineInfo
         {
@@ -582,7 +587,7 @@ public sealed class MetadataReader(string connectionString)
         _ => "Programmability",
     };
 
-    /// <summary>Tip kodunu exclusion filtresinin anladığı kind'e çevirir.</summary>
+    // Tip kodunu exclusion filtresinin anladığı kind'e çevirir.
     private static string KindForType(string type) => type switch
     {
         "V" => "views",
@@ -592,10 +597,8 @@ public sealed class MetadataReader(string connectionString)
         _ => "",
     };
 
-    /// <summary>
-    /// Kullanıcı tanımlı şemaları okur. Yerleşik şemalar (dbo/guest/sys/INFORMATION_SCHEMA ve
-    /// sabit veritabanı rolü şemaları) hariç tutulur — bunlar schema_id aralığıyla ayrılır.
-    /// </summary>
+    // Kullanıcı tanımlı şemaları okur. Yerleşik şemalar (dbo/guest/sys/INFORMATION_SCHEMA ve
+    // sabit veritabanı rolü şemaları) hariç tutulur — bunlar schema_id aralığıyla ayrılır.
     public async Task<List<SchemaInfo>> ReadSchemasAsync(CancellationToken ct = default)
     {
         const string sql = """
@@ -611,8 +614,210 @@ public sealed class MetadataReader(string connectionString)
         await using var cmd = new SqlCommand(sql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
+        {
             schemas.Add(new SchemaInfo { Name = reader.GetString(0), Owner = reader.GetString(1) });
+        }
+
         return schemas;
+    }
+
+    // Table type'ları (User-Defined Table Types) kolonları ve PK/UNIQUE kısıtlarıyla okur.
+    public async Task<List<TableTypeInfo>> ReadTableTypesAsync(CancellationToken ct = default)
+    {
+        // Başlıklar: type_table_object_id internal tabloyu işaret eder.
+        const string headerSql = """
+            SELECT tt.type_table_object_id, s.name, tt.name
+            FROM sys.table_types tt
+            JOIN sys.schemas s ON tt.schema_id = s.schema_id
+            WHERE tt.is_user_defined = 1
+            ORDER BY s.name, tt.name;
+            """;
+
+        // Kolonlar: MapColumn ile aynı SELECT sırası (0 = object_id, 1..15 = kolon alanları).
+        const string columnsSql = """
+            SELECT
+                c.object_id, c.name, c.column_id, ty.name AS type_name, ty.is_user_defined,
+                c.max_length, c.precision, c.scale, c.is_nullable, c.is_identity,
+                ic.seed_value, ic.increment_value, cc.definition, dc.name, dc.definition, c.collation_name
+            FROM sys.table_types tt
+            JOIN sys.columns c ON c.object_id = tt.type_table_object_id
+            JOIN sys.types ty ON c.user_type_id = ty.user_type_id
+            LEFT JOIN sys.identity_columns ic ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+            LEFT JOIN sys.computed_columns cc ON c.object_id = cc.object_id AND c.column_id = cc.column_id
+            LEFT JOIN sys.default_constraints dc ON c.default_object_id = dc.object_id
+            WHERE tt.is_user_defined = 1
+            ORDER BY c.object_id, c.column_id;
+            """;
+
+        // PK ve UNIQUE kısıtlar (table type internal tablosu üzerinden).
+        const string keysSql = """
+            SELECT i.object_id, i.name, i.type_desc, i.is_primary_key, c.name AS column_name, ic.is_descending_key
+            FROM sys.table_types tt
+            JOIN sys.indexes i ON i.object_id = tt.type_table_object_id
+            JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+            JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+            WHERE tt.is_user_defined = 1 AND (i.is_primary_key = 1 OR i.is_unique_constraint = 1)
+            ORDER BY i.object_id, i.index_id, ic.key_ordinal;
+            """;
+
+        var headers = new List<(int ObjectId, ObjectName Name)>();
+        var columnsByObject = new Dictionary<int, List<ColumnInfo>>();
+        var pkByObject = new Dictionary<int, PrimaryKeyInfo>();
+        var uniquesByObject = new Dictionary<int, List<UniqueConstraintInfo>>();
+
+        await using var conn = await OpenConnectionAsync(ct);
+
+        await using (var cmd = new SqlCommand(headerSql, conn))
+        await using (var reader = await cmd.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                headers.Add((reader.GetInt32(0), new ObjectName(reader.GetString(1), reader.GetString(2))));
+            }
+        }
+
+        await using (var cmd = new SqlCommand(columnsSql, conn))
+        await using (var reader = await cmd.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                int objectId = reader.GetInt32(0);
+                if (!columnsByObject.TryGetValue(objectId, out var list))
+                {
+                    list = [];
+                    columnsByObject[objectId] = list;
+                }
+                list.Add(MapColumn(reader));
+            }
+        }
+
+        // (object_id, kısıt adı) bazında PK/UNIQUE birikimi.
+        var keyAcc = new Dictionary<(int, string), (int ObjectId, string Name, bool Clustered, bool IsPk, List<(string, bool)> Cols)>();
+        await using (var cmd = new SqlCommand(keysSql, conn))
+        await using (var reader = await cmd.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                int objectId = reader.GetInt32(0);
+                string name = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                var key = (objectId, name);
+                if (!keyAcc.TryGetValue(key, out var entry))
+                {
+                    entry = (objectId, name, reader.GetString(2) == "CLUSTERED", reader.GetBoolean(3), []);
+                    keyAcc[key] = entry;
+                }
+                entry.Cols.Add((reader.GetString(4), reader.GetBoolean(5)));
+            }
+        }
+
+        foreach (var e in keyAcc.Values)
+        {
+            if (e.IsPk)
+            {
+                pkByObject[e.ObjectId] = new PrimaryKeyInfo { Name = e.Name, IsClustered = e.Clustered, Columns = e.Cols };
+            }
+            else
+            {
+                if (!uniquesByObject.TryGetValue(e.ObjectId, out var list))
+                {
+                    list = [];
+                    uniquesByObject[e.ObjectId] = list;
+                }
+                list.Add(new UniqueConstraintInfo { Name = e.Name, IsClustered = e.Clustered, Columns = e.Cols });
+            }
+        }
+
+        return headers.Select(h => new TableTypeInfo
+        {
+            Name = h.Name,
+            Columns = columnsByObject.TryGetValue(h.ObjectId, out var cols) ? cols : [],
+            PrimaryKey = pkByObject.GetValueOrDefault(h.ObjectId),
+            UniqueConstraints = uniquesByObject.TryGetValue(h.ObjectId, out var uqs) ? uqs : [],
+        }).ToList();
+    }
+
+    // Alias tiplerini (User-Defined Data Types) okur — tablo tipleri hariç.
+    public async Task<List<UserDefinedTypeInfo>> ReadUserDefinedTypesAsync(CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT
+                s.name AS schema_name,
+                t.name,
+                TYPE_NAME(t.system_type_id) AS base_type,
+                t.max_length,
+                t.precision,
+                t.scale,
+                t.is_nullable
+            FROM sys.types t
+            JOIN sys.schemas s ON t.schema_id = s.schema_id
+            WHERE t.is_user_defined = 1 AND t.is_table_type = 0
+            ORDER BY s.name, t.name;
+            """;
+
+        var types = new List<UserDefinedTypeInfo>();
+        await using var conn = await OpenConnectionAsync(ct);
+        await using var cmd = new SqlCommand(sql, conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            types.Add(new UserDefinedTypeInfo
+            {
+                Name = new ObjectName(reader.GetString(0), reader.GetString(1)),
+                BaseTypeName = reader.GetString(2),
+                MaxLength = reader.GetInt16(3),
+                Precision = reader.GetByte(4),
+                Scale = reader.GetByte(5),
+                IsNullable = reader.GetBoolean(6),
+            });
+        }
+
+        return types;
+    }
+
+    public async Task<List<SequenceInfo>> ReadSequencesAsync(CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT
+                s.name AS schema_name,
+                seq.name,
+                TYPE_NAME(seq.user_type_id) AS type_name,
+                seq.start_value,
+                seq.increment,
+                seq.minimum_value,
+                seq.maximum_value,
+                seq.is_cycling,
+                seq.is_cached,
+                seq.cache_size
+            FROM sys.sequences seq
+            JOIN sys.schemas s ON seq.schema_id = s.schema_id
+            ORDER BY s.name, seq.name;
+            """;
+
+        // start/increment/min/max sql_variant'tır; tip-bağımsız metne çevrilir.
+        static string Variant(object value) =>
+            Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+
+        var sequences = new List<SequenceInfo>();
+        await using var conn = await OpenConnectionAsync(ct);
+        await using var cmd = new SqlCommand(sql, conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            sequences.Add(new SequenceInfo
+            {
+                Name = new ObjectName(reader.GetString(0), reader.GetString(1)),
+                TypeName = reader.GetString(2),
+                StartValue = Variant(reader.GetValue(3)),
+                Increment = Variant(reader.GetValue(4)),
+                MinValue = Variant(reader.GetValue(5)),
+                MaxValue = Variant(reader.GetValue(6)),
+                IsCycling = reader.GetBoolean(7),
+                IsCached = reader.GetBoolean(8),
+                CacheSize = reader.IsDBNull(9) ? null : reader.GetInt64(9),
+            });
+        }
+
+        return sequences;
     }
 
     public async Task<List<SynonymInfo>> ReadSynonymsAsync(CancellationToken ct = default)

@@ -1,15 +1,13 @@
 namespace SqlMetadataGenerator;
 
-/// <summary>
-/// Komut satırı exclusion kuralları: tip, şema ve isim (substring) bazında.
-/// Bir nesne herhangi bir kurala uyuyorsa dışlanır (VEYA mantığı).
-/// </summary>
+// Komut satırı exclusion kuralları: tip, şema ve isim (substring) bazında.
+// Bir nesne herhangi bir kurala uyuyorsa dışlanır (VEYA mantığı).
 public sealed class ObjectFilter
 {
-    /// <summary>--exclude için geçerli tip adları.</summary>
+    // --exclude için geçerli tip adları.
     public static readonly IReadOnlySet<string> ValidTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "schemas", "tables", "views", "procedures", "functions", "triggers", "synonyms",
+        "schemas", "sequences", "types", "tables", "views", "procedures", "functions", "triggers", "synonyms",
     };
 
     private readonly HashSet<string> _types;
@@ -28,15 +26,15 @@ public sealed class ObjectFilter
 
     public static ObjectFilter Empty { get; } = new([], [], []);
 
-    /// <summary>Bu tip dışlanmamış mı? (tip adları: tables, views, procedures, functions, triggers, synonyms, schemas)</summary>
+    // Bu tip dışlanmamış mı? (tip adları: tables, views, procedures, functions, triggers, synonyms, schemas)
     public bool IncludesType(string type) => !_types.Contains(type);
 
-    /// <summary>Verilen şema/ad çiftindeki nesne şema veya isim kuralıyla dışlanmamış mı?</summary>
+    // Verilen şema/ad çiftindeki nesne şema veya isim kuralıyla dışlanmamış mı?
     public bool IncludesObject(string schema, string name) =>
         !_schemas.Contains(schema)
         && !_namePatterns.Any(p => name.Contains(p, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Modül tiplerinden (view/procedure/function/trigger) en az biri dahil mi?</summary>
+    // Modül tiplerinden (view/procedure/function/trigger) en az biri dahil mi?
     public bool HasAnyModuleType =>
         IncludesType("views") || IncludesType("procedures")
         || IncludesType("functions") || IncludesType("triggers");
