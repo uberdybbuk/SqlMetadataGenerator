@@ -25,6 +25,12 @@ public sealed class ScriptFormat
     /// Audit kolonları. Bir tabloda bunlardan ardışık (>= 2) bir grup varsa,
     /// o grubun öncesine ve sonrasına boş satır eklenerek ayrı bir blok gibi yazılır.
     /// </summary>
+    /// <summary>
+    /// Açıksa, audit olmayan ardışık kolonlar ortak kelime paylaştıkça gruplanır ve
+    /// (en az 2 kolonluk) grupların öncesine/sonrasına boş satır eklenir.
+    /// </summary>
+    public bool GroupColumns { get; init; } = true;
+
     public IReadOnlySet<string> AuditColumns { get; init; } = DefaultAuditColumns;
 
     public static readonly IReadOnlySet<string> DefaultAuditColumns =

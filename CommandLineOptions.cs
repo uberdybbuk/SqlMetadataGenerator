@@ -25,6 +25,7 @@ public sealed class CommandLineOptions
     public string OutputRoot { get; init; } = "./output";
     public KeywordCase KeywordCase { get; init; } = KeywordCase.Lower;
     public bool EmitSetOptions { get; init; }
+    public bool GroupColumns { get; init; } = true;
     /// <summary>null ise ScriptFormat'ın varsayılan audit kolon listesi kullanılır.</summary>
     public IReadOnlySet<string>? AuditColumns { get; init; }
     /// <summary>true ise snapshot yok sayılır ve tüm nesneler yeniden çekilir.</summary>
@@ -36,6 +37,7 @@ public sealed class CommandLineOptions
     {
         KeywordCase = KeywordCase,
         EmitSetOptions = EmitSetOptions,
+        GroupColumns = GroupColumns,
         DatabaseCollation = databaseCollation,
         AuditColumns = AuditColumns ?? ScriptFormat.DefaultAuditColumns,
     };
@@ -91,6 +93,7 @@ public sealed class CommandLineOptions
         string output = "./output";
         var keywordCase = KeywordCase.Lower;
         bool emitSetOptions = false;
+        bool groupColumns = true;
         IReadOnlySet<string>? auditColumns = null;
         bool fullRefresh = false;
         string[] excludeTypes = [], excludeSchemas = [], excludeNames = [];
@@ -153,6 +156,9 @@ public sealed class CommandLineOptions
                     break;
                 case "--set-options":
                     emitSetOptions = true;
+                    break;
+                case "--no-group-columns":
+                    groupColumns = false;
                     break;
                 case "--full":
                     fullRefresh = true;
@@ -225,6 +231,7 @@ public sealed class CommandLineOptions
             OutputRoot = output,
             KeywordCase = keywordCase,
             EmitSetOptions = emitSetOptions,
+            GroupColumns = groupColumns,
             AuditColumns = auditColumns,
             FullRefresh = fullRefresh,
             Filter = new ObjectFilter(excludeTypes, excludeSchemas, excludeNames),
@@ -257,6 +264,8 @@ public sealed class CommandLineOptions
           --no-encrypt                Şifrelemeyi kapat
           --keyword-case <lower|upper>  Anahtar kelime büyük/küçük harfi (varsayılan: lower)
           --set-options               SET ANSI_NULLS / QUOTED_IDENTIFIER bloklarını ekle
+          --no-group-columns          Kolonları ortak kelimeye göre boş satırla gruplama
+                                      (varsayılan: açık)
           --audit-columns "a,b,c"     Audit kolonları (ardışık grup boş satırla ayrılır).
                                       Varsayılan: CreatedAt,CreatedBy,IsActive,UpdatedAt,
                                       UpdatedBy,UpdatedCorrelationId,UpdatedChannelCode
