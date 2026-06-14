@@ -95,6 +95,8 @@ public static class TableScripter
         var blankBefore = new HashSet<int>();
         var blankAfter = new HashSet<int>();
         DetectAuditBlocks(table.Columns, fmt.AuditColumns, blankBefore, blankAfter);
+        if (fmt.GroupColumns)
+            DetectWordGroups(table.Columns, fmt.AuditColumns, blankBefore, blankAfter);
         if (hasConstraint)
             blankBefore.Add(firstConstraintIndex);
 
@@ -149,6 +151,70 @@ public static class TableScripter
             }
             i++;
         }
+    }
+
+    /// <summary>
+    /// Audit olmayan ardışık kolonları, ortak kelime paylaştıkları sürece zincirleyerek gruplar.
+    /// En az 2 kolonluk grupların öncesine/sonrasına boş satır işaretler. Audit kolonları zinciri kırar
+    /// (onlar ayrıca DetectAuditBlocks tarafından ele alınır).
+    /// </summary>
+    private static void DetectWordGroups(
+        List<ColumnInfo> columns, IReadOnlySet<string> auditColumns,
+        HashSet<int> blankBefore, HashSet<int> blankAfter)
+    {
+        var tokens = columns.Select(c => Tokenize(c.Name)).ToList();
+
+        int i = 0;
+        while (i < columns.Count)
+        {
+            if (auditColumns.Contains(columns[i].Name))
+            {
+                i++;
+                continue;
+            }
+
+            int start = i;
+            while (i + 1 < columns.Count
+                   && !auditColumns.Contains(columns[i + 1].Name)
+                   && tokens[i].Overlaps(tokens[i + 1]))
+                i++;
+
+            if (i - start + 1 >= 2)
+            {
+                if (start > 0)
+                    blankBefore.Add(start);
+                blankAfter.Add(i);
+            }
+            i++;
+        }
+    }
+
+    /// <summary>Kolon adını kelimelerine ayırır: '_' ve camelCase/PascalCase sınırları (büyük/küçük harf duyarsız).</summary>
+    private static HashSet<string> Tokenize(string name)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var part in name.Split('_', StringSplitOptions.RemoveEmptyEntries))
+            foreach (var word in SplitCamelCase(part))
+                set.Add(word);
+        return set;
+    }
+
+    private static IEnumerable<string> SplitCamelCase(string s)
+    {
+        int start = 0;
+        for (int i = 1; i < s.Length; i++)
+        {
+            // "UpdatedAt" -> Updated|At ; "XMLData" -> XML|Data ; "PROCESS" -> bütün kalır
+            bool boundary = char.IsUpper(s[i])
+                && (char.IsLower(s[i - 1]) || (i + 1 < s.Length && char.IsLower(s[i + 1])));
+            if (boundary)
+            {
+                yield return s[start..i];
+                start = i;
+            }
+        }
+        if (start < s.Length)
+            yield return s[start..];
     }
 
     /// <summary>Tipten sonraki kısım: COLLATE, IDENTITY, NULL/NOT NULL, DEFAULT.</summary>
