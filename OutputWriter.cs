@@ -56,7 +56,9 @@ public sealed class OutputWriter
             _namersByCategory[safeCategory] = namer;
         }
 
-        string fileName = namer.Reserve(objectName) + ".sql";
+        // Şema dizinde olsa da dosya adına "{şema}.{ad}" yazılır; editörde her iki adla da bulunur.
+        string baseName = schema is null ? objectName : $"{schema}.{objectName}";
+        string fileName = namer.Reserve(baseName) + ".sql";
         await File.WriteAllTextAsync(Path.Combine(dir, fileName), script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), ct);
         return new WrittenFile(safeCategory, fileName);
     }
