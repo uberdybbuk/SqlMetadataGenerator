@@ -1,0 +1,20 @@
+{
+    "connections": [
+        {
+            "alias": "demo",
+            "description": "Örnek sunucu",
+            "server": "sunucu.adresi,1433",
+            "auth": "sql",
+            "user": "readonlyuser",
+            "passwordEnv": "SQLMETA_PW_DEMO",
+            "trustServerCertificate": true,
+            "encrypt": true
+        },
+        {
+            "alias": "local",
+            "description": "Yerel geliştirme",
+            "server": "localhost,1433",
+            "auth": "integrated"
+        }
+    ]
+}
