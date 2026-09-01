@@ -56,7 +56,7 @@ export function TableDetailPage() {
                 {schema}.{name}
             </h1>
             <p className="subtitle">
-                {db} · {alias}
+                <span className="mono">{db}</span> veritabanı · <span className="mono">{alias}</span> sunucusu
             </p>
 
             {detail.error && <div className="error">{detail.error}</div>}

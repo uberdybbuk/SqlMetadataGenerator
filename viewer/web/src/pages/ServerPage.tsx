@@ -9,6 +9,8 @@ import type { DatabaseInfo } from "../api";
 export function ServerPage() {
     const { alias = "" } = useParams();
     const { data, error, loading } = useApi(() => api.server(alias), [alias]);
+    // Alias tek başına hangi sunucuya baktığını söylemiyor; gerçek adresi de göster.
+    const connections = useApi(() => api.connections(), []);
 
     if (loading) {
         return <div className="state">Sunucu okunuyor…</div>;
@@ -21,6 +23,7 @@ export function ServerPage() {
     }
 
     const { server, databases } = data;
+    const connection = connections.data?.find((c) => c.alias.toLowerCase() === alias.toLowerCase());
     const totalMb = databases.reduce((sum, db) => sum + db.dataMb, 0);
 
     const columns: Column<DatabaseInfo>[] = [
@@ -71,8 +74,12 @@ export function ServerPage() {
         <>
             <h1>{alias}</h1>
             <p className="subtitle">
+                <span className="mono">{connection?.server ?? "—"}</span>
+                {connection?.user && <> · {connection.user}</>}
+                {connection?.description && <> · {connection.description}</>}
+                <br />
                 SQL Server {server.productVersion} {server.productLevel} · {server.edition} ·{" "}
-                {server.collation} · {server.machineName}
+                {server.collation} · makine {server.machineName}
             </p>
 
             <div className="badges">

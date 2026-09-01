@@ -51,25 +51,51 @@ a:hover {
     padding: 0 24px 64px;
 }
 
-/* ---- Breadcrumb: URL'in görünür hâli ---- */
+/* ---- Breadcrumb: her parçanın NE olduğu yazıyla görünür ---- */
 .crumbs {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 8px;
     flex-wrap: wrap;
     padding: 18px 0;
-    font-family: var(--mono);
     font-size: 13px;
     border-bottom: 1px solid var(--border);
     margin-bottom: 24px;
 }
 
-.crumbs .sep {
+.crumbs .crumb {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+/* "sunucu", "veritabanı", "şema" — adın ne olduğunu söyleyen tür etiketi. */
+.crumbs .kind {
     color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.crumbs .detail {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 12px;
+}
+
+.crumbs .detail::before {
+    content: "·";
+    margin-right: 6px;
+}
+
+.crumbs .sep {
+    color: var(--border);
+    margin-left: 2px;
 }
 
 .crumbs .current {
-    color: var(--muted);
+    color: var(--text);
+    font-weight: 600;
 }
 
 h1 {

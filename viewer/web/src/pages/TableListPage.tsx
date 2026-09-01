@@ -89,7 +89,7 @@ export function TableListPage() {
         <>
             <h1>{schema ? `${schema} tabloları` : "Tablolar"}</h1>
             <p className="subtitle">
-                {db} · {shown.length} / {rows.length} tablo
+                <span className="mono">{db}</span> veritabanı · {shown.length} / {rows.length} tablo
             </p>
 
             <div className="toolbar">

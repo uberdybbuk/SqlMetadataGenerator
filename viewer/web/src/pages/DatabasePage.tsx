@@ -91,7 +91,9 @@ export function DatabasePage() {
     return (
         <>
             <h1>{db}</h1>
-            <p className="subtitle">{alias} üzerinde</p>
+            <p className="subtitle">
+                <span className="mono">{alias}</span> sunucusundaki veritabanı
+            </p>
 
             {overview.error && <div className="error">{overview.error}</div>}
             {overview.data && (
