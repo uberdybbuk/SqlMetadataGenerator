@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Spectre.Console" Version="0.57.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../SqlMetadataGenerator.Core/SqlMetadataGenerator.Core.csproj" />
+    </ItemGroup>
+
+</Project>

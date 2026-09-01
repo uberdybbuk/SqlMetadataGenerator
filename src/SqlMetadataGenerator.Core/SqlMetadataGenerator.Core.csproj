@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Metadata okuma, script üretme ve deploy mantığı. Cli ve Web ortak kullanır;
+         konsola veya web'e ait hiçbir bağımlılığı olmamalı. -->
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.1" />
+    </ItemGroup>
+
+</Project>

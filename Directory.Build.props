@@ -1,0 +1,12 @@
+<Project>
+
+    <!-- Tüm projeler için ortak ayarlar; tek tek csproj'larda tekrarlanmaz. -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <!-- Klasör yapısı değişse de namespace'ler SqlMetadataGenerator kökünde kalır. -->
+        <RootNamespace>SqlMetadataGenerator</RootNamespace>
+    </PropertyGroup>
+
+</Project>

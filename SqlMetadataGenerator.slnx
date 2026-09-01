@@ -1,0 +1,12 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/SqlMetadataGenerator.Cli/SqlMetadataGenerator.Cli.csproj" />
+    <Project Path="src/SqlMetadataGenerator.Core/SqlMetadataGenerator.Core.csproj" />
+    <Project Path="src/SqlMetadataGenerator.Web/SqlMetadataGenerator.Web.csproj" />
+  </Folder>
+</Solution>

@@ -274,7 +274,7 @@ public sealed class CommandLineOptions
     public static string UsageText =>
         """
         Kullanım:
-          dotnet run -- --server <sunucu> --database <db> [seçenekler]
+          dotnet run --project src/SqlMetadataGenerator.Cli -- --server <sunucu> --database <db> [seçenekler]
 
         Bağlantı, kimlik doğrulama ve güvenlik:
           -s, --server <ad>           SQL Server adı/adresi (örn. localhost,1433)

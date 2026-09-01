@@ -7,24 +7,32 @@
 A .NET 10 console app that scripts a SQL Server database into an SSMS-like folder tree, and
 recreates a database from those scripts.
 
+## Project layout
+
+```
+src/SqlMetadataGenerator.Core/   metadata reading, scripting and deploy logic (class library)
+src/SqlMetadataGenerator.Cli/    the console app
+src/SqlMetadataGenerator.Web/    ASP.NET Core host (early scaffolding)
+```
+
 ## Usage
 
 Generate scripts:
 
 ```
-dotnet run -- --server localhost,1433 --database MyDb --user sa --password *** --output ./output
+dotnet run --project src/SqlMetadataGenerator.Cli -- --server localhost,1433 --database MyDb --user sa --password *** --output ./output
 ```
 
 With Windows authentication:
 
 ```
-dotnet run -- --server localhost --database MyDb --integrated
+dotnet run --project src/SqlMetadataGenerator.Cli -- --server localhost --database MyDb --integrated
 ```
 
 Deploy the generated files to a target database:
 
 ```
-dotnet run -- --server localhost --database MyDbCopy --integrated --deploy --source ./output/localhost/MyDb
+dotnet run --project src/SqlMetadataGenerator.Cli -- --server localhost --database MyDbCopy --integrated --deploy --source ./output/localhost/MyDb
 ```
 
 Run with no arguments to see the full option list.
