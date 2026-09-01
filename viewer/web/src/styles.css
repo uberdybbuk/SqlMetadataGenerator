@@ -331,3 +331,43 @@ th .arrow {
 th.num button.sort {
     flex-direction: row-reverse;
 }
+
+/* ---- İkonlar ---- */
+.icon {
+    flex: 0 0 auto;
+}
+
+/* İkon + metin çiftini tek satırda, taban hizasında tutar. */
+.with-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.crumbs .icon {
+    color: var(--muted);
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.card .title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+h1.with-icon {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.pill.with-icon {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+}

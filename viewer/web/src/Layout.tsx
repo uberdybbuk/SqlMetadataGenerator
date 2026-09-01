@@ -2,6 +2,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 
 import { api } from "./api";
 import { useApi } from "./useApi";
+import { Icon, type IconName } from "./Icon";
 
 // URL'deki tip segmentinin (tables, views ...) okunur karşılıkları.
 // Anahtarlar ObjectFilter.ValidTypes sözlüğüyle aynı: CLI, manifest ve URL tek dil konuşur.
@@ -14,6 +15,17 @@ const SECTION_LABELS: Record<string, string> = {
     synonyms: "Synonym'lar",
     sequences: "Sequence'lar",
     types: "Tipler",
+};
+
+const SECTION_ICONS: Record<string, IconName> = {
+    tables: "table",
+    views: "view",
+    procedures: "procedure",
+    functions: "function",
+    triggers: "trigger",
+    synonyms: "synonym",
+    sequences: "sequence",
+    types: "type",
 };
 
 const OBJECT_LABELS: Record<string, string> = {
@@ -30,6 +42,7 @@ const OBJECT_LABELS: Record<string, string> = {
 interface Crumb {
     // "sunucu", "veritabanı", "şema" gibi tür etiketi; bölüm sayfalarında yok.
     kind?: string;
+    icon?: IconName;
     label: string;
     // Sunucu için gerçek adres — alias tek başına neyi işaret ettiğini söylemiyor.
     detail?: string;
@@ -48,6 +61,8 @@ function buildCrumbs(pathname: string, serverAddress: string | null): Crumb[] {
     }
 
     const [, alias, db, section, schema, name] = parts;
+    // İlk parça bir varlık değil, sayfa adı — ikonu yok. Aksi hâlde yanındaki
+    // sunucu ikonuyla aynı görünüp iki ayrı şeyi aynı sanmaya yol açıyordu.
     const crumbs: Crumb[] = [{ label: "Bağlantılar", href: "/app" }];
     if (!alias) {
         return crumbs;
@@ -56,6 +71,7 @@ function buildCrumbs(pathname: string, serverAddress: string | null): Crumb[] {
     const a = encodeURIComponent(alias);
     crumbs.push({
         kind: "sunucu",
+        icon: "server",
         label: decodeURIComponent(alias),
         detail: serverAddress ?? undefined,
         href: `/app/${a}`,
@@ -66,12 +82,22 @@ function buildCrumbs(pathname: string, serverAddress: string | null): Crumb[] {
     }
 
     const d = encodeURIComponent(db);
-    crumbs.push({ kind: "veritabanı", label: decodeURIComponent(db), href: `/app/${a}/${d}`, mono: true });
+    crumbs.push({
+        kind: "veritabanı",
+        icon: "database",
+        label: decodeURIComponent(db),
+        href: `/app/${a}/${d}`,
+        mono: true,
+    });
     if (!section) {
         return crumbs;
     }
 
-    crumbs.push({ label: SECTION_LABELS[section] ?? section, href: `/app/${a}/${d}/${section}` });
+    crumbs.push({
+        icon: SECTION_ICONS[section],
+        label: SECTION_LABELS[section] ?? section,
+        href: `/app/${a}/${d}/${section}`,
+    });
     if (!schema) {
         return crumbs;
     }
@@ -79,6 +105,7 @@ function buildCrumbs(pathname: string, serverAddress: string | null): Crumb[] {
     const s = encodeURIComponent(schema);
     crumbs.push({
         kind: "şema",
+        icon: "schema",
         label: decodeURIComponent(schema),
         href: `/app/${a}/${d}/${section}/${s}`,
         mono: true,
@@ -89,6 +116,7 @@ function buildCrumbs(pathname: string, serverAddress: string | null): Crumb[] {
 
     crumbs.push({
         kind: OBJECT_LABELS[section] ?? "nesne",
+        icon: SECTION_ICONS[section],
         label: decodeURIComponent(name),
         href: `/app/${a}/${d}/${section}/${s}/${encodeURIComponent(name)}`,
         mono: true,
@@ -113,6 +141,7 @@ function Breadcrumbs() {
                 const last = index === crumbs.length - 1;
                 return (
                     <span key={crumb.href} className="crumb">
+                        {crumb.icon && <Icon name={crumb.icon} label={crumb.kind ?? crumb.label} />}
                         {crumb.kind && <span className="kind">{crumb.kind}</span>}
                         {last ? (
                             <span className={crumb.mono ? "current mono" : "current"}>{crumb.label}</span>

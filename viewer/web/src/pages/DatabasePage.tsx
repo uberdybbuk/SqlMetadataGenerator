@@ -7,18 +7,19 @@ import { useApi } from "../useApi";
 import { formatKb, formatRows } from "../format";
 import { labelColorFor, rampFor, sampleRamp, useDarkMode } from "../theme";
 import { DataTable, type Column } from "../DataTable";
+import { Icon, type IconName } from "../Icon";
 
-// Nesne tipi sayaçları için gösterim sırası ve etiketleri.
-const KIND_LABELS: [string, string][] = [
-    ["tables", "tablo"],
-    ["views", "view"],
-    ["procedures", "procedure"],
-    ["functions", "function"],
-    ["triggers", "trigger"],
-    ["synonyms", "synonym"],
-    ["sequences", "sequence"],
-    ["types", "type"],
-    ["schemas", "şema"],
+// Nesne tipi sayaçları: gösterim sırası, etiket ve ikon.
+const KINDS: [key: string, label: string, icon: IconName][] = [
+    ["tables", "tablo", "table"],
+    ["views", "view", "view"],
+    ["procedures", "procedure", "procedure"],
+    ["functions", "function", "function"],
+    ["triggers", "trigger", "trigger"],
+    ["synonyms", "synonym", "synonym"],
+    ["sequences", "sequence", "sequence"],
+    ["types", "tip", "type"],
+    ["schemas", "şema", "schema"],
 ];
 
 export function DatabasePage() {
@@ -59,7 +60,8 @@ export function DatabasePage() {
             header: "Şema",
             sortValue: (t) => t.schema,
             render: (t) => (
-                <Link className="mono muted" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
+                <Link className="mono muted with-icon" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
+                    <Icon name="schema" />
                     {t.schema}
                 </Link>
             ),
@@ -70,9 +72,10 @@ export function DatabasePage() {
             sortValue: (t) => t.name,
             render: (t) => (
                 <Link
-                    className="mono"
+                    className="mono with-icon"
                     to={`${base}/tables/${encodeURIComponent(t.schema)}/${encodeURIComponent(t.name)}`}
                 >
+                    <Icon name="table" />
                     {t.name}
                 </Link>
             ),
@@ -98,8 +101,9 @@ export function DatabasePage() {
             {overview.error && <div className="error">{overview.error}</div>}
             {overview.data && (
                 <div className="badges">
-                    {KIND_LABELS.filter(([key]) => overview.data!.counts[key]).map(([key, label]) => (
+                    {KINDS.filter(([key]) => overview.data!.counts[key]).map(([key, label, icon]) => (
                         <span key={key} className="badge">
+                            <Icon name={icon} size={14} />
                             <b>{overview.data!.counts[key]}</b> {label}
                         </span>
                     ))}

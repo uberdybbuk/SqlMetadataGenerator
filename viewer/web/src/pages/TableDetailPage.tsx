@@ -5,6 +5,7 @@ import { api, type ColumnSummary } from "../api";
 import { useApi } from "../useApi";
 import { formatType } from "../format";
 import { DataTable, type Column } from "../DataTable";
+import { Icon } from "../Icon";
 
 export function TableDetailPage() {
     const { alias = "", db = "", schema = "", name = "" } = useParams();
@@ -36,7 +37,12 @@ export function TableDetailPage() {
             sortValue: (c) => c.primaryKeyOrdinal,
             render: (c) => (
                 <>
-                    {c.primaryKeyOrdinal !== null && <span className="pill">pk {c.primaryKeyOrdinal}</span>}
+                    {c.primaryKeyOrdinal !== null && (
+                        <span className="pill with-icon">
+                            <Icon name="key" size={12} />
+                            pk {c.primaryKeyOrdinal}
+                        </span>
+                    )}
                     {c.isIdentity && <span className="pill"> identity</span>}
                     {c.isComputed && <span className="pill"> computed</span>}
                 </>
@@ -52,7 +58,8 @@ export function TableDetailPage() {
 
     return (
         <>
-            <h1 className="mono">
+            <h1 className="mono with-icon">
+                <Icon name="table" size={22} />
                 {schema}.{name}
             </h1>
             <p className="subtitle">

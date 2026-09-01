@@ -5,6 +5,7 @@ import { api, type TableStats } from "../api";
 import { useApi } from "../useApi";
 import { formatKb, formatRows } from "../format";
 import { DataTable, type Column } from "../DataTable";
+import { Icon } from "../Icon";
 
 export function TableListPage() {
     const { alias = "", db = "", schema } = useParams();
@@ -37,7 +38,8 @@ export function TableListPage() {
             header: "Şema",
             sortValue: (t) => t.schema,
             render: (t) => (
-                <Link className="mono muted" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
+                <Link className="mono muted with-icon" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
+                    <Icon name="schema" />
                     {t.schema}
                 </Link>
             ),
@@ -48,9 +50,10 @@ export function TableListPage() {
             sortValue: (t) => t.name,
             render: (t) => (
                 <Link
-                    className="mono"
+                    className="mono with-icon"
                     to={`${base}/tables/${encodeURIComponent(t.schema)}/${encodeURIComponent(t.name)}`}
                 >
+                    <Icon name="table" />
                     {t.name}
                 </Link>
             ),

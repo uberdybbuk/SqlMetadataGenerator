@@ -5,6 +5,7 @@ import { useApi } from "../useApi";
 import { formatDate, formatMb } from "../format";
 import { DataTable, type Column } from "../DataTable";
 import type { DatabaseInfo } from "../api";
+import { Icon } from "../Icon";
 
 export function ServerPage() {
     const { alias = "" } = useParams();
@@ -33,11 +34,18 @@ export function ServerPage() {
             sortValue: (db) => db.name,
             render: (db) =>
                 db.isBrowsable ? (
-                    <Link className="mono" to={`/app/${encodeURIComponent(alias)}/${encodeURIComponent(db.name)}`}>
+                    <Link
+                        className="mono with-icon"
+                        to={`/app/${encodeURIComponent(alias)}/${encodeURIComponent(db.name)}`}
+                    >
+                        <Icon name="database" />
                         {db.name}
                     </Link>
                 ) : (
-                    <span className="mono muted">{db.name}</span>
+                    <span className="mono muted with-icon">
+                        <Icon name="database" />
+                        {db.name}
+                    </span>
                 ),
         },
         { key: "data", header: "Veri", numeric: true, sortValue: (db) => db.dataMb, render: (db) => formatMb(db.dataMb) },
