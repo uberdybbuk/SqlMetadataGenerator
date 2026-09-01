@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
 import { useApi } from "../useApi";
 import { formatDate, formatMb } from "../format";
+import { DataTable, type Column } from "../DataTable";
+import type { DatabaseInfo } from "../api";
 
 export function ServerPage() {
     const { alias = "" } = useParams();
@@ -20,8 +22,50 @@ export function ServerPage() {
 
     const { server, databases } = data;
     const totalMb = databases.reduce((sum, db) => sum + db.dataMb, 0);
-    // En büyük veritabanı en üstte: ilgilenilen genelde o.
-    const sorted = [...databases].sort((a, b) => b.dataMb - a.dataMb);
+
+    const columns: Column<DatabaseInfo>[] = [
+        {
+            key: "name",
+            header: "Veritabanı",
+            sortValue: (db) => db.name,
+            render: (db) =>
+                db.isBrowsable ? (
+                    <Link className="mono" to={`/app/${encodeURIComponent(alias)}/${encodeURIComponent(db.name)}`}>
+                        {db.name}
+                    </Link>
+                ) : (
+                    <span className="mono muted">{db.name}</span>
+                ),
+        },
+        { key: "data", header: "Veri", numeric: true, sortValue: (db) => db.dataMb, render: (db) => formatMb(db.dataMb) },
+        { key: "log", header: "Log", numeric: true, sortValue: (db) => db.logMb, render: (db) => formatMb(db.logMb) },
+        {
+            key: "state",
+            header: "Durum",
+            sortValue: (db) => db.state,
+            render: (db) =>
+                db.state === "ONLINE" ? <span className="muted">online</span> : <span className="pill">{db.state.toLowerCase()}</span>,
+        },
+        {
+            key: "recovery",
+            header: "Kurtarma",
+            sortValue: (db) => db.recoveryModel,
+            render: (db) => <span className="muted">{db.recoveryModel.toLowerCase()}</span>,
+            className: "muted",
+        },
+        {
+            key: "collation",
+            header: "Collation",
+            sortValue: (db) => db.collation,
+            render: (db) => <span className="muted mono" style={{ fontSize: 12 }}>{db.collation ?? "—"}</span>,
+        },
+        {
+            key: "created",
+            header: "Oluşturma",
+            sortValue: (db) => db.createDate,
+            render: (db) => <span className="muted mono" style={{ fontSize: 12 }}>{formatDate(db.createDate)}</span>,
+        },
+    ];
 
     return (
         <>
@@ -40,55 +84,12 @@ export function ServerPage() {
                 </span>
             </div>
 
-            <div className="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Veritabanı</th>
-                            <th className="num">Veri</th>
-                            <th className="num">Log</th>
-                            <th>Durum</th>
-                            <th>Kurtarma</th>
-                            <th>Collation</th>
-                            <th>Oluşturma</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {sorted.map((db) => (
-                            <tr key={db.name}>
-                                <td>
-                                    {db.isBrowsable ? (
-                                        <Link
-                                            className="mono"
-                                            to={`/app/${encodeURIComponent(alias)}/${encodeURIComponent(db.name)}`}
-                                        >
-                                            {db.name}
-                                        </Link>
-                                    ) : (
-                                        <span className="mono muted">{db.name}</span>
-                                    )}
-                                </td>
-                                <td className="num">{formatMb(db.dataMb)}</td>
-                                <td className="num">{formatMb(db.logMb)}</td>
-                                <td>
-                                    {db.state === "ONLINE" ? (
-                                        <span className="muted">online</span>
-                                    ) : (
-                                        <span className="pill">{db.state.toLowerCase()}</span>
-                                    )}
-                                </td>
-                                <td className="muted">{db.recoveryModel.toLowerCase()}</td>
-                                <td className="muted mono" style={{ fontSize: 12 }}>
-                                    {db.collation ?? "—"}
-                                </td>
-                                <td className="muted mono" style={{ fontSize: 12 }}>
-                                    {formatDate(db.createDate)}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+            <DataTable
+                columns={columns}
+                rows={databases}
+                rowKey={(db) => db.name}
+                initialSort={{ key: "data", desc: true }}
+            />
             <p className="subtitle" style={{ marginTop: 12 }}>
                 Boyutlar <code>sys.master_files</code>'tan gelir: ayrılmış dosya boyutudur,
                 kullanılan alan değil.

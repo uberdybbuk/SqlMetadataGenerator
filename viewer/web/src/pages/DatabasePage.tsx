@@ -6,6 +6,7 @@ import { api, type TableStats } from "../api";
 import { useApi } from "../useApi";
 import { formatKb, formatRows } from "../format";
 import { labelColorFor, rampFor, sampleRamp, useDarkMode } from "../theme";
+import { DataTable, type Column } from "../DataTable";
 
 // Nesne tipi sayaçları için gösterim sırası ve etiketleri.
 const KIND_LABELS: [string, string][] = [
@@ -45,13 +46,47 @@ export function DatabasePage() {
     const totalKb = rows.reduce((sum, t) => sum + t.reservedKb, 0);
     const totalRows = rows.reduce((sum, t) => sum + t.rowCount, 0);
     const ranked = [...rows].sort((a, b) => b.reservedKb - a.reservedKb);
-    const biggest = ranked.slice(0, 15);
 
     // Tek tablo alanın yarısından fazlasını kaplıyorsa asıl bilgi budur ve bir
     // grafikten değil bir cümleden daha hızlı okunur. Treemap bu durumda "bir şey
     // her şeyi kaplıyor" der ama kuyruk hakkında hiçbir şey söyleyemez.
     const top = ranked[0];
     const dominance = top && totalKb > 0 ? (top.reservedKb / totalKb) * 100 : 0;
+
+    const columns: Column<TableStats>[] = [
+        {
+            key: "schema",
+            header: "Şema",
+            sortValue: (t) => t.schema,
+            render: (t) => (
+                <Link className="mono muted" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
+                    {t.schema}
+                </Link>
+            ),
+        },
+        {
+            key: "name",
+            header: "Tablo",
+            sortValue: (t) => t.name,
+            render: (t) => (
+                <Link
+                    className="mono"
+                    to={`${base}/tables/${encodeURIComponent(t.schema)}/${encodeURIComponent(t.name)}`}
+                >
+                    {t.name}
+                </Link>
+            ),
+        },
+        { key: "rows", header: "Satır", numeric: true, sortValue: (t) => t.rowCount, render: (t) => formatRows(t.rowCount) },
+        { key: "reserved", header: "Ayrılmış", numeric: true, sortValue: (t) => t.reservedKb, render: (t) => formatKb(t.reservedKb) },
+        {
+            key: "used",
+            header: "Kullanılan",
+            numeric: true,
+            sortValue: (t) => t.usedKb,
+            render: (t) => <span className="muted">{formatKb(t.usedKb)}</span>,
+        },
+    ];
 
     return (
         <>
@@ -143,41 +178,13 @@ export function DatabasePage() {
                     </p>
 
                     <h2>En büyük tablolar</h2>
-                    <div className="table-wrap">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Şema</th>
-                                    <th>Tablo</th>
-                                    <th className="num">Satır</th>
-                                    <th className="num">Ayrılmış</th>
-                                    <th className="num">Kullanılan</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {biggest.map((t) => (
-                                    <tr key={`${t.schema}.${t.name}`}>
-                                        <td>
-                                            <Link className="mono muted" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
-                                                {t.schema}
-                                            </Link>
-                                        </td>
-                                        <td>
-                                            <Link
-                                                className="mono"
-                                                to={`${base}/tables/${encodeURIComponent(t.schema)}/${encodeURIComponent(t.name)}`}
-                                            >
-                                                {t.name}
-                                            </Link>
-                                        </td>
-                                        <td className="num">{formatRows(t.rowCount)}</td>
-                                        <td className="num">{formatKb(t.reservedKb)}</td>
-                                        <td className="num muted">{formatKb(t.usedKb)}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                    <DataTable
+                        columns={columns}
+                        rows={rows}
+                        rowKey={(t) => `${t.schema}.${t.name}`}
+                        initialSort={{ key: "reserved", desc: true }}
+                        limit={15}
+                    />
                     <p style={{ marginTop: 12 }}>
                         <Link to={`${base}/tables`}>Tüm {rows.length} tabloyu listele →</Link>
                     </p>

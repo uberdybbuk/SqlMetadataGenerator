@@ -1,15 +1,54 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 
-import { api } from "../api";
+import { api, type ColumnSummary } from "../api";
 import { useApi } from "../useApi";
 import { formatType } from "../format";
+import { DataTable, type Column } from "../DataTable";
 
 export function TableDetailPage() {
     const { alias = "", db = "", schema = "", name = "" } = useParams();
     const [tab, setTab] = useState<"columns" | "data">("columns");
 
     const detail = useApi(() => api.table(alias, db, schema, name), [alias, db, schema, name]);
+
+    const columns: Column<ColumnSummary>[] = [
+        { key: "id", header: "#", numeric: true, sortValue: (c) => c.columnId, render: (c) => c.columnId, className: "muted" },
+        { key: "name", header: "Kolon", sortValue: (c) => c.name, render: (c) => c.name, className: "mono" },
+        {
+            key: "type",
+            header: "Tip",
+            sortValue: (c) => formatType(c.typeName, c.maxLength, c.precision, c.scale),
+            render: (c) => (
+                <span className="mono muted">{formatType(c.typeName, c.maxLength, c.precision, c.scale)}</span>
+            ),
+        },
+        {
+            key: "null",
+            header: "Null",
+            sortValue: (c) => c.isNullable,
+            render: (c) => <span className="muted">{c.isNullable ? "null" : "not null"}</span>,
+        },
+        {
+            key: "key",
+            header: "Anahtar",
+            // Birincil anahtar kolonları önce, anahtar sırasına göre.
+            sortValue: (c) => c.primaryKeyOrdinal,
+            render: (c) => (
+                <>
+                    {c.primaryKeyOrdinal !== null && <span className="pill">pk {c.primaryKeyOrdinal}</span>}
+                    {c.isIdentity && <span className="pill"> identity</span>}
+                    {c.isComputed && <span className="pill"> computed</span>}
+                </>
+            ),
+        },
+        {
+            key: "default",
+            header: "Varsayılan",
+            sortValue: (c) => c.defaultDefinition,
+            render: (c) => <span className="mono muted">{c.defaultDefinition ?? ""}</span>,
+        },
+    ];
 
     return (
         <>
@@ -35,38 +74,12 @@ export function TableDetailPage() {
                     </div>
 
                     {tab === "columns" && (
-                        <div className="table-wrap">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Kolon</th>
-                                        <th>Tip</th>
-                                        <th>Null</th>
-                                        <th>Anahtar</th>
-                                        <th>Varsayılan</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {detail.data.columns.map((c) => (
-                                        <tr key={c.columnId}>
-                                            <td className="num muted">{c.columnId}</td>
-                                            <td className="mono">{c.name}</td>
-                                            <td className="mono muted">
-                                                {formatType(c.typeName, c.maxLength, c.precision, c.scale)}
-                                            </td>
-                                            <td className="muted">{c.isNullable ? "null" : "not null"}</td>
-                                            <td>
-                                                {c.primaryKeyOrdinal !== null && <span className="pill">pk {c.primaryKeyOrdinal}</span>}
-                                                {c.isIdentity && <span className="pill"> identity</span>}
-                                                {c.isComputed && <span className="pill"> computed</span>}
-                                            </td>
-                                            <td className="mono muted">{c.defaultDefinition ?? ""}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                        <DataTable
+                            columns={columns}
+                            rows={detail.data.columns}
+                            rowKey={(c) => String(c.columnId)}
+                            initialSort={{ key: "id" }}
+                        />
                     )}
 
                     {tab === "data" && <PreviewTab alias={alias} db={db} schema={schema} name={name} />}
@@ -74,6 +87,13 @@ export function TableDetailPage() {
             )}
         </>
     );
+}
+
+// Önizleme satırı: kolonlar çalışma zamanında belirlendiği için dizi olarak gelir.
+// Sıralama için satırın kendisini sarmalıyoruz.
+interface PreviewRow {
+    index: number;
+    values: (string | number | boolean | null)[];
 }
 
 function PreviewTab({ alias, db, schema, name }: { alias: string; db: string; schema: string; name: string }) {
@@ -93,41 +113,33 @@ function PreviewTab({ alias, db, schema, name }: { alias: string; db: string; sc
     }
 
     const truncated = data.columns.filter((c) => c.truncated).map((c) => c.name);
+    const rows: PreviewRow[] = data.rows.map((values, index) => ({ index, values }));
+
+    const columns: Column<PreviewRow>[] = data.columns.map((column, i) => ({
+        key: `${i}-${column.name}`,
+        numeric: typeof data.rows[0]?.[i] === "number",
+        header: (
+            <>
+                {column.name}
+                <div style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+                    {column.typeName}
+                    {column.truncated && <span className="trunc"> · kısaltıldı</span>}
+                </div>
+            </>
+        ),
+        sortValue: (row) => row.values[i],
+        render: (row) =>
+            row.values[i] === null ? (
+                <span className="muted">NULL</span>
+            ) : (
+                String(row.values[i]).slice(0, 120)
+            ),
+        className: typeof data.rows[0]?.[i] === "number" ? undefined : "mono",
+    }));
 
     return (
         <>
-            <div className="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            {data.columns.map((c) => (
-                                <th key={c.name}>
-                                    {c.name}
-                                    <div style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-                                        {c.typeName}
-                                        {c.truncated && <span className="trunc"> · kısaltıldı</span>}
-                                    </div>
-                                </th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {data.rows.map((row, i) => (
-                            <tr key={i}>
-                                {row.map((value, j) => (
-                                    <td key={j} className={typeof value === "number" ? "num" : "mono"}>
-                                        {value === null ? (
-                                            <span className="muted">NULL</span>
-                                        ) : (
-                                            String(value).slice(0, 120)
-                                        )}
-                                    </td>
-                                ))}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+            <DataTable columns={columns} rows={rows} rowKey={(row) => String(row.index)} />
             {truncated.length > 0 && (
                 <p className="subtitle" style={{ marginTop: 12 }}>
                     Şu kolonlar sunucu tarafında kısaltıldı: <span className="mono">{truncated.join(", ")}</span>.
