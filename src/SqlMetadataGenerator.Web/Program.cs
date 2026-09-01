@@ -29,7 +29,12 @@ internal static class Program
 
         app.MapExplorerEndpoints();
 
-        // SPA sunumu (wwwroot + index.html fallback) Faz 2'de eklenecek.
+        // Production'da SPA'yı wwwroot'tan sun. Fallback şart: /app/demo/Bpm/tables gibi
+        // istemci tarafı bir rotada sayfa yenilenince sunucuda o dosya yoktur.
+        // Geliştirmede SPA'yı Vite sunar (:5173) ve /api'yi buraya proxy'ler.
+        app.UseStaticFiles();
+        app.MapFallbackToFile("index.html");
+
         app.Run();
     }
 
