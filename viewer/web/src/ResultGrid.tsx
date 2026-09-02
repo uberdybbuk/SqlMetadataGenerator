@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 
 import { DataTable, type Column } from "./DataTable";
 import { formatCell, isNumericType } from "./cell";
+import { buildHtml, buildPlainText, type CopyRegion } from "./clipboard";
 
 // Sorgu sonucunu gösteren genel bileşen. Yalnızca tablo önizlemesi için değil:
 // ileride serbest sorgu, WHERE doğrulama ve üretim raporları da bunu kullanacak,
@@ -21,10 +22,14 @@ export interface ResultColumn {
 interface Selection {
     rows: Set<number>;
     cols: Set<string>;
+    // "satırIndeksi:kolonAnahtarı"
+    cells: Set<string>;
     all: boolean;
 }
 
-const EMPTY: Selection = { rows: new Set(), cols: new Set(), all: false };
+const EMPTY: Selection = { rows: new Set(), cols: new Set(), cells: new Set(), all: false };
+
+const cellKey = (rowIndex: number, columnKey: string) => `${rowIndex}:${columnKey}`;
 
 export interface ResultGridProps {
     columns: ResultColumn[];
@@ -54,56 +59,47 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
 
     const columnKeys = useMemo(() => columns.map((c, i) => `${i}-${c.name}`), [columns]);
 
+    // Her seçim türü diğerlerini temizler: bir hücreye tıklamak, önceki satır/
+    // kolon/tümü seçimini bırakır ve aktif seçim o hücre olur.
     const selectRow = useCallback((row: GridRow, additive: boolean) => {
         setSelection((current) => {
             const next = additive && !current.all ? new Set(current.rows) : new Set<number>();
-            if (next.has(row.index)) {
-                next.delete(row.index);
-            } else {
-                next.add(row.index);
-            }
-            return { rows: next, cols: new Set(), all: false };
+            toggle(next, row.index);
+            return { ...EMPTY, rows: next, cells: new Set() };
         });
     }, []);
 
     const selectColumn = useCallback((key: string, additive: boolean) => {
         setSelection((current) => {
             const next = additive && !current.all ? new Set(current.cols) : new Set<string>();
-            if (next.has(key)) {
-                next.delete(key);
-            } else {
-                next.add(key);
-            }
-            return { rows: new Set(), cols: next, all: false };
+            toggle(next, key);
+            return { ...EMPTY, cols: next, cells: new Set() };
+        });
+    }, []);
+
+    const selectCell = useCallback((row: GridRow, key: string, additive: boolean) => {
+        setSelection((current) => {
+            const next = additive && !current.all ? new Set(current.cells) : new Set<string>();
+            toggle(next, cellKey(row.index, key));
+            return { ...EMPTY, cells: next, rows: new Set(), cols: new Set() };
         });
     }, []);
 
     const selectAll = useCallback(() => {
-        setSelection((current) => (current.all ? EMPTY : { rows: new Set(), cols: new Set(), all: true }));
+        setSelection((current) => (current.all ? EMPTY : { ...EMPTY, all: true, cells: new Set() }));
     }, []);
 
-    // Seçim ancak kopyalanabiliyorsa işe yarar: TSV olarak panoya yazılır,
-    // yani doğrudan bir tabloya yapıştırılabilir.
+    // Seçim ancak kopyalanabiliyorsa işe yarar. Panoya iki biçim birden yazılır:
+    // düz metin (editör/terminal) ve HTML (Excel — bkz. clipboard.ts).
     useEffect(() => {
         function onCopy(event: ClipboardEvent) {
-            const hasSelection = selection.all || selection.rows.size > 0 || selection.cols.size > 0;
-            if (!hasSelection || window.getSelection()?.toString()) {
+            const region = buildRegion(selection, columns, columnKeys, gridRows);
+            if (!region || window.getSelection()?.toString()) {
                 return;
             }
 
-            const cols = columns
-                .map((c, i) => ({ c, i }))
-                .filter(({ i }) => selection.all || selection.cols.size === 0 || selection.cols.has(columnKeys[i]));
-            const picked = gridRows.filter(
-                (r) => selection.all || selection.rows.size === 0 || selection.rows.has(r.index),
-            );
-
-            const text = [
-                cols.map(({ c }) => c.name).join("\t"),
-                ...picked.map((r) => cols.map(({ i }) => r.values[i] ?? "NULL").join("\t")),
-            ].join("\n");
-
-            event.clipboardData?.setData("text/plain", text);
+            event.clipboardData?.setData("text/plain", buildPlainText(region));
+            event.clipboardData?.setData("text/html", buildHtml(region));
             event.preventDefault();
         }
 
@@ -183,8 +179,14 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
                     selection={{
                         isRowSelected: (row) => selection.all || selection.rows.has(row.index),
                         isColumnSelected: (key) => selection.all || selection.cols.has(key),
+                        isCellSelected: (row, key) =>
+                            selection.all ||
+                            selection.rows.has(row.index) ||
+                            selection.cols.has(key) ||
+                            selection.cells.has(cellKey(row.index, key)),
                         onRow: selectRow,
                         onColumn: selectColumn,
+                        onCell: selectCell,
                     }}
                 />
             ) : (
@@ -212,4 +214,65 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
             </div>
         </div>
     );
+}
+
+function toggle<T>(set: Set<T>, value: T): void {
+    if (set.has(value)) {
+        set.delete(value);
+    } else {
+        set.add(value);
+    }
+}
+
+// Seçimi kopyalanabilir bir dikdörtgene çevirir. Tek tek hücre seçiminde
+// başlık yazılmaz; satır/kolon/tümü seçiminde yazılır, yoksa yapıştırılan
+// sütunların ne olduğu kaybolur.
+function buildRegion(
+    selection: Selection,
+    columns: ResultColumn[],
+    columnKeys: string[],
+    gridRows: GridRow[],
+): CopyRegion | null {
+    if (selection.all) {
+        return { columns, rows: gridRows.map((r) => r.values), includeHeader: true };
+    }
+
+    if (selection.cols.size > 0) {
+        const picked = columns.map((c, i) => ({ c, i })).filter(({ i }) => selection.cols.has(columnKeys[i]));
+        return {
+            columns: picked.map(({ c }) => c),
+            rows: gridRows.map((r) => picked.map(({ i }) => r.values[i])),
+            includeHeader: true,
+        };
+    }
+
+    if (selection.rows.size > 0) {
+        return {
+            columns,
+            rows: gridRows.filter((r) => selection.rows.has(r.index)).map((r) => r.values),
+            includeHeader: true,
+        };
+    }
+
+    if (selection.cells.size > 0) {
+        // Seçili hücreleri kapsayan en küçük dikdörtgen: Excel'e yapıştırınca
+        // şekil bozulmasın diye satır/kolon hizası korunur.
+        const usedColumns = columns
+            .map((c, i) => ({ c, i }))
+            .filter(({ i }) => gridRows.some((r) => selection.cells.has(cellKey(r.index, columnKeys[i]))));
+        const usedRows = gridRows.filter((r) =>
+            usedColumns.some(({ i }) => selection.cells.has(cellKey(r.index, columnKeys[i]))),
+        );
+        return {
+            columns: usedColumns.map(({ c }) => c),
+            rows: usedRows.map((r) =>
+                usedColumns.map(({ i }) =>
+                    selection.cells.has(cellKey(r.index, columnKeys[i])) ? r.values[i] : null,
+                ),
+            ),
+            includeHeader: usedColumns.length > 1 || usedRows.length > 1,
+        };
+    }
+
+    return null;
 }

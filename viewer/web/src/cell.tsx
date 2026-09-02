@@ -76,6 +76,27 @@ function splitFraction(time: string): [string, string] {
     return [time.slice(0, dot), time.slice(dot)];
 }
 
+// formatCell'in düz metin karşılığı — panoya kopyalarken kullanılır.
+// Ekranda görüneni yazar: aynı tarih biçimi, ISO 'T' ayracı olmadan.
+// Tek ayrım boş metin: ekranda "empty" etiketi görünür ama panoya BOŞ gider,
+// yoksa hücreye "empty" kelimesi yapıştırılırdı.
+export function formatCellText(value: unknown, typeName: string): string {
+    if (value === null || value === undefined) {
+        return "NULL";
+    }
+
+    const t = typeName.toLowerCase();
+    const text = String(value);
+
+    if (DATE_ONLY.has(t)) {
+        return text.slice(0, 10);
+    }
+    if (DATE_TIME.has(t)) {
+        return text.replace("T", " ");
+    }
+    return text;
+}
+
 // Sayısal tipler sağa yaslanır; metin ve tarih sola.
 const NUMERIC = new Set([
     "bigint", "int", "smallint", "tinyint", "decimal", "numeric",

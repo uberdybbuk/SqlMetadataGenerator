@@ -488,7 +488,12 @@ output/
 # Gerçek bağlantı tanımları — sunucu adresi ve kullanıcı adı içerir, repoya girmez.
 # Şablon için connections.example.json'a bakın. Parolalar hiçbir dosyada tutulmaz,
 # connections.json'daki passwordEnv'in gösterdiği ortam değişkeninden okunur.
-connections.json
+#
+# Kalıp bilerek geniş: connections.local.json gibi varyantları ve
+# connections..json gibi yazım hatalarını da yakalar. Tam adı yazan bir kural,
+# adı bir karakter kayan dosyayı sessizce commit'e sokuyordu.
+connections*.json
+!connections.example.json
 
 # Vite build çıktısı Web projesinin wwwroot'una kopyalanır.
 src/SqlMetadataGenerator.Web/wwwroot/

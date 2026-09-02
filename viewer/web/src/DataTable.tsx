@@ -40,8 +40,10 @@ interface DataTableProps<T> {
     selection?: {
         isRowSelected: (row: T) => boolean;
         isColumnSelected: (key: string) => boolean;
+        isCellSelected: (row: T, key: string) => boolean;
         onRow: (row: T, additive: boolean) => void;
         onColumn: (key: string, additive: boolean) => void;
+        onCell: (row: T, key: string, additive: boolean) => void;
     };
 }
 
@@ -231,26 +233,37 @@ export function DataTable<T>({
                         const rowSelected = selection?.isRowSelected(row) ?? false;
                         return (
                             <tr key={rowKey(row)} className={rowSelected ? "selected" : undefined}>
-                                {columns.map((column) => (
-                                    <td
-                                        key={column.key}
-                                        onClick={
-                                            column.className === "rownum" && selection
-                                                ? (e) => selection.onRow(row, e.metaKey || e.ctrlKey)
-                                                : undefined
-                                        }
-                                        className={[
-                                            column.numeric ? "num" : "",
-                                            column.className ?? "",
-                                            column.cellClassName?.(row) ?? "",
-                                            rowSelected || selection?.isColumnSelected(column.key) ? "selected" : "",
-                                        ]
-                                            .filter(Boolean)
-                                            .join(" ")}
-                                    >
-                                        {column.render(row)}
-                                    </td>
-                                ))}
+                                {columns.map((column) => {
+                                    const isRowNumber = column.className === "rownum";
+                                    return (
+                                        <td
+                                            key={column.key}
+                                            onClick={
+                                                !selection
+                                                    ? undefined
+                                                    : isRowNumber
+                                                      ? (e) => selection.onRow(row, e.metaKey || e.ctrlKey)
+                                                      : (e) => selection.onCell(row, column.key, e.metaKey || e.ctrlKey)
+                                            }
+                                            className={[
+                                                column.numeric ? "num" : "",
+                                                column.className ?? "",
+                                                column.cellClassName?.(row) ?? "",
+                                                isRowNumber
+                                                    ? rowSelected
+                                                        ? "selected"
+                                                        : ""
+                                                    : selection?.isCellSelected(row, column.key)
+                                                      ? "selected"
+                                                      : "",
+                                            ]
+                                                .filter(Boolean)
+                                                .join(" ")}
+                                        >
+                                            {column.render(row)}
+                                        </td>
+                                    );
+                                })}
                             </tr>
                         );
                     })}
