@@ -176,13 +176,15 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
                     }}
                 />
             ) : (
-                <div className="messages">
-                    {messages.length === 0 ? (
-                        <span className="muted">The server returned no messages.</span>
-                    ) : (
-                        messages.map((message, i) => <div key={i}>{message}</div>)
-                    )}
-                </div>
+                messages.length === 0 ? (
+                    <div className="empty-note">The server returned no messages.</div>
+                ) : (
+                    <div className="messages">
+                        {messages.map((message, i) => (
+                            <div key={i}>{message}</div>
+                        ))}
+                    </div>
+                )
             )}
 
             <div className="status">

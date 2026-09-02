@@ -256,7 +256,9 @@ export function DataTable<T>({
                     })}
                     {sorted.length === 0 && (
                         <tr className="norows">
-                            <td colSpan={columns.length}>No rows.</td>
+                            <td colSpan={columns.length} className="empty-note">
+                                The query returned no rows.
+                            </td>
                         </tr>
                     )}
                 </tbody>
