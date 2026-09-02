@@ -69,14 +69,6 @@ a:hover {
     gap: 6px;
 }
 
-/* "sunucu", "veritabanı", "şema" — adın ne olduğunu söyleyen tür etiketi. */
-.crumbs .kind {
-    color: var(--muted);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
 .crumbs .detail {
     color: var(--muted);
     font-family: var(--mono);

@@ -40,7 +40,7 @@ const OBJECT_LABELS: Record<string, string> = {
 };
 
 interface Crumb {
-    // "sunucu", "veritabanı", "şema" gibi tür etiketi; bölüm sayfalarında yok.
+    // Ekranda gösterilmez; yalnızca ikonun erişilebilir adı olarak kullanılır.
     kind?: string;
     icon?: IconName;
     label: string;
@@ -93,8 +93,10 @@ function buildCrumbs(pathname: string, serverAddress: string | null): Crumb[] {
         return crumbs;
     }
 
+    // Bölüm crumb'ında ikon yok: "Tablolar" sözcüğü zaten türü söylüyor, ikon
+    // onu tekrar ederdi. İkon yalnızca adın kendisinin ne olduğunu söylemediği
+    // yerlerde var — sunucu, veritabanı ve nesnenin kendisi.
     crumbs.push({
-        icon: SECTION_ICONS[section],
         label: SECTION_LABELS[section] ?? section,
         href: `/app/${a}/${d}/${section}`,
     });
@@ -103,9 +105,9 @@ function buildCrumbs(pathname: string, serverAddress: string | null): Crumb[] {
     }
 
     const s = encodeURIComponent(schema);
+    // Şemanın ikonu yok: bulunduğu yer zaten ne olduğunu söylüyor.
     crumbs.push({
         kind: "şema",
-        icon: "schema",
         label: decodeURIComponent(schema),
         href: `/app/${a}/${d}/${section}/${s}`,
         mono: true,
@@ -142,7 +144,6 @@ function Breadcrumbs() {
                 return (
                     <span key={crumb.href} className="crumb">
                         {crumb.icon && <Icon name={crumb.icon} label={crumb.kind ?? crumb.label} />}
-                        {crumb.kind && <span className="kind">{crumb.kind}</span>}
                         {last ? (
                             <span className={crumb.mono ? "current mono" : "current"}>{crumb.label}</span>
                         ) : (
