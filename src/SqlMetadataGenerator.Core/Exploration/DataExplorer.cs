@@ -149,19 +149,22 @@ public sealed class DataExplorer(string connectionString)
         var columns = await ReadPreviewColumnsAsync(objectId, ct);
         if (columns.Count == 0)
         {
-            return new PreviewResult { Columns = [], Rows = [] };
+            return new PreviewResult { Columns = [], Rows = [], Sql = string.Empty };
         }
 
         string projection = string.Join(",\n       ", columns.Select(c => c.Projection));
         string qualified = $"{SqlIdentifier.Quote(schema)}.{SqlIdentifier.Quote(table)}";
         string whereClause = string.IsNullOrWhiteSpace(where) ? string.Empty : $"\nWHERE ({where})";
 
+        // @top parametre olarak gider; gösterilecek metinde okunabilirlik için
+        // sayının kendisi yazılır, yoksa kullanıcı "@top" görüp ne olduğunu bilemez.
         string sql = $"""
             SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
             SELECT TOP (@top)
                    {projection}
             FROM {qualified}{whereClause};
             """;
+        string displaySql = sql.Replace("(@top)", $"({top})");
 
         var rows = new List<object?[]>();
         await using var conn = await OpenAsync(ct);
@@ -187,6 +190,7 @@ public sealed class DataExplorer(string connectionString)
                 Truncated = c.Truncated,
             }).ToList(),
             Rows = rows,
+            Sql = displaySql,
         };
     }
 

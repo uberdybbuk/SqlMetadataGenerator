@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { api, type ColumnSummary } from "../api";
@@ -6,6 +6,10 @@ import { useApi } from "../useApi";
 import { formatType } from "../format";
 import { DataTable, type Column } from "../DataTable";
 import { Icon } from "../Icon";
+import { formatCell, isNumericType } from "../cell";
+
+// Monaco büyük; yalnızca veri sekmesi açılınca indirilsin.
+const SqlEditor = lazy(() => import("../SqlEditor"));
 
 export function TableDetailPage() {
     const { alias = "", db = "", schema = "", name = "" } = useParams();
@@ -103,6 +107,9 @@ interface PreviewRow {
     values: (string | number | boolean | null)[];
 }
 
+const TRUNCATION_NOTE =
+    "Truncated server-side. Large text and binary values are not transferred in full for previews.";
+
 function PreviewTab({ alias, db, schema, name }: { alias: string; db: string; schema: string; name: string }) {
     const { data, error, loading } = useApi(
         () => api.preview(alias, db, schema, name, 20),
@@ -115,43 +122,52 @@ function PreviewTab({ alias, db, schema, name }: { alias: string; db: string; sc
     if (error) {
         return <div className="error">{error}</div>;
     }
-    if (!data || data.rows.length === 0) {
-        return <div className="state">Table is empty.</div>;
+    if (!data) {
+        return null;
     }
 
-    const truncated = data.columns.filter((c) => c.truncated).map((c) => c.name);
     const rows: PreviewRow[] = data.rows.map((values, index) => ({ index, values }));
 
     const columns: Column<PreviewRow>[] = data.columns.map((column, i) => ({
         key: `${i}-${column.name}`,
-        numeric: typeof data.rows[0]?.[i] === "number",
-        header: (
+        numeric: isNumericType(column.typeName),
+        header: column.name,
+        subHeader: (
             <>
-                {column.name}
-                <div style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-                    {column.typeName}
-                    {column.truncated && <span className="trunc"> · truncated</span>}
-                </div>
+                {column.typeName}
+                {column.truncated && (
+                    <>
+                        {" · "}
+                        <span className="trunc" title={TRUNCATION_NOTE}>
+                            truncated
+                        </span>
+                    </>
+                )}
             </>
         ),
         sortValue: (row) => row.values[i],
-        render: (row) =>
-            row.values[i] === null ? (
-                <span className="muted">NULL</span>
-            ) : (
-                String(row.values[i]).slice(0, 120)
-            ),
-        className: typeof data.rows[0]?.[i] === "number" ? undefined : "mono",
+        render: (row) => formatCell(row.values[i], column.typeName),
+        className: isNumericType(column.typeName) ? undefined : "mono",
     }));
 
     return (
         <>
-            <DataTable columns={columns} rows={rows} rowKey={(row) => String(row.index)} />
-            {truncated.length > 0 && (
-                <p className="subtitle" style={{ marginTop: 12 }}>
-                    Truncated server-side: <span className="mono">{truncated.join(", ")}</span>. Large text
-                    and binary values are not transferred in full for previews.
-                </p>
+            <div className="editor-wrap">
+                <Suspense fallback={<div className="state">Loading editor…</div>}>
+                    <SqlEditor value={data.sql} />
+                </Suspense>
+            </div>
+
+            {data.rows.length === 0 ? (
+                <div className="state">Table is empty.</div>
+            ) : (
+                <DataTable
+                    columns={columns}
+                    rows={rows}
+                    rowKey={(row) => String(row.index)}
+                    dense
+                    resizable
+                />
             )}
         </>
     );

@@ -78,6 +78,8 @@ export interface PreviewColumn {
 export interface PreviewResult {
     columns: PreviewColumn[];
     rows: (string | number | boolean | null)[][];
+    // Önizlemeyi üreten sorgunun kendisi; kullanıcıya gösterilir.
+    sql: string;
 }
 
 // Backend hataları RFC 7807 ProblemDetails olarak döner; "detail" alanı kullanıcıya

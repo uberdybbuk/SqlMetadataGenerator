@@ -8,6 +8,7 @@
     --accent-soft: #e8f0fe;
     --danger: #b42318;
     --danger-soft: #fdeceb;
+    --warn: #b25000;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -22,6 +23,7 @@
         --accent-soft: #1e2a3d;
         --danger: #f4776a;
         --danger-soft: #2e1c1a;
+        --warn: #e8963c;
     }
 }
 
@@ -192,15 +194,27 @@ td {
     white-space: nowrap;
 }
 
+/* Kolon adları veritabanındaki hâliyle yazılır. Büyük harfe çevirmek
+   PascalCase adları (CorrelationId) okunmaz hâle getiriyordu. */
 th {
     font-weight: 600;
-    color: var(--muted);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    color: var(--text);
+    font-size: 12px;
     position: sticky;
     top: 0;
     background: var(--panel);
+    position: relative;
+}
+
+th .hname {
+    font-weight: 600;
+}
+
+/* Kolonun SQL tipi: her başlıkta adın ARDINDAN gelir. */
+th .htype {
+    font-weight: 400;
+    color: var(--muted);
+    font-size: 11px;
 }
 
 tbody tr:last-child td {
@@ -292,36 +306,51 @@ input[type="search"]:focus {
 }
 
 /* ---- Sıralanabilir başlık ---- */
-th button.sort {
+th .sort {
     background: none;
     border: none;
     padding: 0;
     margin: 0;
     font: inherit;
     color: inherit;
-    text-transform: inherit;
-    letter-spacing: inherit;
+    cursor: default;
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    width: 100%;
+    overflow: hidden;
+}
+
+th button.sort {
     cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
 }
 
-th button.sort:hover {
-    color: var(--text);
+th button.sort:hover .hname {
+    color: var(--accent);
 }
 
-th button.sort.active {
+th button.sort.active .hname,
+th button.sort.active .arrow {
     color: var(--accent);
 }
 
 th .arrow {
     display: inline-block;
     min-width: 8px;
+    font-size: 11px;
 }
 
-th.num button.sort {
-    flex-direction: row-reverse;
+/* Sayısal kolon sağa yaslanır ama içerik SIRASI değişmez:
+   ad, tip, ok — her başlıkta aynı. */
+th.num .sort {
+    justify-content: flex-end;
+}
+
+th .hname,
+th .htype {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ---- İkonlar ---- */
@@ -362,4 +391,70 @@ h1.with-icon {
     display: inline-flex;
     gap: 4px;
     align-items: center;
+}
+
+
+/* ---- Veri ızgarası: yoğun yerleşim ---- */
+.table-wrap.dense table {
+    font-size: 12px;
+}
+
+.table-wrap.dense th,
+.table-wrap.dense td {
+    padding: 4px 10px;
+}
+
+.table-wrap.dense td {
+    max-width: 520px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Saniye altı kesir ve saat dilimi eki: değer tam görünür ama göz
+   önce anlamlı kısmı yakalar. */
+.sub {
+    color: var(--muted);
+}
+
+.null {
+    color: var(--muted);
+    font-style: italic;
+}
+
+/* ---- Kısaltılmış kolon uyarısı ---- */
+.trunc {
+    color: var(--warn);
+    font-weight: 600;
+    cursor: help;
+}
+
+/* ---- Kolon genişliği sürükleme ---- */
+th .resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 7px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+}
+
+th .resizer:hover,
+body.resizing th .resizer {
+    background: var(--accent);
+    opacity: 0.35;
+}
+
+body.resizing {
+    cursor: col-resize;
+    user-select: none;
+}
+
+/* ---- Monaco sarmalayıcı ---- */
+.editor-wrap {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 14px;
+    background: var(--panel);
 }

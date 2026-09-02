@@ -50,6 +50,9 @@ public sealed class PreviewResult
     public required List<PreviewColumn> Columns { get; init; }
     // Satır başına kolon sırasına göre değerler; null'lar korunur.
     public required List<object?[]> Rows { get; init; }
+    // Gerçekten çalıştırılan sorgu. Kullanıcıya gösterilir: kısaltmanın nereden
+    // geldiği de dahil, önizlemenin nasıl üretildiği görünür olsun.
+    public required string Sql { get; init; }
 }
 
 // Tablo detay sayfasının kolon satırı. Script üretimi için değil, GÖSTERİM için —

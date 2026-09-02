@@ -1,10 +1,12 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 export type SortValue = string | number | boolean | null;
 
 export interface Column<T> {
     key: string;
     header: ReactNode;
+    // Başlığın altına/yanına yazılan ikincil bilgi (ör. kolonun SQL tipi).
+    subHeader?: ReactNode;
     // Sayısal kolonlar sağa yaslanır ve ilk tıklamada büyükten küçüğe sıralanır.
     numeric?: boolean;
     // Sıralamada kullanılacak ham değer. Verilmezse kolon sıralanamaz.
@@ -20,21 +22,84 @@ interface DataTableProps<T> {
     initialSort?: { key: string; desc?: boolean };
     // Sıralamadan SONRA uygulanır: "şuna göre ilk N" anlamı korunur.
     limit?: number;
+    // Veri ızgarası için daha sıkı satır yüksekliği ve küçük yazı.
+    dense?: boolean;
+    // Kolon kenarlarından sürükleyerek genişlik ayarlama.
+    resizable?: boolean;
 }
 
-// Tüm listelerde ortak sıralama davranışı. Her kolon sıralanabilir (sortValue
-// verildiği sürece); metinler Türkçe sıralama kurallarıyla, null'lar her zaman sona.
-export function DataTable<T>({ columns, rows, rowKey, initialSort, limit }: DataTableProps<T>) {
+const MIN_WIDTH = 56;
+
+export function DataTable<T>({
+    columns,
+    rows,
+    rowKey,
+    initialSort,
+    limit,
+    dense,
+    resizable,
+}: DataTableProps<T>) {
     const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(
         initialSort ? { key: initialSort.key, desc: initialSort.desc ?? false } : null,
     );
+    const [widths, setWidths] = useState<Record<string, number> | null>(null);
+    const tableRef = useRef<HTMLTableElement>(null);
+
+    // Genişlikleri tarayıcının otomatik yerleşiminden ölçüp sabitleriz. Aksi hâlde
+    // table-layout:fixed baştan devreye girip her kolona eşit genişlik verirdi.
+    useLayoutEffect(() => {
+        if (!resizable || widths || !tableRef.current) {
+            return;
+        }
+        const cells = tableRef.current.querySelectorAll("thead th");
+        const measured: Record<string, number> = {};
+        cells.forEach((cell, i) => {
+            const column = columns[i];
+            if (column) {
+                measured[column.key] = Math.max(MIN_WIDTH, Math.round(cell.getBoundingClientRect().width));
+            }
+        });
+        if (Object.keys(measured).length > 0) {
+            setWidths(measured);
+        }
+    }, [resizable, widths, columns]);
+
+    // Kolon değişince (başka tabloya geçince) ölçüm sıfırlanmalı.
+    const columnKeys = columns.map((c) => c.key).join("|");
+    const previousKeys = useRef(columnKeys);
+    if (previousKeys.current !== columnKeys) {
+        previousKeys.current = columnKeys;
+        if (widths) {
+            setWidths(null);
+        }
+    }
+
+    const startResize = useCallback((key: string, event: React.MouseEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const startX = event.clientX;
+        const th = (event.currentTarget as HTMLElement).closest("th");
+        const startWidth = th?.getBoundingClientRect().width ?? MIN_WIDTH;
+
+        const onMove = (e: MouseEvent) => {
+            const next = Math.max(MIN_WIDTH, Math.round(startWidth + e.clientX - startX));
+            setWidths((current) => ({ ...(current ?? {}), [key]: next }));
+        };
+        const onUp = () => {
+            window.removeEventListener("mousemove", onMove);
+            window.removeEventListener("mouseup", onUp);
+            document.body.classList.remove("resizing");
+        };
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+        document.body.classList.add("resizing");
+    }, []);
 
     const sorted = useMemo(() => {
         const column = sort && columns.find((c) => c.key === sort.key);
         if (!column?.sortValue) {
             return limit ? rows.slice(0, limit) : rows;
         }
-
         const direction = sort!.desc ? -1 : 1;
         const copy = [...rows].sort((a, b) => compare(column.sortValue!(a), column.sortValue!(b)) * direction);
         return limit ? copy.slice(0, limit) : copy;
@@ -52,13 +117,29 @@ export function DataTable<T>({ columns, rows, rowKey, initialSort, limit }: Data
         );
     }
 
+    const fixed = resizable && widths !== null;
+
     return (
-        <div className="table-wrap">
-            <table>
+        <div className={dense ? "table-wrap dense" : "table-wrap"}>
+            <table ref={tableRef} style={fixed ? { tableLayout: "fixed", width: "max-content" } : undefined}>
+                {fixed && (
+                    <colgroup>
+                        {columns.map((c) => (
+                            <col key={c.key} style={{ width: widths![c.key] }} />
+                        ))}
+                    </colgroup>
+                )}
                 <thead>
                     <tr>
                         {columns.map((column) => {
                             const active = sort?.key === column.key;
+                            const label = (
+                                <>
+                                    <span className="hname">{column.header}</span>
+                                    {column.subHeader && <span className="htype">{column.subHeader}</span>}
+                                    <span className="arrow">{active ? (sort!.desc ? "↓" : "↑") : ""}</span>
+                                </>
+                            );
                             return (
                                 <th
                                     key={column.key}
@@ -71,11 +152,19 @@ export function DataTable<T>({ columns, rows, rowKey, initialSort, limit }: Data
                                             className={active ? "sort active" : "sort"}
                                             onClick={() => toggle(column)}
                                         >
-                                            {column.header}
-                                            <span className="arrow">{active ? (sort!.desc ? "↓" : "↑") : ""}</span>
+                                            {label}
                                         </button>
                                     ) : (
-                                        column.header
+                                        <span className="sort">{label}</span>
+                                    )}
+                                    {resizable && (
+                                        <span
+                                            className="resizer"
+                                            onMouseDown={(e) => startResize(column.key, e)}
+                                            role="separator"
+                                            aria-orientation="vertical"
+                                            aria-label={`Resize column`}
+                                        />
                                     )}
                                 </th>
                             );
