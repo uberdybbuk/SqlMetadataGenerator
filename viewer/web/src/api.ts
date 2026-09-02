@@ -67,6 +67,9 @@ export interface TableDetail {
     schema: string;
     name: string;
     columns: ColumnSummary[];
+    // Önizleme sorgusunun metni. Sonuçla değil metadatayla geldiği için
+    // editör sorgunun dönmesini beklemez.
+    previewSql: string;
 }
 
 export interface PreviewColumn {

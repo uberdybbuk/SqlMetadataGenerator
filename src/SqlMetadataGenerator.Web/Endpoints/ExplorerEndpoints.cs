@@ -10,6 +10,9 @@ namespace SqlMetadataGenerator.Web.Endpoints;
 // Tek zihinsel model; adres çubuğundaki yolu API'de aramak zorunda kalmazsın.
 internal static class ExplorerEndpoints
 {
+    // Tablo detayında gösterilen örnek önizleme sorgusunun satır sınırı.
+    private const int DefaultPreviewTop = 20;
+
     public static void MapExplorerEndpoints(this WebApplication app)
     {
         var api = app.MapGroup("/api");
@@ -66,8 +69,20 @@ internal static class ExplorerEndpoints
                     return NotFound($"Table not found: {schema}.{name}");
                 }
 
-                var columns = await explorer.ReadTableColumnsAsync(resolved.Value.ObjectId, ct);
-                return Results.Ok(new { schema = resolved.Value.Schema, name = resolved.Value.Name, columns });
+                // Önizleme sorgusunun metni de burada döner: arayüz onu sonucu
+                // beklemeden gösterebilsin diye. Metin sonucun değil, kolonların türevi.
+                var columnsTask = explorer.ReadTableColumnsAsync(resolved.Value.ObjectId, ct);
+                var sqlTask = explorer.BuildPreviewSqlAsync(
+                    resolved.Value.ObjectId, resolved.Value.Schema, resolved.Value.Name, DefaultPreviewTop, null, ct);
+                await Task.WhenAll(columnsTask, sqlTask);
+
+                return Results.Ok(new
+                {
+                    schema = resolved.Value.Schema,
+                    name = resolved.Value.Name,
+                    columns = await columnsTask,
+                    previewSql = await sqlTask,
+                });
             }));
 
         // TOP N önizleme. Opsiyonel where ile filtrelenebilir; URL'de olduğu için

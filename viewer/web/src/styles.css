@@ -630,3 +630,8 @@ th .colinfo .warn-line {
 .status .grow {
     flex: 1;
 }
+
+/* Monaco modülü henüz inmemişse editörün yerini tutar; yerleşim zıplamasın. */
+.editor-placeholder {
+    height: 73px;
+}

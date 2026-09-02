@@ -157,18 +157,7 @@ public sealed class DataExplorer(string connectionString)
             return new PreviewResult { Columns = [], Rows = [], Sql = string.Empty, ElapsedMs = 0, Messages = [] };
         }
 
-        string projection = string.Join(",\n       ", columns.Select(c => c.Projection));
-        string qualified = $"{SqlIdentifier.Quote(schema)}.{SqlIdentifier.Quote(table)}";
-        string whereClause = string.IsNullOrWhiteSpace(where) ? string.Empty : $"\nWHERE ({where})";
-
-        // top çağıran tarafta sınırlanmış bir int; parametre yerine doğrudan yazılır.
-        // Böylece kullanıcıya gösterilen sorgu ile çalışan sorgu aynı metin olur —
-        // "TOP (@top)" gösterip "TOP 20" çalıştırmak gibi bir ayrım kalmaz.
-        string displaySql = $"""
-            SELECT TOP {top}
-                   {projection}
-            FROM {qualified}{whereClause};
-            """;
+        string displaySql = ComposeSql(columns, schema, table, top, where);
 
         // Yalıtım seviyesi ReadOnlyCommand tarafından eklenir; kullanıcıya gösterilen
         // metnin parçası değildir.
@@ -235,6 +224,32 @@ public sealed class DataExplorer(string connectionString)
             ElapsedMs = stopwatch.ElapsedMilliseconds,
             Messages = messages,
         };
+    }
+
+    // Önizleme sorgusunun metnini üretir. Metin yalnızca kolon metadatasına bağlıdır,
+    // sorgunun ÇALIŞMASINA değil — bu yüzden arayüz onu sonucu beklemeden gösterebilir.
+    public async Task<string> BuildPreviewSqlAsync(
+        int objectId, string schema, string table, int top, string? where, CancellationToken ct = default)
+    {
+        var columns = await ReadPreviewColumnsAsync(objectId, ct);
+        return columns.Count == 0 ? string.Empty : ComposeSql(columns, schema, table, top, where);
+    }
+
+    // top çağıran tarafta sınırlanmış bir int; parametre yerine doğrudan yazılır.
+    // Böylece kullanıcıya gösterilen sorgu ile çalışan sorgu aynı metin olur —
+    // "TOP (@top)" gösterip "TOP 20" çalıştırmak gibi bir ayrım kalmaz.
+    private static string ComposeSql(
+        List<PreviewColumnPlan> columns, string schema, string table, int top, string? where)
+    {
+        string projection = string.Join(",\n       ", columns.Select(c => c.Projection));
+        string qualified = $"{SqlIdentifier.Quote(schema)}.{SqlIdentifier.Quote(table)}";
+        string whereClause = string.IsNullOrWhiteSpace(where) ? string.Empty : $"\nWHERE ({where})";
+
+        return $"""
+            SELECT TOP {top}
+                   {projection}
+            FROM {qualified}{whereClause};
+            """;
     }
 
     // WHERE koşuluna uyan satır sayısı. Büyük tablolarda tarama yapabilir; çağıran
