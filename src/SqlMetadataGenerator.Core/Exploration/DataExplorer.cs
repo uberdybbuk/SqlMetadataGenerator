@@ -156,20 +156,22 @@ public sealed class DataExplorer(string connectionString)
         string qualified = $"{SqlIdentifier.Quote(schema)}.{SqlIdentifier.Quote(table)}";
         string whereClause = string.IsNullOrWhiteSpace(where) ? string.Empty : $"\nWHERE ({where})";
 
-        // @top parametre olarak gider; gösterilecek metinde okunabilirlik için
-        // sayının kendisi yazılır, yoksa kullanıcı "@top" görüp ne olduğunu bilemez.
-        string sql = $"""
-            SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-            SELECT TOP (@top)
+        // top çağıran tarafta sınırlanmış bir int; parametre yerine doğrudan yazılır.
+        // Böylece kullanıcıya gösterilen sorgu ile çalışan sorgu aynı metin olur —
+        // "TOP (@top)" gösterip "TOP 20" çalıştırmak gibi bir ayrım kalmaz.
+        string displaySql = $"""
+            SELECT TOP {top}
                    {projection}
             FROM {qualified}{whereClause};
             """;
-        string displaySql = sql.Replace("(@top)", $"({top})");
+
+        // Isolation level çalıştırma detayı: kilit tutmamak için gerekli ama
+        // kullanıcının okuduğu sorgunun parçası değil, o yüzden yalnızca çalıştırmaya eklenir.
+        string sql = "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;\n" + displaySql;
 
         var rows = new List<object?[]>();
         await using var conn = await OpenAsync(ct);
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = timeoutSeconds };
-        cmd.Parameters.AddWithValue("@top", top);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -295,8 +297,11 @@ public sealed class DataExplorer(string connectionString)
         const int TextChars = 256;
         const int BinaryBytes = 64;
 
+        // Tanımlayıcılar yalnızca gerektiğinde köşeli parantezlenir (SqlIdentifier.Quote).
+        // Takma ad da yalnızca ifade sarmalandığında yazılır: düz bir kolonda
+        // "Id AS Id" yazmanın hiçbir karşılığı yok.
         string quoted = SqlIdentifier.Quote(name);
-        string alias = $"[{name.Replace("]", "]]")}]";
+        string alias = $" AS {quoted}";
         string t = typeName.ToLowerInvariant();
 
         // max_length: metin tiplerinde bayt cinsinden (-1 = max), nvarchar'da karakterin iki katı.
@@ -307,23 +312,24 @@ public sealed class DataExplorer(string connectionString)
         {
             case "text" or "ntext" or "xml" or "sql_variant":
                 return new PreviewColumnPlan(name, typeName, true,
-                    $"LEFT(CONVERT(nvarchar(max), {quoted}), {TextChars}) AS {alias}");
+                    $"LEFT(CONVERT(nvarchar(max), {quoted}), {TextChars}){alias}");
 
             case "varchar" or "nvarchar" or "char" or "nchar" when longText:
                 return new PreviewColumnPlan(name, typeName, true,
-                    $"LEFT(CONVERT(nvarchar(max), {quoted}), {TextChars}) AS {alias}");
+                    $"LEFT(CONVERT(nvarchar(max), {quoted}), {TextChars}){alias}");
 
             case "binary" or "varbinary" or "image" when longBinary:
                 return new PreviewColumnPlan(name, typeName, true,
-                    $"CONVERT(varchar({BinaryBytes * 2 + 2}), CONVERT(varbinary({BinaryBytes}), {quoted}), 1) AS {alias}");
+                    $"CONVERT(varchar({BinaryBytes * 2 + 2}), CONVERT(varbinary({BinaryBytes}), {quoted}), 1){alias}");
 
             // CLR tipleri nvarchar'a cast edilemez; hex gösterime düşülür.
             case "geography" or "geometry" or "hierarchyid":
                 return new PreviewColumnPlan(name, typeName, true,
-                    $"CONVERT(varchar({BinaryBytes * 2 + 2}), CONVERT(varbinary({BinaryBytes}), CONVERT(varbinary(max), {quoted})), 1) AS {alias}");
+                    $"CONVERT(varchar({BinaryBytes * 2 + 2}), CONVERT(varbinary({BinaryBytes}), CONVERT(varbinary(max), {quoted})), 1){alias}");
 
             default:
-                return new PreviewColumnPlan(name, typeName, false, $"{quoted} AS {alias}");
+                // Sarmalama yok: kolonun kendisi zaten sonuç kolonunun adını taşır.
+                return new PreviewColumnPlan(name, typeName, false, quoted);
         }
     }
 
