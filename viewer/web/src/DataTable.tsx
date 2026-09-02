@@ -16,6 +16,10 @@ export interface Column<T> {
     className?: string;
     // Satıra göre değişen hücre sınıfı (ör. NULL hücresini boyamak için).
     cellClassName?: (row: T) => string | undefined;
+    // Başlık olduğu gibi çizilir: sıralama/seçim düğmesi sarmalanmaz ve
+    // genişliği ölçülmez. Satır numarası oluğu gibi kendi kontrolünü taşıyan
+    // kolonlar için — aksi hâlde düğme içine düğme yerleşiyor.
+    plain?: boolean;
 }
 
 interface DataTableProps<T> {
@@ -29,6 +33,16 @@ interface DataTableProps<T> {
     dense?: boolean;
     // Kolon kenarlarından sürükleyerek genişlik ayarlama.
     resizable?: boolean;
+    // Ölçülen genişliğin üst sınırı; tek bir uzun değer kolonu ekranı yutmasın.
+    maxWidth?: number;
+    // Seçim: başlığa tıklamak kolonu seçer, sıralama ayrı bir düğmeye taşınır.
+    // Verilmezse başlığın tamamı sıralama düğmesidir (liste sayfalarındaki davranış).
+    selection?: {
+        isRowSelected: (row: T) => boolean;
+        isColumnSelected: (key: string) => boolean;
+        onRow: (row: T, additive: boolean) => void;
+        onColumn: (key: string, additive: boolean) => void;
+    };
 }
 
 const MIN_WIDTH = 56;
@@ -41,6 +55,8 @@ export function DataTable<T>({
     limit,
     dense,
     resizable,
+    maxWidth = 320,
+    selection,
 }: DataTableProps<T>) {
     const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(
         initialSort ? { key: initialSort.key, desc: initialSort.desc ?? false } : null,
@@ -59,13 +75,18 @@ export function DataTable<T>({
         cells.forEach((cell, i) => {
             const column = columns[i];
             if (column) {
-                measured[column.key] = Math.max(MIN_WIDTH, Math.round(cell.getBoundingClientRect().width));
+                // plain kolonlar da ölçülür: genişlikleri CSS'ten gelse bile
+                // tablonun toplam genişliğine katkıları sayılmalı.
+                measured[column.key] = Math.min(
+                    maxWidth,
+                    Math.max(MIN_WIDTH, Math.round(cell.getBoundingClientRect().width)),
+                );
             }
         });
         if (Object.keys(measured).length > 0) {
             setWidths(measured);
         }
-    }, [resizable, widths, columns]);
+    }, [resizable, widths, columns, maxWidth]);
 
     // Kolon değişince (başka tabloya geçince) ölçüm sıfırlanmalı.
     const columnKeys = columns.map((c) => c.key).join("|");
@@ -121,14 +142,21 @@ export function DataTable<T>({
     }
 
     const fixed = resizable && widths !== null;
+    // Sabit yerleşimde tablo genişliği AÇIKÇA verilir. "max-content" bırakılırsa
+    // tarayıcı hücre içeriğine göre büyüyüp colgroup'taki genişlikleri eziyor;
+    // "auto" bırakılırsa kapsayıcıya yayılıyor. İkisi de kolonları şişiriyordu.
+    const totalWidth = fixed ? Object.values(widths!).reduce((sum, w) => sum + w, 0) : undefined;
 
     return (
         <div className={dense ? "table-wrap dense" : "table-wrap"}>
-            <table ref={tableRef} style={fixed ? { tableLayout: "fixed", width: "max-content" } : undefined}>
+            <table
+                ref={tableRef}
+                style={fixed ? { tableLayout: "fixed", width: totalWidth } : undefined}
+            >
                 {fixed && (
                     <colgroup>
                         {columns.map((c) => (
-                            <col key={c.key} style={{ width: widths![c.key] }} />
+                            <col key={c.key} style={c.plain ? undefined : { width: widths![c.key] }} />
                         ))}
                     </colgroup>
                 )}
@@ -136,31 +164,55 @@ export function DataTable<T>({
                     <tr>
                         {columns.map((column) => {
                             const active = sort?.key === column.key;
-                            const label = (
-                                <>
-                                    <span className="hname">{column.header}</span>
-                                    <span className="arrow">{active ? (sort!.desc ? "↓" : "↑") : ""}</span>
-                                </>
-                            );
+                            const arrow = active ? (sort!.desc ? "↓" : "↑") : "⇅";
+                            const selected = selection?.isColumnSelected(column.key) ?? false;
                             return (
                                 <th
                                     key={column.key}
-                                    className={column.numeric ? "num" : undefined}
+                                    className={[column.numeric ? "num" : "", selected ? "selected" : ""]
+                                        .filter(Boolean)
+                                        .join(" ")}
                                     aria-sort={active ? (sort!.desc ? "descending" : "ascending") : undefined}
                                 >
-                                    {column.sortValue ? (
+                                    {column.plain ? (
+                                        column.header
+                                    ) : selection ? (
+                                        // Ad kolonu seçer, ok sıralar: ikisi ayrı düğme.
+                                        <span className="sort">
+                                            <button
+                                                type="button"
+                                                className="hname pick"
+                                                onClick={(e) => selection.onColumn(column.key, e.metaKey || e.ctrlKey)}
+                                            >
+                                                {column.header}
+                                            </button>
+                                            {column.sortValue && (
+                                                <button
+                                                    type="button"
+                                                    className={active ? "arrow sortbtn active" : "arrow sortbtn"}
+                                                    onClick={() => toggle(column)}
+                                                    aria-label="Sort"
+                                                >
+                                                    {arrow}
+                                                </button>
+                                            )}
+                                        </span>
+                                    ) : column.sortValue ? (
                                         <button
                                             type="button"
                                             className={active ? "sort active" : "sort"}
                                             onClick={() => toggle(column)}
                                         >
-                                            {label}
+                                            <span className="hname">{column.header}</span>
+                                            <span className="arrow">{active ? (sort!.desc ? "↓" : "↑") : ""}</span>
                                         </button>
                                     ) : (
-                                        <span className="sort">{label}</span>
+                                        <span className="sort">
+                                            <span className="hname">{column.header}</span>
+                                        </span>
                                     )}
                                     {column.info && <span className="colinfo">{column.info}</span>}
-                                    {resizable && (
+                                    {resizable && !column.plain && (
                                         <span
                                             className="resizer"
                                             onMouseDown={(e) => startResize(column.key, e)}
@@ -175,24 +227,38 @@ export function DataTable<T>({
                     </tr>
                 </thead>
                 <tbody>
-                    {sorted.map((row) => (
-                        <tr key={rowKey(row)}>
-                            {columns.map((column) => (
-                                <td
-                                    key={column.key}
-                                    className={[
-                                        column.numeric ? "num" : "",
-                                        column.className ?? "",
-                                        column.cellClassName?.(row) ?? "",
-                                    ]
-                                        .filter(Boolean)
-                                        .join(" ")}
-                                >
-                                    {column.render(row)}
-                                </td>
-                            ))}
+                    {sorted.map((row) => {
+                        const rowSelected = selection?.isRowSelected(row) ?? false;
+                        return (
+                            <tr key={rowKey(row)} className={rowSelected ? "selected" : undefined}>
+                                {columns.map((column) => (
+                                    <td
+                                        key={column.key}
+                                        onClick={
+                                            column.className === "rownum" && selection
+                                                ? (e) => selection.onRow(row, e.metaKey || e.ctrlKey)
+                                                : undefined
+                                        }
+                                        className={[
+                                            column.numeric ? "num" : "",
+                                            column.className ?? "",
+                                            column.cellClassName?.(row) ?? "",
+                                            rowSelected || selection?.isColumnSelected(column.key) ? "selected" : "",
+                                        ]
+                                            .filter(Boolean)
+                                            .join(" ")}
+                                    >
+                                        {column.render(row)}
+                                    </td>
+                                ))}
+                            </tr>
+                        );
+                    })}
+                    {sorted.length === 0 && (
+                        <tr className="norows">
+                            <td colSpan={columns.length}>No rows.</td>
                         </tr>
-                    ))}
+                    )}
                 </tbody>
             </table>
         </div>

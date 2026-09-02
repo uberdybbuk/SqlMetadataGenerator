@@ -9,10 +9,19 @@ export interface AsyncState<T> {
 // Basit veri çekme kancası. İstek sonucu, bileşen sökülmüşse veya bağımlılıklar
 // değişip yeni bir istek başlamışsa yok sayılır — böylece geç gelen eski cevap
 // yeni veriyi ezmez.
-export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[]): AsyncState<T> {
-    const [state, setState] = useState<AsyncState<T>>({ data: null, error: null, loading: true });
+// enabled false iken istek HİÇ gönderilmez. Sekmesine basılmadan çalışmaması
+// gereken sorgular (ör. kolon listesi) ana sorgunun hızını etkilemesin diye.
+export function useApi<T>(
+    fetcher: () => Promise<T>,
+    deps: unknown[],
+    enabled = true,
+): AsyncState<T> {
+    const [state, setState] = useState<AsyncState<T>>({ data: null, error: null, loading: enabled });
 
     useEffect(() => {
+        if (!enabled) {
+            return;
+        }
         let cancelled = false;
         setState({ data: null, error: null, loading: true });
         fetcher()
@@ -31,7 +40,7 @@ export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[]): AsyncStat
             cancelled = true;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, deps);
+    }, [...deps, enabled]);
 
     return state;
 }

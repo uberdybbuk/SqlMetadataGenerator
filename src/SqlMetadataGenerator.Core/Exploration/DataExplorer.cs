@@ -120,44 +120,100 @@ public sealed class DataExplorer(string connectionString)
         return counts;
     }
 
-    // Tabloyu katalogdan doğrular ve KANONİK adları döner. Sonraki SQL'ler bu adlardan
-    // kurulur, kullanıcının yazdığı metinden değil — enjeksiyon yüzeyi böylece kapanır.
-    public async Task<(int ObjectId, string Schema, string Name)?> ResolveTableAsync(
+    // Tabloyu doğrular ve TÜM kolon metadatasını TEK gidiş-dönüşte okur.
+    // Daha önce üç ayrı sorgu vardı (varlık kontrolü, önizleme kolonları, detay
+    // kolonları) ve iki uç bunları ayrı ayrı çalıştırıyordu; Almanya'daki bir
+    // sunucuda her tur ~60 ms saf gecikme demekti.
+    //
+    // Kanonik adlar katalogdan döner ve sonraki SQL'ler onlardan kurulur,
+    // kullanıcının yazdığı metinden değil — enjeksiyon yüzeyi böylece kapanır.
+    public async Task<TableShape?> ReadTableShapeAsync(
         string schema, string name, CancellationToken ct = default)
     {
         const string sql = """
-            SELECT t.object_id, s.name, t.name
+            SELECT
+                s.name, t.name, t.object_id,
+                c.name, c.column_id, ty.name, c.max_length, c.precision, c.scale,
+                c.is_nullable, c.is_identity,
+                CASE WHEN cc.object_id IS NULL THEN 0 ELSE 1 END AS is_computed,
+                dc.definition,
+                pk.key_ordinal
             FROM sys.tables t
             JOIN sys.schemas s ON t.schema_id = s.schema_id
-            WHERE s.name = @schema AND t.name = @name AND t.is_ms_shipped = 0 AND t.type = 'U';
+            JOIN sys.columns c ON c.object_id = t.object_id
+            JOIN sys.types ty ON c.user_type_id = ty.user_type_id
+            LEFT JOIN sys.computed_columns cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
+            LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
+            LEFT JOIN (
+                SELECT ic.object_id, ic.column_id, ic.key_ordinal
+                FROM sys.indexes i
+                JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+                WHERE i.is_primary_key = 1
+            ) pk ON pk.object_id = c.object_id AND pk.column_id = c.column_id
+            WHERE s.name = @schema AND t.name = @name AND t.is_ms_shipped = 0 AND t.type = 'U'
+            ORDER BY c.column_id;
             """;
+
+        string? canonicalSchema = null;
+        string? canonicalName = null;
+        int objectId = 0;
+        var columns = new List<ColumnSummary>();
 
         await using var conn = await OpenAsync(ct);
         await using var cmd = ReadOnlyCommand.Create(conn, sql);
         cmd.Parameters.AddWithValue("@schema", schema);
         cmd.Parameters.AddWithValue("@name", name);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct))
+        while (await reader.ReadAsync(ct))
+        {
+            canonicalSchema ??= reader.GetString(0);
+            canonicalName ??= reader.GetString(1);
+            objectId = reader.GetInt32(2);
+            columns.Add(new ColumnSummary
+            {
+                Name = reader.GetString(3),
+                ColumnId = reader.GetInt32(4),
+                TypeName = reader.GetString(5),
+                MaxLength = reader.GetInt16(6),
+                Precision = reader.GetByte(7),
+                Scale = reader.GetByte(8),
+                IsNullable = reader.GetBoolean(9),
+                IsIdentity = reader.GetBoolean(10),
+                IsComputed = reader.GetInt32(11) == 1,
+                DefaultDefinition = reader.IsDBNull(12) ? null : reader.GetString(12),
+                PrimaryKeyOrdinal = reader.IsDBNull(13) ? null : reader.GetByte(13),
+            });
+        }
+
+        if (canonicalSchema is null || canonicalName is null)
         {
             return null;
         }
 
-        return (reader.GetInt32(0), reader.GetString(1), reader.GetString(2));
+        return new TableShape
+        {
+            ObjectId = objectId,
+            Schema = canonicalSchema,
+            Name = canonicalName,
+            Columns = columns,
+        };
     }
 
     // TOP N satır önizlemesi. Büyük metin/binary kolonlar SUNUCU TARAFINDA kısaltılır;
     // aksi hâlde tek satır megabaytlarca veri taşıyabilir (ör. nvarchar(max) JSON payload).
+    // Kolon metadatası çağıran tarafından verilir: aynı bilgiyi ikinci kez okumak
+    // fazladan bir gidiş-dönüş demekti.
     public async Task<PreviewResult> PreviewAsync(
-        int objectId, string schema, string table, int top, string? where,
+        TableShape shape, int top, string? where,
         int timeoutSeconds = 30, CancellationToken ct = default)
     {
-        var columns = await ReadPreviewColumnsAsync(objectId, ct);
+        var columns = shape.Columns.Select(c => BuildPlan(c.Name, c.TypeName, c.MaxLength)).ToList();
         if (columns.Count == 0)
         {
             return new PreviewResult { Columns = [], Rows = [], Sql = string.Empty, ElapsedMs = 0, Messages = [] };
         }
 
-        string displaySql = ComposeSql(columns, schema, table, top, where);
+        string displaySql = ComposeSql(columns, shape.Schema, shape.Name, top, where);
 
         // Yalıtım seviyesi ReadOnlyCommand tarafından eklenir; kullanıcıya gösterilen
         // metnin parçası değildir.
@@ -213,10 +269,9 @@ public sealed class DataExplorer(string connectionString)
 
         return new PreviewResult
         {
-            Columns = columns.Select((c, i) => new PreviewColumn
+            Columns = shape.Columns.Select((c, i) => new PreviewColumn
             {
-                Name = c.Name,
-                TypeName = c.TypeName,
+                Column = c,
                 Truncated = actuallyTruncated[i],
             }).ToList(),
             Rows = rows,
@@ -228,11 +283,10 @@ public sealed class DataExplorer(string connectionString)
 
     // Önizleme sorgusunun metnini üretir. Metin yalnızca kolon metadatasına bağlıdır,
     // sorgunun ÇALIŞMASINA değil — bu yüzden arayüz onu sonucu beklemeden gösterebilir.
-    public async Task<string> BuildPreviewSqlAsync(
-        int objectId, string schema, string table, int top, string? where, CancellationToken ct = default)
+    public static string BuildPreviewSql(TableShape shape, int top, string? where)
     {
-        var columns = await ReadPreviewColumnsAsync(objectId, ct);
-        return columns.Count == 0 ? string.Empty : ComposeSql(columns, schema, table, top, where);
+        var columns = shape.Columns.Select(c => BuildPlan(c.Name, c.TypeName, c.MaxLength)).ToList();
+        return columns.Count == 0 ? string.Empty : ComposeSql(columns, shape.Schema, shape.Name, top, where);
     }
 
     // top çağıran tarafta sınırlanmış bir int; parametre yerine doğrudan yazılır.
@@ -270,80 +324,9 @@ public sealed class DataExplorer(string connectionString)
         return result is null or DBNull ? 0 : Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
-    // Tablo detay sayfası için kolon listesi (PK üyeliği dahil).
-    public async Task<List<ColumnSummary>> ReadTableColumnsAsync(int objectId, CancellationToken ct = default)
-    {
-        const string sql = """
-            SELECT
-                c.name, c.column_id, ty.name, c.max_length, c.precision, c.scale,
-                c.is_nullable, c.is_identity,
-                CASE WHEN cc.object_id IS NULL THEN 0 ELSE 1 END AS is_computed,
-                dc.definition,
-                pk.key_ordinal
-            FROM sys.columns c
-            JOIN sys.types ty ON c.user_type_id = ty.user_type_id
-            LEFT JOIN sys.computed_columns cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
-            LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
-            LEFT JOIN (
-                SELECT ic.object_id, ic.column_id, ic.key_ordinal
-                FROM sys.indexes i
-                JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
-                WHERE i.is_primary_key = 1
-            ) pk ON pk.object_id = c.object_id AND pk.column_id = c.column_id
-            WHERE c.object_id = @objectId
-            ORDER BY c.column_id;
-            """;
-
-        var list = new List<ColumnSummary>();
-        await using var conn = await OpenAsync(ct);
-        await using var cmd = ReadOnlyCommand.Create(conn, sql);
-        cmd.Parameters.AddWithValue("@objectId", objectId);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            list.Add(new ColumnSummary
-            {
-                Name = reader.GetString(0),
-                ColumnId = reader.GetInt32(1),
-                TypeName = reader.GetString(2),
-                MaxLength = reader.GetInt16(3),
-                Precision = reader.GetByte(4),
-                Scale = reader.GetByte(5),
-                IsNullable = reader.GetBoolean(6),
-                IsIdentity = reader.GetBoolean(7),
-                IsComputed = reader.GetInt32(8) == 1,
-                DefaultDefinition = reader.IsDBNull(9) ? null : reader.GetString(9),
-                PrimaryKeyOrdinal = reader.IsDBNull(10) ? null : reader.GetByte(10),
-            });
-        }
-
-        return list;
-    }
 
     internal sealed record PreviewColumnPlan(string Name, string TypeName, bool Truncated, string Projection);
 
-    private async Task<List<PreviewColumnPlan>> ReadPreviewColumnsAsync(int objectId, CancellationToken ct)
-    {
-        const string sql = """
-            SELECT c.name, ty.name, c.max_length
-            FROM sys.columns c
-            JOIN sys.types ty ON c.user_type_id = ty.user_type_id
-            WHERE c.object_id = @objectId
-            ORDER BY c.column_id;
-            """;
-
-        var plans = new List<PreviewColumnPlan>();
-        await using var conn = await OpenAsync(ct);
-        await using var cmd = ReadOnlyCommand.Create(conn, sql);
-        cmd.Parameters.AddWithValue("@objectId", objectId);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            plans.Add(BuildPlan(reader.GetString(0), reader.GetString(1), reader.GetInt16(2)));
-        }
-
-        return plans;
-    }
 
     // Önizlemede kolon başına kısaltma stratejisi.
     internal static PreviewColumnPlan BuildPlan(string name, string typeName, short maxLength)

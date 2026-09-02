@@ -37,12 +37,25 @@ public sealed class TableStats
     public required long UsedKb { get; init; }
 }
 
+// Bir tablonun kimliği ve tüm kolon metadatası — tek sorguda okunur.
+public sealed class TableShape
+{
+    public required int ObjectId { get; init; }
+    public required string Schema { get; init; }
+    public required string Name { get; init; }
+    public required List<ColumnSummary> Columns { get; init; }
+}
+
 public sealed class PreviewColumn
 {
-    public required string Name { get; init; }
-    public required string TypeName { get; init; }
-    // Sunucu tarafında kısaltıldıysa true (büyük metin/binary kolonlar).
+    // Kolon metadatasının tamamı sonuçla birlikte döner; başlık bilgi kartı
+    // ayrı bir istek beklemez.
+    public required ColumnSummary Column { get; init; }
+    // Bu önizlemede değeri gerçekten kesildiyse true.
     public required bool Truncated { get; init; }
+
+    public string Name => Column.Name;
+    public string TypeName => Column.TypeName;
 }
 
 public sealed class PreviewResult

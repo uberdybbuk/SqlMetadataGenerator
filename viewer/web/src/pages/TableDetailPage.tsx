@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { api, type ColumnSummary, type PreviewResult } from "../api";
@@ -18,13 +18,16 @@ export function TableDetailPage() {
     // İki istek PARALEL başlar. Önizleme, tablo metadatasına bağlı değil — yalnızca
     // URL'deki adlara. Daha önce önizleme bileşeni metadata geldikten sonra mount
     // olduğu için iki gidiş-dönüş arka arkaya diziliyordu.
-    const detail = useApi(() => api.table(alias, db, schema, name), [alias, db, schema, name]);
-    const preview = useApi(() => api.preview(alias, db, schema, name, 20), [alias, db, schema, name]);
-
-    const columnInfo = useMemo(
-        () => new Map((detail.data?.columns ?? []).map((c) => [c.name, c])),
-        [detail.data],
+    // Kolon listesi YALNIZCA sekmesine basılınca istenir. Veri sekmesi onu
+    // beklemiyor — önizleme kendi kolon metadatasını taşıyor — ve eşzamanlı
+    // ikinci bir sorgu ana sorgunun hızını düşürüyordu.
+    const [columnsWanted, setColumnsWanted] = useState(false);
+    const detail = useApi(
+        () => api.table(alias, db, schema, name),
+        [alias, db, schema, name],
+        columnsWanted,
     );
+    const preview = useApi(() => api.preview(alias, db, schema, name, 20), [alias, db, schema, name]);
 
     return (
         <>
@@ -41,17 +44,20 @@ export function TableDetailPage() {
                 <button className="chip" aria-pressed={tab === "data"} onClick={() => setTab("data")}>
                     data (first 20)
                 </button>
-                <button className="chip" aria-pressed={tab === "columns"} onClick={() => setTab("columns")}>
-                    columns{detail.data && ` (${detail.data.columns.length})`}
+                <button
+                    className="chip"
+                    aria-pressed={tab === "columns"}
+                    onClick={() => {
+                        setColumnsWanted(true);
+                        setTab("columns");
+                    }}
+                >
+                    columns{preview.data && ` (${preview.data.columns.length})`}
                 </button>
             </div>
 
             {tab === "data" ? (
-                <DataTab
-                    preview={preview}
-                    columnInfo={columnInfo}
-                    metadataSql={detail.data?.previewSql}
-                />
+                <DataTab preview={preview} />
             ) : (
                 <ColumnsTab detail={detail} />
             )}
@@ -59,24 +65,15 @@ export function TableDetailPage() {
     );
 }
 
-function DataTab({
-    preview,
-    columnInfo,
-    metadataSql,
-}: {
-    preview: AsyncState<PreviewResult>;
-    columnInfo: Map<string, ColumnSummary>;
-    metadataSql?: string;
-}) {
-    // Başlık kartındaki ek bilgiler tablo metadatasından gelir; geç gelirse kart
-    // o zaman zenginleşir, ızgara onu beklemez.
+function DataTab({ preview }: { preview: AsyncState<PreviewResult> }) {
+    // Başlık kartındaki bilgiler önizlemenin kendisiyle gelir; ayrı istek yok.
     const columns: ResultColumn[] = (preview.data?.columns ?? []).map((column) => {
-        const meta = columnInfo.get(column.name);
+        const meta = column.column;
         return {
             name: column.name,
             typeName: column.typeName,
             truncated: column.truncated,
-            details: meta && (
+            details: (
                 <>
                     <span className="muted">
                         {formatType(meta.typeName, meta.maxLength, meta.precision, meta.scale)} ·{" "}
@@ -97,12 +94,11 @@ function DataTab({
 
     return (
         <>
-            {/* Editör sorgu sonucunu BEKLEMEZ ve metnini de sonuçtan almaz: sorgu
-                metni kolon metadatasının türevi, hangisi önce gelirse o gösterilir.
-                Sonuç geldiğinde onun metni geçerlidir (ileride WHERE'i o taşıyacak). */}
+            {/* Editör iskeleti hemen görünür; metni önizlemeyle gelir. Önizleme
+                artık iki gidiş-dönüş (metadata + veri), üç değil. */}
             <div className="editor-wrap">
                 <Suspense fallback={<div className="editor-placeholder" />}>
-                    <SqlEditor value={preview.data?.sql ?? metadataSql ?? ""} />
+                    <SqlEditor value={preview.data?.sql ?? ""} />
                 </Suspense>
             </div>
 

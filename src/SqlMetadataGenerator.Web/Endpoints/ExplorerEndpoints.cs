@@ -59,30 +59,19 @@ internal static class ExplorerEndpoints
         api.MapGet("/servers/{alias}/databases/{db}/tables", (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
             WithDatabase(alias, db, registry, async (explorer, _) => Results.Ok(await explorer.ReadTableStatsAsync(ct))));
 
+        // Kolon listesi. Veri sekmesi bunu BEKLEMEZ — önizleme kendi metadatasını
+        // taşır; bu uç yalnızca "columns" sekmesine geçilince çağrılır.
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}",
             (string alias, string db, string schema, string name, ConnectionRegistry registry, CancellationToken ct) =>
             WithDatabase(alias, db, registry, async (explorer, _) =>
             {
-                var resolved = await explorer.ResolveTableAsync(schema, name, ct);
-                if (resolved is null)
+                var shape = await explorer.ReadTableShapeAsync(schema, name, ct);
+                if (shape is null)
                 {
                     return NotFound($"Table not found: {schema}.{name}");
                 }
 
-                // Önizleme sorgusunun metni de burada döner: arayüz onu sonucu
-                // beklemeden gösterebilsin diye. Metin sonucun değil, kolonların türevi.
-                var columnsTask = explorer.ReadTableColumnsAsync(resolved.Value.ObjectId, ct);
-                var sqlTask = explorer.BuildPreviewSqlAsync(
-                    resolved.Value.ObjectId, resolved.Value.Schema, resolved.Value.Name, DefaultPreviewTop, null, ct);
-                await Task.WhenAll(columnsTask, sqlTask);
-
-                return Results.Ok(new
-                {
-                    schema = resolved.Value.Schema,
-                    name = resolved.Value.Name,
-                    columns = await columnsTask,
-                    previewSql = await sqlTask,
-                });
+                return Results.Ok(new { shape.Schema, shape.Name, shape.Columns });
             }));
 
         // TOP N önizleme. Opsiyonel where ile filtrelenebilir; URL'de olduğu için
@@ -97,16 +86,14 @@ internal static class ExplorerEndpoints
                     return BadRequest(guardError!);
                 }
 
-                var resolved = await explorer.ResolveTableAsync(schema, name, ct);
-                if (resolved is null)
+                var shape = await explorer.ReadTableShapeAsync(schema, name, ct);
+                if (shape is null)
                 {
                     return NotFound($"Table not found: {schema}.{name}");
                 }
 
                 int capped = Math.Clamp(top, 1, 500);
-                var preview = await explorer.PreviewAsync(
-                    resolved.Value.ObjectId, resolved.Value.Schema, resolved.Value.Name, capped, where, ct: ct);
-                return Results.Ok(preview);
+                return Results.Ok(await explorer.PreviewAsync(shape, capped, where, ct: ct));
             }));
 
         // "Doğrula & Say": WHERE'i hem sözdizimsel olarak sınar hem eşleşen satır sayısını verir.
@@ -120,13 +107,13 @@ internal static class ExplorerEndpoints
                     return BadRequest(guardError!);
                 }
 
-                var resolved = await explorer.ResolveTableAsync(schema, name, ct);
-                if (resolved is null)
+                var shape = await explorer.ReadTableShapeAsync(schema, name, ct);
+                if (shape is null)
                 {
                     return NotFound($"Table not found: {schema}.{name}");
                 }
 
-                long count = await explorer.CountAsync(resolved.Value.Schema, resolved.Value.Name, where, ct: ct);
+                long count = await explorer.CountAsync(shape.Schema, shape.Name, where, ct: ct);
                 return Results.Ok(new { rows = count, where });
             }));
     }

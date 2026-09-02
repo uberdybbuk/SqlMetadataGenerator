@@ -14,6 +14,8 @@
     --null: #7a6420;
     --null-bg: #fbf3ce;
     --null-bg-hover: #f5ebc0;
+    --sel: #dbe8fb;
+    --sel-head: #c7dbf7;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -34,6 +36,8 @@
         --null: #cbb583;
         --null-bg: #33301f;
         --null-bg-hover: #3d3926;
+        --sel: #24354d;
+        --sel-head: #2e455f;
     }
 }
 
@@ -430,8 +434,10 @@ h1.with-icon {
     line-height: 1.45;
 }
 
+/* Ölçüm turunda (henüz sabit yerleşim yokken) tek bir uzun değer kolonu
+   şişirmesin; sonrasında genişliği colgroup belirler. */
 .table-wrap.dense td {
-    max-width: 520px;
+    max-width: 320px;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -634,4 +640,89 @@ th .colinfo .warn-line {
 /* Monaco modülü henüz inmemişse editörün yerini tutar; yerleşim zıplamasın. */
 .editor-placeholder {
     height: 73px;
+}
+
+/* ---- Sonuç ızgarası: sabit genişlikler ---- */
+/* Kolonlar tüm genişliğe yayılmasın; içeriğe göre boyutlanıp sağda boşluk bıraksın.
+   min-width:100% VERİLMEZ — verilince az kolonlu bir sonuçta artan alan son
+   kolona dağılıyor ve iki kolon ekranı boydan boya kaplıyordu. */
+.result table {
+    width: max-content;
+}
+
+.result td.rownum,
+.result th:first-child {
+    width: 46px;
+    min-width: 46px;
+    max-width: 46px;
+    text-align: right;
+    padding-right: 8px;
+}
+
+/* Köşe hücresi: tüm ızgarayı seçer. */
+th .corner {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+}
+
+th .corner:hover {
+    color: var(--accent);
+}
+
+/* Başlıkta ad kolonu seçer, ok sıralar. */
+th .hname.pick {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-weight: 600;
+    color: inherit;
+    cursor: pointer;
+    text-align: inherit;
+}
+
+th .hname.pick:hover {
+    color: var(--accent);
+}
+
+th .sortbtn {
+    background: none;
+    border: none;
+    padding: 0 2px;
+    font: inherit;
+    font-size: 11px;
+    color: var(--border);
+    cursor: pointer;
+}
+
+th:hover .sortbtn {
+    color: var(--muted);
+}
+
+th .sortbtn.active {
+    color: var(--accent);
+}
+
+/* ---- Seçim ---- */
+th.selected {
+    background: var(--sel-head);
+}
+
+td.selected {
+    background: var(--sel);
+}
+
+tbody tr:hover td.selected {
+    background: var(--sel);
+}
+
+tr.norows td {
+    color: var(--muted);
+    padding: 14px 10px;
+    text-align: left;
 }

@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { DataTable, type Column } from "./DataTable";
 import { formatCell, isNumericType } from "./cell";
@@ -16,6 +16,16 @@ export interface ResultColumn {
     details?: ReactNode;
 }
 
+// Seçim SSMS'teki gibi: satır numarasına tıklamak satırı, başlığa tıklamak
+// kolonu, sol üst köşeye tıklamak tümünü seçer. Ctrl/Cmd ile eklenir.
+interface Selection {
+    rows: Set<number>;
+    cols: Set<string>;
+    all: boolean;
+}
+
+const EMPTY: Selection = { rows: new Set(), cols: new Set(), all: false };
+
 export interface ResultGridProps {
     columns: ResultColumn[];
     rows: (string | number | boolean | null)[][];
@@ -32,19 +42,90 @@ interface GridRow {
 
 export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: ResultGridProps) {
     const [tab, setTab] = useState<"results" | "messages">("results");
+    const [selection, setSelection] = useState<Selection>(EMPTY);
 
-    const gridRows: GridRow[] = rows.map((values, index) => ({ index, values }));
+    // Yeni bir sonuç geldiğinde eski seçim anlamını yitirir.
+    useEffect(() => setSelection(EMPTY), [rows, columns]);
 
-    // Sol kenarda satır numarası: SSMS'teki gibi, kaydırırken sabit kalır.
+    const gridRows: GridRow[] = useMemo(
+        () => rows.map((values, index) => ({ index, values })),
+        [rows],
+    );
+
+    const columnKeys = useMemo(() => columns.map((c, i) => `${i}-${c.name}`), [columns]);
+
+    const selectRow = useCallback((row: GridRow, additive: boolean) => {
+        setSelection((current) => {
+            const next = additive && !current.all ? new Set(current.rows) : new Set<number>();
+            if (next.has(row.index)) {
+                next.delete(row.index);
+            } else {
+                next.add(row.index);
+            }
+            return { rows: next, cols: new Set(), all: false };
+        });
+    }, []);
+
+    const selectColumn = useCallback((key: string, additive: boolean) => {
+        setSelection((current) => {
+            const next = additive && !current.all ? new Set(current.cols) : new Set<string>();
+            if (next.has(key)) {
+                next.delete(key);
+            } else {
+                next.add(key);
+            }
+            return { rows: new Set(), cols: next, all: false };
+        });
+    }, []);
+
+    const selectAll = useCallback(() => {
+        setSelection((current) => (current.all ? EMPTY : { rows: new Set(), cols: new Set(), all: true }));
+    }, []);
+
+    // Seçim ancak kopyalanabiliyorsa işe yarar: TSV olarak panoya yazılır,
+    // yani doğrudan bir tabloya yapıştırılabilir.
+    useEffect(() => {
+        function onCopy(event: ClipboardEvent) {
+            const hasSelection = selection.all || selection.rows.size > 0 || selection.cols.size > 0;
+            if (!hasSelection || window.getSelection()?.toString()) {
+                return;
+            }
+
+            const cols = columns
+                .map((c, i) => ({ c, i }))
+                .filter(({ i }) => selection.all || selection.cols.size === 0 || selection.cols.has(columnKeys[i]));
+            const picked = gridRows.filter(
+                (r) => selection.all || selection.rows.size === 0 || selection.rows.has(r.index),
+            );
+
+            const text = [
+                cols.map(({ c }) => c.name).join("\t"),
+                ...picked.map((r) => cols.map(({ i }) => r.values[i] ?? "NULL").join("\t")),
+            ].join("\n");
+
+            event.clipboardData?.setData("text/plain", text);
+            event.preventDefault();
+        }
+
+        document.addEventListener("copy", onCopy);
+        return () => document.removeEventListener("copy", onCopy);
+    }, [selection, columns, columnKeys, gridRows]);
+
+    // Sol kenarda satır numarası; başlığındaki köşe hücresi tümünü seçer.
     const numberColumn: Column<GridRow> = {
         key: "__rownum",
-        header: "",
+        header: (
+            <button type="button" className="corner" onClick={selectAll} aria-label="Select all">
+                ◧
+            </button>
+        ),
         render: (row) => row.index + 1,
         className: "rownum",
+        plain: true,
     };
 
     const dataColumns: Column<GridRow>[] = columns.map((column, i) => ({
-        key: `${i}-${column.name}`,
+        key: columnKeys[i],
         numeric: isNumericType(column.typeName),
         header: column.name,
         info: (
@@ -79,17 +160,21 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
             </div>
 
             {tab === "results" ? (
-                rows.length === 0 ? (
-                    <div className="state">No rows.</div>
-                ) : (
-                    <DataTable
-                        columns={[numberColumn, ...dataColumns]}
-                        rows={gridRows}
-                        rowKey={(row) => String(row.index)}
-                        dense
-                        resizable
-                    />
-                )
+                // Satır gelmese bile başlıklar gösterilir: hangi kolonların
+                // sorgulandığı sonucun boş olmasından bağımsız bir bilgi.
+                <DataTable
+                    columns={[numberColumn, ...dataColumns]}
+                    rows={gridRows}
+                    rowKey={(row) => String(row.index)}
+                    dense
+                    resizable
+                    selection={{
+                        isRowSelected: (row) => selection.all || selection.rows.has(row.index),
+                        isColumnSelected: (key) => selection.all || selection.cols.has(key),
+                        onRow: selectRow,
+                        onColumn: selectColumn,
+                    }}
+                />
             ) : (
                 <div className="messages">
                     {messages.length === 0 ? (

@@ -67,15 +67,16 @@ export interface TableDetail {
     schema: string;
     name: string;
     columns: ColumnSummary[];
-    // Önizleme sorgusunun metni. Sonuçla değil metadatayla geldiği için
-    // editör sorgunun dönmesini beklemez.
-    previewSql: string;
 }
 
 export interface PreviewColumn {
     name: string;
     typeName: string;
+    // Bu önizlemede değeri gerçekten kesildiyse true.
     truncated: boolean;
+    // Kolon metadatasının tamamı sonuçla birlikte gelir; başlık kartı ayrı
+    // bir istek beklemez.
+    column: ColumnSummary;
 }
 
 export interface PreviewResult {
