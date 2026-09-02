@@ -9,6 +9,10 @@
     --danger: #b42318;
     --danger-soft: #fdeceb;
     --warn: #b25000;
+    --head: #f2f1ee;
+    --head-line: #cfcdc8;
+    --null: #8a6100;
+    --null-bg: #fdf3d7;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -24,6 +28,10 @@
         --danger: #f4776a;
         --danger-soft: #2e1c1a;
         --warn: #e8963c;
+        --head: #24262b;
+        --head-line: #3d4149;
+        --null: #e3c07b;
+        --null-bg: #33291a;
     }
 }
 
@@ -191,19 +199,34 @@ td {
     text-align: left;
     padding: 7px 12px;
     border-bottom: 1px solid var(--border);
+    /* Dikey ayraç: hangi değerin hangi kolona ait olduğu yan yana okunabilsin. */
+    border-right: 1px solid var(--border);
     white-space: nowrap;
+}
+
+th:last-child,
+td:last-child {
+    border-right: none;
 }
 
 /* Kolon adları veritabanındaki hâliyle yazılır. Büyük harfe çevirmek
    PascalCase adları (CorrelationId) okunmaz hâle getiriyordu. */
+/* Başlık satırı gövdeden açıkça ayrılır: kendi zemini, kalın alt kenarı
+   ve gövdeden farklı yazı rengi var. */
 th {
     font-weight: 600;
     color: var(--text);
     font-size: 12px;
+    background: var(--head);
+    border-bottom: 2px solid var(--head-line);
     position: sticky;
     top: 0;
-    background: var(--panel);
-    position: relative;
+    z-index: 1;
+}
+
+/* resizer mutlak konumlanıyor; th konumlandırma bağlamı olmalı. */
+th {
+    position: sticky;
 }
 
 th .hname {
@@ -221,7 +244,7 @@ tbody tr:last-child td {
     border-bottom: none;
 }
 
-tbody tr:hover {
+tbody tr:hover td {
     background: var(--accent-soft);
 }
 
@@ -416,9 +439,21 @@ h1.with-icon {
     color: var(--muted);
 }
 
+/* SSMS'teki gibi NULL kendi rengiyle işaretlenir; boş metin ayrı ve daha
+   silik durur, böylece "değer yok" ile "değer boş" karışmaz. */
 .null {
+    color: var(--null);
+    background: var(--null-bg);
+    border-radius: 3px;
+    padding: 0 5px;
+    font-size: 11px;
+    letter-spacing: 0.03em;
+}
+
+.empty {
     color: var(--muted);
     font-style: italic;
+    font-size: 11px;
 }
 
 /* ---- Kısaltılmış kolon uyarısı ---- */

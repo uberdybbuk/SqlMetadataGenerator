@@ -11,6 +11,10 @@ namespace SqlMetadataGenerator.Exploration;
 // görünürlüğü gerektirir — bu aracın normal senaryosu az yetkili kullanıcıdır.
 public sealed class DataExplorer(string connectionString)
 {
+    // Önizlemede metin kolonlarının kesildiği karakter sayısı. Projeksiyon bu
+    // sınırla yazılır, kesilip kesilmediği de aynı sınırla anlaşılır.
+    internal const int TextLimit = 256;
+
     private readonly string _connectionString = connectionString;
 
     private async Task<SqlConnection> OpenAsync(CancellationToken ct)
@@ -59,7 +63,7 @@ public sealed class DataExplorer(string connectionString)
 
         var list = new List<TableStats>();
         await using var conn = await OpenAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -105,7 +109,7 @@ public sealed class DataExplorer(string connectionString)
 
         var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         await using var conn = await OpenAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -128,7 +132,7 @@ public sealed class DataExplorer(string connectionString)
             """;
 
         await using var conn = await OpenAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         cmd.Parameters.AddWithValue("@schema", schema);
         cmd.Parameters.AddWithValue("@name", name);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -165,13 +169,14 @@ public sealed class DataExplorer(string connectionString)
             FROM {qualified}{whereClause};
             """;
 
-        // Isolation level çalıştırma detayı: kilit tutmamak için gerekli ama
-        // kullanıcının okuduğu sorgunun parçası değil, o yüzden yalnızca çalıştırmaya eklenir.
-        string sql = "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;\n" + displaySql;
+        // Yalıtım seviyesi ReadOnlyCommand tarafından eklenir; kullanıcıya gösterilen
+        // metnin parçası değildir.
+        string sql = displaySql;
 
         var rows = new List<object?[]>();
         await using var conn = await OpenAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = timeoutSeconds };
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
+        cmd.CommandTimeout = timeoutSeconds;
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -183,13 +188,24 @@ public sealed class DataExplorer(string connectionString)
             rows.Add(values);
         }
 
+        // Damga "kısaltılabilir" değil "kısaltıldı" anlamına gelmeli. nvarchar(max)
+        // tanımlı ama değerleri kısa bir kolonda projeksiyon LEFT ile sarmalanır,
+        // yine de tek bir karakter bile kesilmemiştir; orada uyarı göstermek gürültü.
+        // Sınıra dayanan bir değer varsa kolon gerçekten kısaltılmıştır.
+        var actuallyTruncated = new bool[columns.Count];
+        for (int i = 0; i < columns.Count; i++)
+        {
+            actuallyTruncated[i] = columns[i].Truncated
+                && rows.Any(r => r[i] is string text && text.Length >= TextLimit);
+        }
+
         return new PreviewResult
         {
-            Columns = columns.Select(c => new PreviewColumn
+            Columns = columns.Select((c, i) => new PreviewColumn
             {
                 Name = c.Name,
                 TypeName = c.TypeName,
-                Truncated = c.Truncated,
+                Truncated = actuallyTruncated[i],
             }).ToList(),
             Rows = rows,
             Sql = displaySql,
@@ -205,13 +221,11 @@ public sealed class DataExplorer(string connectionString)
         string qualified = $"{SqlIdentifier.Quote(schema)}.{SqlIdentifier.Quote(table)}";
         string whereClause = string.IsNullOrWhiteSpace(where) ? string.Empty : $"\nWHERE ({where})";
 
-        string sql = $"""
-            SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-            SELECT COUNT_BIG(*) FROM {qualified}{whereClause};
-            """;
+        string sql = $"SELECT COUNT_BIG(*) FROM {qualified}{whereClause};";
 
         await using var conn = await OpenAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = timeoutSeconds };
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
+        cmd.CommandTimeout = timeoutSeconds;
         var result = await cmd.ExecuteScalarAsync(ct);
         return result is null or DBNull ? 0 : Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
@@ -242,7 +256,7 @@ public sealed class DataExplorer(string connectionString)
 
         var list = new List<ColumnSummary>();
         await using var conn = await OpenAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         cmd.Parameters.AddWithValue("@objectId", objectId);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -280,7 +294,7 @@ public sealed class DataExplorer(string connectionString)
 
         var plans = new List<PreviewColumnPlan>();
         await using var conn = await OpenAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         cmd.Parameters.AddWithValue("@objectId", objectId);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -294,7 +308,7 @@ public sealed class DataExplorer(string connectionString)
     // Önizlemede kolon başına kısaltma stratejisi.
     internal static PreviewColumnPlan BuildPlan(string name, string typeName, short maxLength)
     {
-        const int TextChars = 256;
+        const int TextChars = TextLimit;
         const int BinaryBytes = 64;
 
         // Tanımlayıcılar yalnızca gerektiğinde köşeli parantezlenir (SqlIdentifier.Quote).

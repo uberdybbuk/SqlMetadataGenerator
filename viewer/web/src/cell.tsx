@@ -15,12 +15,18 @@ const DATE_TIME = new Set(["datetime", "datetime2", "smalldatetime", "datetimeof
 const TIME_ONLY = new Set(["time"]);
 
 export function formatCell(value: unknown, typeName: string): ReactNode {
+    // NULL ile boş metin ekranda aynı görünmemeli: biri "değer yok", diğeri
+    // "değer var ve boş". SSMS'teki gibi NULL ayrı bir renkle işaretlenir.
     if (value === null || value === undefined) {
         return <span className="null">NULL</span>;
     }
 
     const t = typeName.toLowerCase();
     const text = String(value);
+
+    if (text === "") {
+        return <span className="empty">empty</span>;
+    }
 
     if (DATE_ONLY.has(t)) {
         // "2026-07-22T00:00:00.0000000" -> "2026-07-22"

@@ -24,7 +24,7 @@ public sealed class MetadataReader(string connectionString)
     {
         const string sql = "SELECT CONVERT(nvarchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation'));";
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         var result = await cmd.ExecuteScalarAsync(ct);
         return result is null or DBNull ? null : (string)result;
     }
@@ -88,7 +88,7 @@ public sealed class MetadataReader(string connectionString)
 
         var names = new List<(int, ObjectName)>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -130,7 +130,7 @@ public sealed class MetadataReader(string connectionString)
 
         var map = new Dictionary<int, List<ColumnInfo>>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -188,7 +188,7 @@ public sealed class MetadataReader(string connectionString)
         // object_id -> (name, isClustered, columns)
         var accumulator = new Dictionary<int, (string Name, bool Clustered, List<(string, bool)> Cols)>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -232,7 +232,7 @@ public sealed class MetadataReader(string connectionString)
         // (object_id, index_id) -> birikim
         var acc = new Dictionary<(int, int), (string Name, bool Clustered, List<(string, bool)> Cols, int ObjectId)>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -294,7 +294,7 @@ public sealed class MetadataReader(string connectionString)
         // (object_id, index_id) -> birikim
         var acc = new Dictionary<(int, int), (IndexBuilder Builder, int ObjectId)>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -388,7 +388,7 @@ public sealed class MetadataReader(string connectionString)
         // fk.object_id -> birikim
         var acc = new Dictionary<int, (ForeignKeyBuilder Builder, int ParentObjectId)>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -469,7 +469,7 @@ public sealed class MetadataReader(string connectionString)
 
         var map = new Dictionary<int, List<CheckConstraintInfo>>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -507,7 +507,7 @@ public sealed class MetadataReader(string connectionString)
 
         var headers = new List<ModuleHeader>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -562,7 +562,7 @@ public sealed class MetadataReader(string connectionString)
 
         var defByObject = new Dictionary<int, string>(batch.Count);
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -611,7 +611,7 @@ public sealed class MetadataReader(string connectionString)
 
         var schemas = new List<SchemaInfo>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -667,7 +667,7 @@ public sealed class MetadataReader(string connectionString)
 
         await using var conn = await OpenConnectionAsync(ct);
 
-        await using (var cmd = new SqlCommand(headerSql, conn))
+        await using (var cmd = ReadOnlyCommand.Create(conn, headerSql))
         await using (var reader = await cmd.ExecuteReaderAsync(ct))
         {
             while (await reader.ReadAsync(ct))
@@ -676,7 +676,7 @@ public sealed class MetadataReader(string connectionString)
             }
         }
 
-        await using (var cmd = new SqlCommand(columnsSql, conn))
+        await using (var cmd = ReadOnlyCommand.Create(conn, columnsSql))
         await using (var reader = await cmd.ExecuteReaderAsync(ct))
         {
             while (await reader.ReadAsync(ct))
@@ -693,7 +693,7 @@ public sealed class MetadataReader(string connectionString)
 
         // (object_id, kısıt adı) bazında PK/UNIQUE birikimi.
         var keyAcc = new Dictionary<(int, string), (int ObjectId, string Name, bool Clustered, bool IsPk, List<(string, bool)> Cols)>();
-        await using (var cmd = new SqlCommand(keysSql, conn))
+        await using (var cmd = ReadOnlyCommand.Create(conn, keysSql))
         await using (var reader = await cmd.ExecuteReaderAsync(ct))
         {
             while (await reader.ReadAsync(ct))
@@ -756,7 +756,7 @@ public sealed class MetadataReader(string connectionString)
 
         var types = new List<UserDefinedTypeInfo>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -799,7 +799,7 @@ public sealed class MetadataReader(string connectionString)
 
         var sequences = new List<SequenceInfo>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -831,7 +831,7 @@ public sealed class MetadataReader(string connectionString)
 
         var synonyms = new List<SynonymInfo>();
         await using var conn = await OpenConnectionAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {

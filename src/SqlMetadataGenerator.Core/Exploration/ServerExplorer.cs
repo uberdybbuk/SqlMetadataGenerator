@@ -30,7 +30,7 @@ public sealed class ServerExplorer(string connectionString)
             """;
 
         await using var conn = await OpenAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
         {
@@ -72,7 +72,7 @@ public sealed class ServerExplorer(string connectionString)
 
         var list = new List<DatabaseInfo>();
         await using var conn = await OpenAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {

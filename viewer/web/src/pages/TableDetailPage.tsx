@@ -13,7 +13,9 @@ const SqlEditor = lazy(() => import("../SqlEditor"));
 
 export function TableDetailPage() {
     const { alias = "", db = "", schema = "", name = "" } = useParams();
-    const [tab, setTab] = useState<"columns" | "data">("columns");
+    // Bir tabloya tıklayan kişi önce VERİYİ görmek ister; kolon listesi
+    // ikinci sorudur.
+    const [tab, setTab] = useState<"columns" | "data">("data");
 
     const detail = useApi(() => api.table(alias, db, schema, name), [alias, db, schema, name]);
 
