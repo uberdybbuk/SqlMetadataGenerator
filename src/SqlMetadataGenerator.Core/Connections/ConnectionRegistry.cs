@@ -35,7 +35,7 @@ public sealed class ConnectionRegistry
         }
         catch (JsonException ex)
         {
-            throw new InvalidOperationException($"'{path}' okunamadı: {ex.Message}", ex);
+            throw new InvalidOperationException($"Could not read '{path}': {ex.Message}", ex);
         }
 
         var byAlias = new Dictionary<string, ConnectionEntry>(StringComparer.OrdinalIgnoreCase);
@@ -44,12 +44,12 @@ public sealed class ConnectionRegistry
             if (!IsValidAlias(entry.Alias))
             {
                 throw new InvalidOperationException(
-                    $"Geçersiz alias: '{entry.Alias}'. Yalnızca harf, rakam, '-' ve '_' kullanılabilir ve harf/rakamla başlamalı.");
+                    $"Invalid alias '{entry.Alias}'. Use only letters, digits, '-' and '_', starting with a letter or digit.");
             }
 
             if (!byAlias.TryAdd(entry.Alias, entry))
             {
-                throw new InvalidOperationException($"Alias birden fazla kez tanımlanmış: '{entry.Alias}'.");
+                throw new InvalidOperationException($"Alias defined more than once: '{entry.Alias}'.");
             }
         }
 
@@ -82,7 +82,7 @@ public sealed class ConnectionRegistry
         if (string.IsNullOrEmpty(password))
         {
             throw new InvalidOperationException(
-                $"'{entry.Alias}' için parola bulunamadı. '{envName}' ortam değişkenini ayarlayın.");
+                $"No password for '{entry.Alias}'. Set the '{envName}' environment variable.");
         }
 
         builder.UserID = entry.User ?? string.Empty;

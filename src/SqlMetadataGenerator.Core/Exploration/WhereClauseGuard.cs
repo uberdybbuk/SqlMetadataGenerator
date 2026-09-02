@@ -18,13 +18,13 @@ public static class WhereClauseGuard
 
         if (string.IsNullOrWhiteSpace(where))
         {
-            error = "WHERE ifadesi boş olamaz.";
+            error = "The WHERE expression cannot be empty.";
             return false;
         }
 
         if (where.Length > MaxLength)
         {
-            error = $"WHERE ifadesi en fazla {MaxLength} karakter olabilir.";
+            error = $"The WHERE expression can be at most {MaxLength} characters.";
             return false;
         }
 
@@ -36,7 +36,7 @@ public static class WhereClauseGuard
             {
                 if (!SkipDelimited(where, ref i, '\'', '\''))
                 {
-                    error = "Kapanmamış tırnak (') var.";
+                    error = "Unclosed quote (').";
                     return false;
                 }
                 continue;
@@ -46,7 +46,7 @@ public static class WhereClauseGuard
             {
                 if (!SkipDelimited(where, ref i, ']', ']'))
                 {
-                    error = "Kapanmamış köşeli parantez ([) var.";
+                    error = "Unclosed bracket ([).";
                     return false;
                 }
                 continue;
@@ -56,7 +56,7 @@ public static class WhereClauseGuard
             {
                 if (!SkipDelimited(where, ref i, '"', '"'))
                 {
-                    error = "Kapanmamış çift tırnak (\") var.";
+                    error = "Unclosed double quote (\").";
                     return false;
                 }
                 continue;
@@ -64,25 +64,25 @@ public static class WhereClauseGuard
 
             if (c == ';')
             {
-                error = "WHERE ifadesinde ';' kullanılamaz — tek bir koşul bekleniyor.";
+                error = "';' is not allowed in a WHERE expression — a single condition is expected.";
                 return false;
             }
 
             if (c == '-' && i + 1 < where.Length && where[i + 1] == '-')
             {
-                error = "WHERE ifadesinde '--' yorumu kullanılamaz.";
+                error = "'--' comments are not allowed in a WHERE expression.";
                 return false;
             }
 
             if (c == '/' && i + 1 < where.Length && where[i + 1] == '*')
             {
-                error = "WHERE ifadesinde '/*' yorumu kullanılamaz.";
+                error = "'/*' comments are not allowed in a WHERE expression.";
                 return false;
             }
 
             if (c == '*' && i + 1 < where.Length && where[i + 1] == '/')
             {
-                error = "WHERE ifadesinde '*/' yorumu kullanılamaz.";
+                error = "'*/' comments are not allowed in a WHERE expression.";
                 return false;
             }
         }

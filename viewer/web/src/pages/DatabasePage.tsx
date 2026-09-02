@@ -4,22 +4,23 @@ import { Chart } from "../echarts";
 
 import { api, type TableStats } from "../api";
 import { useApi } from "../useApi";
-import { formatKb, formatRows } from "../format";
+import { formatKb, formatRows, plural } from "../format";
 import { labelColorFor, rampFor, sampleRamp, useDarkMode } from "../theme";
 import { DataTable, type Column } from "../DataTable";
 import { Icon, type IconName } from "../Icon";
 
-// Nesne tipi sayaçları: gösterim sırası, etiket ve ikon.
-const KINDS: [key: string, label: string, icon: IconName][] = [
-    ["tables", "tablo", "table"],
+// Nesne tipi sayaçları: gösterim sırası, tekil etiket ve ikon.
+// Çoğul biçim sayıya göre üretilir — "1 procedures" gibi çıktı olmasın.
+const KINDS: [key: string, singular: string, icon: IconName][] = [
+    ["tables", "table", "table"],
     ["views", "view", "view"],
     ["procedures", "procedure", "procedure"],
     ["functions", "function", "function"],
     ["triggers", "trigger", "trigger"],
     ["synonyms", "synonym", "synonym"],
     ["sequences", "sequence", "sequence"],
-    ["types", "tip", "type"],
-    ["schemas", "şema", "schema"],
+    ["types", "type", "type"],
+    ["schemas", "schema", "schema"],
 ];
 
 export function DatabasePage() {
@@ -57,7 +58,7 @@ export function DatabasePage() {
     const columns: Column<TableStats>[] = [
         {
             key: "schema",
-            header: "Şema",
+            header: "Schema",
             sortValue: (t) => t.schema,
             render: (t) => (
                 <Link className="mono muted with-icon" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
@@ -68,7 +69,7 @@ export function DatabasePage() {
         },
         {
             key: "name",
-            header: "Tablo",
+            header: "Table",
             sortValue: (t) => t.name,
             render: (t) => (
                 <Link
@@ -80,11 +81,11 @@ export function DatabasePage() {
                 </Link>
             ),
         },
-        { key: "rows", header: "Satır", numeric: true, sortValue: (t) => t.rowCount, render: (t) => formatRows(t.rowCount) },
-        { key: "reserved", header: "Ayrılmış", numeric: true, sortValue: (t) => t.reservedKb, render: (t) => formatKb(t.reservedKb) },
+        { key: "rows", header: "Rows", numeric: true, sortValue: (t) => t.rowCount, render: (t) => formatRows(t.rowCount) },
+        { key: "reserved", header: "Allocated", numeric: true, sortValue: (t) => t.reservedKb, render: (t) => formatKb(t.reservedKb) },
         {
             key: "used",
-            header: "Kullanılan",
+            header: "Used",
             numeric: true,
             sortValue: (t) => t.usedKb,
             render: (t) => <span className="muted">{formatKb(t.usedKb)}</span>,
@@ -95,23 +96,24 @@ export function DatabasePage() {
         <>
             <h1>{db}</h1>
             <p className="subtitle">
-                <span className="mono">{alias}</span> sunucusundaki veritabanı
+                Database on <span className="mono">{alias}</span>
             </p>
 
             {overview.error && <div className="error">{overview.error}</div>}
             {overview.data && (
                 <div className="badges">
-                    {KINDS.filter(([key]) => overview.data!.counts[key]).map(([key, label, icon]) => (
+                    {KINDS.filter(([key]) => overview.data!.counts[key]).map(([key, singular, icon]) => (
                         <span key={key} className="badge">
                             <Icon name={icon} size={14} />
-                            <b>{overview.data!.counts[key]}</b> {label}
+                            <b>{overview.data!.counts[key]}</b>{" "}
+                            {plural(overview.data!.counts[key], singular)}
                         </span>
                     ))}
                 </div>
             )}
 
             {tables.error && <div className="error">{tables.error}</div>}
-            {tables.loading && <div className="state">Tablo istatistikleri okunuyor…</div>}
+            {tables.loading && <div className="state">Reading table statistics…</div>}
 
             {!tables.loading && rows.length > 0 && (
                 <>
@@ -125,9 +127,8 @@ export function DatabasePage() {
                                 margin: "8px 0 0",
                             }}
                         >
-                            Ayrılmış alanın{" "}
-                            <b>%{dominance.toLocaleString("tr-TR", { maximumFractionDigits: 1 })}</b>{" "}
-                            tek bir tabloda:{" "}
+                            <b>{dominance.toLocaleString("en-US", { maximumFractionDigits: 1 })}%</b>{" "}
+                            of allocated space sits in a single table:{" "}
                             <Link
                                 className="mono"
                                 to={`${base}/tables/${encodeURIComponent(top.schema)}/${encodeURIComponent(top.name)}`}
@@ -139,21 +140,22 @@ export function DatabasePage() {
                     )}
 
                     <h2>
-                        Disk dağılımı{" "}
+                        Disk footprint{" "}
                         <span className="muted" style={{ fontWeight: 400 }}>
-                            — kutu boyutu ayrılmış alan, renk satır sayısı
+                            — box size is allocated space, color is row count
                         </span>
                     </h2>
                     <div className="toolbar">
                         <button className="chip" aria-pressed={drill === null} onClick={() => setDrill(null)}>
-                            tüm şemalar
+                            all schemas
                         </button>
                         {drill && (
                             <span className="muted">
-                                <span className="mono">{drill}</span> şemasındaki {inScope.length} tablo
+                                {inScope.length} {plural(inScope.length, "table")} in{" "}
+                                <span className="mono">{drill}</span>
                             </span>
                         )}
-                        {!drill && <span className="muted">bir şemaya tıklayarak içine inebilirsin</span>}
+                        {!drill && <span className="muted">click a schema to drill in</span>}
                     </div>
 
                     <div style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel)" }}>
@@ -176,14 +178,19 @@ export function DatabasePage() {
                     </div>
 
                     <p className="subtitle" style={{ marginTop: 12 }}>
-                        Toplam ~{formatRows(totalRows)} satır, {formatKb(totalKb)} ayrılmış alan.
+                        ~{formatRows(totalRows)} rows, {formatKb(totalKb)} allocated in total.
                         {rows.length - sized.length > 0 && (
-                            <> {rows.length - sized.length} tablo boş olduğu için haritada yer almıyor.</>
+                            <>
+                                {" "}
+                                {rows.length - sized.length}{" "}
+                                {plural(rows.length - sized.length, "empty table", "empty tables")} not on the
+                                map.
+                            </>
                         )}{" "}
-                        Sayılar katalog view'larından okunur, tarama yapılmaz — yaklaşıktır.
+                        Counts come from catalog views without scanning — they are approximate.
                     </p>
 
-                    <h2>En büyük tablolar</h2>
+                    <h2>Largest tables</h2>
                     <DataTable
                         columns={columns}
                         rows={rows}
@@ -192,7 +199,7 @@ export function DatabasePage() {
                         limit={15}
                     />
                     <p style={{ marginTop: 12 }}>
-                        <Link to={`${base}/tables`}>Tüm {rows.length} tabloyu listele →</Link>
+                        <Link to={`${base}/tables`}>List all {rows.length} tables →</Link>
                     </p>
                 </>
             )}
@@ -215,7 +222,7 @@ function ColorScale({ dark }: { dark: boolean }) {
                 color: "var(--muted)",
             }}
         >
-            <span>az satır</span>
+            <span>fewer rows</span>
             <span
                 style={{
                     display: "inline-block",
@@ -225,7 +232,7 @@ function ColorScale({ dark }: { dark: boolean }) {
                     background: `linear-gradient(to right, ${ramp.join(", ")})`,
                 }}
             />
-            <span>çok satır</span>
+            <span>more rows</span>
         </div>
     );
 }
@@ -276,8 +283,8 @@ function buildTreemap(rows: TableStats[], dark: boolean, flat: boolean) {
             formatter: (info: { name: string; value: number; data: { schema?: string; rowCount?: number } }) => {
                 const { schema, rowCount } = info.data ?? {};
                 const title = schema ? `${schema}.${info.name}` : info.name;
-                const rowsLine = rowCount === undefined ? "" : `<br/>~${formatRows(rowCount)} satır`;
-                return `<b>${title}</b><br/>${formatKb(info.value)} ayrılmış${rowsLine}`;
+                const rowsLine = rowCount === undefined ? "" : `<br/>~${formatRows(rowCount)} rows`;
+                return `<b>${title}</b><br/>${formatKb(info.value)} allocated${rowsLine}`;
             },
         },
         series: [

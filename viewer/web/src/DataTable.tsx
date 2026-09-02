@@ -116,5 +116,5 @@ function compare(a: SortValue, b: SortValue): number {
     if (typeof a === "boolean" && typeof b === "boolean") {
         return Number(a) - Number(b);
     }
-    return String(a).localeCompare(String(b), "tr", { numeric: true, sensitivity: "base" });
+    return String(a).localeCompare(String(b), "en", { numeric: true, sensitivity: "base" });
 }

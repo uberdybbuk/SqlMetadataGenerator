@@ -27,7 +27,7 @@ function unwrapComponent(module: unknown): ComponentType<CoreProps> {
         candidate = (candidate as { default: unknown }).default;
     }
     if (typeof candidate !== "function") {
-        throw new Error("echarts-for-react/lib/core bileşeni çözümlenemedi.");
+        throw new Error("Could not resolve the echarts-for-react/lib/core component.");
     }
     return candidate as ComponentType<CoreProps>;
 }

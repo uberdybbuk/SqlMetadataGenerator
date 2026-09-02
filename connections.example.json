@@ -2,8 +2,8 @@
     "connections": [
         {
             "alias": "demo",
-            "description": "Örnek sunucu",
-            "server": "sunucu.adresi,1433",
+            "description": "Example server",
+            "server": "your.server.address,1433",
             "auth": "sql",
             "user": "readonlyuser",
             "passwordEnv": "SQLMETA_PW_DEMO",
@@ -12,7 +12,7 @@
         },
         {
             "alias": "local",
-            "description": "Yerel geliştirme",
+            "description": "Local development",
             "server": "localhost,1433",
             "auth": "integrated"
         }

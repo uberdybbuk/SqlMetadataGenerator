@@ -20,11 +20,11 @@ internal static class Program
         var log = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Connections");
         if (resolved is null)
         {
-            log.LogWarning("'{File}' bulunamadı; bağlantı listesi boş. connections.example.json'ı kopyalayın.", configured);
+            log.LogWarning("'{File}' not found; the connection list is empty. Copy connections.example.json.", configured);
         }
         else
         {
-            log.LogInformation("Bağlantı tanımları: {Path}", resolved);
+            log.LogInformation("Connections file: {Path}", resolved);
         }
 
         app.MapExplorerEndpoints();

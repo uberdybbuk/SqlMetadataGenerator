@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { api, type TableStats } from "../api";
 import { useApi } from "../useApi";
-import { formatKb, formatRows } from "../format";
+import { formatKb, formatRows, plural } from "../format";
 import { DataTable, type Column } from "../DataTable";
 import { Icon } from "../Icon";
 
@@ -17,25 +17,25 @@ export function TableListPage() {
     const rows = data ?? [];
 
     const schemas = useMemo(
-        () => [...new Set(rows.map((t) => t.schema))].sort((a, b) => a.localeCompare(b, "tr")),
+        () => [...new Set(rows.map((t) => t.schema))].sort((a, b) => a.localeCompare(b, "en")),
         [rows],
     );
 
     const shown = useMemo(() => {
-        const needle = search.trim().toLocaleLowerCase("tr");
+        const needle = search.trim().toLowerCase();
         return rows.filter(
             (t) =>
                 (!schema || t.schema === schema) &&
                 (!needle ||
-                    t.name.toLocaleLowerCase("tr").includes(needle) ||
-                    t.schema.toLocaleLowerCase("tr").includes(needle)),
+                    t.name.toLowerCase().includes(needle) ||
+                    t.schema.toLowerCase().includes(needle)),
         );
     }, [rows, schema, search]);
 
     const columns: Column<TableStats>[] = [
         {
             key: "schema",
-            header: "Şema",
+            header: "Schema",
             sortValue: (t) => t.schema,
             render: (t) => (
                 <Link className="mono muted with-icon" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
@@ -46,7 +46,7 @@ export function TableListPage() {
         },
         {
             key: "name",
-            header: "Tablo",
+            header: "Table",
             sortValue: (t) => t.name,
             render: (t) => (
                 <Link
@@ -60,21 +60,21 @@ export function TableListPage() {
         },
         {
             key: "rows",
-            header: "Satır",
+            header: "Rows",
             numeric: true,
             sortValue: (t) => t.rowCount,
             render: (t) => formatRows(t.rowCount),
         },
         {
             key: "reserved",
-            header: "Ayrılmış",
+            header: "Allocated",
             numeric: true,
             sortValue: (t) => t.reservedKb,
             render: (t) => formatKb(t.reservedKb),
         },
         {
             key: "used",
-            header: "Kullanılan",
+            header: "Used",
             numeric: true,
             sortValue: (t) => t.usedKb,
             render: (t) => <span className="muted">{formatKb(t.usedKb)}</span>,
@@ -82,7 +82,7 @@ export function TableListPage() {
     ];
 
     if (loading) {
-        return <div className="state">Tablolar okunuyor…</div>;
+        return <div className="state">Reading tables…</div>;
     }
     if (error) {
         return <div className="error">{error}</div>;
@@ -90,20 +90,21 @@ export function TableListPage() {
 
     return (
         <>
-            <h1>{schema ? `${schema} tabloları` : "Tablolar"}</h1>
+            <h1>{schema ? `Tables in ${schema}` : "Tables"}</h1>
             <p className="subtitle">
-                <span className="mono">{db}</span> veritabanı · {shown.length} / {rows.length} tablo
+                <span className="mono">{db}</span> database · {shown.length} of {rows.length}{" "}
+                {plural(rows.length, "table")}
             </p>
 
             <div className="toolbar">
                 <input
                     type="search"
-                    placeholder="Tablo veya şema ara…"
+                    placeholder="Search tables or schemas…"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
                 <button className="chip" aria-pressed={!schema} onClick={() => navigate(`${base}/tables`)}>
-                    tümü
+                    all
                 </button>
                 {schemas.map((s) => (
                     <button
@@ -125,7 +126,7 @@ export function TableListPage() {
                 rowKey={(t) => `${t.schema}.${t.name}`}
                 initialSort={{ key: "reserved", desc: true }}
             />
-            {shown.length === 0 && <div className="state">Eşleşen tablo yok.</div>}
+            {shown.length === 0 && <div className="state">No matching tables.</div>}
         </>
     );
 }

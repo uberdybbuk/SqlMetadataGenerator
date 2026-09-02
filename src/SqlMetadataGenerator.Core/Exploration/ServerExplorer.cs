@@ -34,7 +34,7 @@ public sealed class ServerExplorer(string connectionString)
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
         {
-            throw new InvalidOperationException("Sunucu bilgisi okunamadı.");
+            throw new InvalidOperationException("Could not read server information.");
         }
 
         return new ServerInfo

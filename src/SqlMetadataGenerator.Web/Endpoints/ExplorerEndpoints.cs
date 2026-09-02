@@ -63,7 +63,7 @@ internal static class ExplorerEndpoints
                 var resolved = await explorer.ResolveTableAsync(schema, name, ct);
                 if (resolved is null)
                 {
-                    return NotFound($"Tablo bulunamadı: {schema}.{name}");
+                    return NotFound($"Table not found: {schema}.{name}");
                 }
 
                 var columns = await explorer.ReadTableColumnsAsync(resolved.Value.ObjectId, ct);
@@ -85,7 +85,7 @@ internal static class ExplorerEndpoints
                 var resolved = await explorer.ResolveTableAsync(schema, name, ct);
                 if (resolved is null)
                 {
-                    return NotFound($"Tablo bulunamadı: {schema}.{name}");
+                    return NotFound($"Table not found: {schema}.{name}");
                 }
 
                 int capped = Math.Clamp(top, 1, 500);
@@ -108,7 +108,7 @@ internal static class ExplorerEndpoints
                 var resolved = await explorer.ResolveTableAsync(schema, name, ct);
                 if (resolved is null)
                 {
-                    return NotFound($"Tablo bulunamadı: {schema}.{name}");
+                    return NotFound($"Table not found: {schema}.{name}");
                 }
 
                 long count = await explorer.CountAsync(resolved.Value.Schema, resolved.Value.Name, where, ct: ct);
@@ -122,7 +122,7 @@ internal static class ExplorerEndpoints
         var entry = registry.Find(alias);
         if (entry is null)
         {
-            return NotFound($"Bağlantı bulunamadı: '{alias}'.");
+            return NotFound($"Connection not found: '{alias}'.");
         }
 
         return await Guarded(() =>
@@ -139,7 +139,7 @@ internal static class ExplorerEndpoints
         var entry = registry.Find(alias);
         if (entry is null)
         {
-            return NotFound($"Bağlantı bulunamadı: '{alias}'.");
+            return NotFound($"Connection not found: '{alias}'.");
         }
 
         return await Guarded(() =>
@@ -159,18 +159,18 @@ internal static class ExplorerEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            return Results.Problem(title: "Bağlantı yapılandırması", detail: ex.Message, statusCode: 400);
+            return Results.Problem(title: "Connection configuration", detail: ex.Message, statusCode: 400);
         }
         catch (SqlException ex)
         {
-            return Results.Problem(title: "SQL hatası", detail: ex.Message, statusCode: 400,
+            return Results.Problem(title: "SQL error", detail: ex.Message, statusCode: 400,
                 extensions: new Dictionary<string, object?> { ["sqlNumber"] = ex.Number });
         }
     }
 
     private static IResult NotFound(string detail) =>
-        Results.Problem(title: "Bulunamadı", detail: detail, statusCode: 404);
+        Results.Problem(title: "Not found", detail: detail, statusCode: 404);
 
     private static IResult BadRequest(string detail) =>
-        Results.Problem(title: "Geçersiz istek", detail: detail, statusCode: 400);
+        Results.Problem(title: "Bad request", detail: detail, statusCode: 400);
 }

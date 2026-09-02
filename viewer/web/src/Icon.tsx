@@ -56,20 +56,20 @@ const PATHS: Record<IconName, string> = {
 
 // Etiketler ObjectFilter.ValidTypes sözlüğüyle aynı kavramlara karşılık gelir.
 export const ICON_LABELS: Record<IconName, string> = {
-    server: "sunucu",
-    database: "veritabanı",
-    schema: "şema",
-    table: "tablo",
+    server: "server",
+    database: "database",
+    schema: "schema",
+    table: "table",
     view: "view",
     procedure: "procedure",
     function: "function",
     trigger: "trigger",
     synonym: "synonym",
     sequence: "sequence",
-    type: "tip",
-    column: "kolon",
-    key: "anahtar",
-    search: "ara",
+    type: "type",
+    column: "column",
+    key: "key",
+    search: "search",
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {

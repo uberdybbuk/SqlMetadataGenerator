@@ -2,7 +2,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { api } from "../api";
 import { useApi } from "../useApi";
-import { formatDate, formatMb } from "../format";
+import { formatDate, formatMb, plural } from "../format";
 import { DataTable, type Column } from "../DataTable";
 import type { DatabaseInfo } from "../api";
 import { Icon } from "../Icon";
@@ -14,7 +14,7 @@ export function ServerPage() {
     const connections = useApi(() => api.connections(), []);
 
     if (loading) {
-        return <div className="state">Sunucu okunuyor…</div>;
+        return <div className="state">Reading server…</div>;
     }
     if (error) {
         return <div className="error">{error}</div>;
@@ -30,7 +30,7 @@ export function ServerPage() {
     const columns: Column<DatabaseInfo>[] = [
         {
             key: "name",
-            header: "Veritabanı",
+            header: "Database",
             sortValue: (db) => db.name,
             render: (db) =>
                 db.isBrowsable ? (
@@ -48,18 +48,18 @@ export function ServerPage() {
                     </span>
                 ),
         },
-        { key: "data", header: "Veri", numeric: true, sortValue: (db) => db.dataMb, render: (db) => formatMb(db.dataMb) },
+        { key: "data", header: "Data", numeric: true, sortValue: (db) => db.dataMb, render: (db) => formatMb(db.dataMb) },
         { key: "log", header: "Log", numeric: true, sortValue: (db) => db.logMb, render: (db) => formatMb(db.logMb) },
         {
             key: "state",
-            header: "Durum",
+            header: "State",
             sortValue: (db) => db.state,
             render: (db) =>
                 db.state === "ONLINE" ? <span className="muted">online</span> : <span className="pill">{db.state.toLowerCase()}</span>,
         },
         {
             key: "recovery",
-            header: "Kurtarma",
+            header: "Recovery",
             sortValue: (db) => db.recoveryModel,
             render: (db) => <span className="muted">{db.recoveryModel.toLowerCase()}</span>,
             className: "muted",
@@ -72,7 +72,7 @@ export function ServerPage() {
         },
         {
             key: "created",
-            header: "Oluşturma",
+            header: "Created",
             sortValue: (db) => db.createDate,
             render: (db) => <span className="muted mono" style={{ fontSize: 12 }}>{formatDate(db.createDate)}</span>,
         },
@@ -87,15 +87,15 @@ export function ServerPage() {
                 {connection?.description && <> · {connection.description}</>}
                 <br />
                 SQL Server {server.productVersion} {server.productLevel} · {server.edition} ·{" "}
-                {server.collation} · makine {server.machineName}
+                {server.collation} · machine {server.machineName}
             </p>
 
             <div className="badges">
                 <span className="badge">
-                    <b>{databases.length}</b> veritabanı
+                    <b>{databases.length}</b> {plural(databases.length, "database")}
                 </span>
                 <span className="badge">
-                    toplam <b>{formatMb(totalMb)}</b> veri
+                    <b>{formatMb(totalMb)}</b> total data
                 </span>
             </div>
 
@@ -106,8 +106,7 @@ export function ServerPage() {
                 initialSort={{ key: "data", desc: true }}
             />
             <p className="subtitle" style={{ marginTop: 12 }}>
-                Boyutlar <code>sys.master_files</code>'tan gelir: ayrılmış dosya boyutudur,
-                kullanılan alan değil.
+                Sizes come from <code>sys.master_files</code>: allocated file size, not space in use.
             </p>
         </>
     );

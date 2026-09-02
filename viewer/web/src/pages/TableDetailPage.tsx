@@ -15,10 +15,10 @@ export function TableDetailPage() {
 
     const columns: Column<ColumnSummary>[] = [
         { key: "id", header: "#", numeric: true, sortValue: (c) => c.columnId, render: (c) => c.columnId, className: "muted" },
-        { key: "name", header: "Kolon", sortValue: (c) => c.name, render: (c) => c.name, className: "mono" },
+        { key: "name", header: "Column", sortValue: (c) => c.name, render: (c) => c.name, className: "mono" },
         {
             key: "type",
-            header: "Tip",
+            header: "Type",
             sortValue: (c) => formatType(c.typeName, c.maxLength, c.precision, c.scale),
             render: (c) => (
                 <span className="mono muted">{formatType(c.typeName, c.maxLength, c.precision, c.scale)}</span>
@@ -32,7 +32,7 @@ export function TableDetailPage() {
         },
         {
             key: "key",
-            header: "Anahtar",
+            header: "Key",
             // Birincil anahtar kolonları önce, anahtar sırasına göre.
             sortValue: (c) => c.primaryKeyOrdinal,
             render: (c) => (
@@ -50,7 +50,7 @@ export function TableDetailPage() {
         },
         {
             key: "default",
-            header: "Varsayılan",
+            header: "Default",
             sortValue: (c) => c.defaultDefinition,
             render: (c) => <span className="mono muted">{c.defaultDefinition ?? ""}</span>,
         },
@@ -63,20 +63,20 @@ export function TableDetailPage() {
                 {schema}.{name}
             </h1>
             <p className="subtitle">
-                <span className="mono">{db}</span> veritabanı · <span className="mono">{alias}</span> sunucusu
+                <span className="mono">{db}</span> database · <span className="mono">{alias}</span> server
             </p>
 
             {detail.error && <div className="error">{detail.error}</div>}
-            {detail.loading && <div className="state">Okunuyor…</div>}
+            {detail.loading && <div className="state">Loading…</div>}
 
             {detail.data && (
                 <>
                     <div className="toolbar">
                         <button className="chip" aria-pressed={tab === "columns"} onClick={() => setTab("columns")}>
-                            kolonlar ({detail.data.columns.length})
+                            columns ({detail.data.columns.length})
                         </button>
                         <button className="chip" aria-pressed={tab === "data"} onClick={() => setTab("data")}>
-                            veri (ilk 20)
+                            data (first 20)
                         </button>
                     </div>
 
@@ -110,13 +110,13 @@ function PreviewTab({ alias, db, schema, name }: { alias: string; db: string; sc
     );
 
     if (loading) {
-        return <div className="state">İlk 20 satır getiriliyor…</div>;
+        return <div className="state">Fetching first 20 rows…</div>;
     }
     if (error) {
         return <div className="error">{error}</div>;
     }
     if (!data || data.rows.length === 0) {
-        return <div className="state">Tablo boş.</div>;
+        return <div className="state">Table is empty.</div>;
     }
 
     const truncated = data.columns.filter((c) => c.truncated).map((c) => c.name);
@@ -130,7 +130,7 @@ function PreviewTab({ alias, db, schema, name }: { alias: string; db: string; sc
                 {column.name}
                 <div style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
                     {column.typeName}
-                    {column.truncated && <span className="trunc"> · kısaltıldı</span>}
+                    {column.truncated && <span className="trunc"> · truncated</span>}
                 </div>
             </>
         ),
@@ -149,8 +149,8 @@ function PreviewTab({ alias, db, schema, name }: { alias: string; db: string; sc
             <DataTable columns={columns} rows={rows} rowKey={(row) => String(row.index)} />
             {truncated.length > 0 && (
                 <p className="subtitle" style={{ marginTop: 12 }}>
-                    Şu kolonlar sunucu tarafında kısaltıldı: <span className="mono">{truncated.join(", ")}</span>.
-                    Büyük metin ve binary değerler önizlemede tam taşınmaz.
+                    Truncated server-side: <span className="mono">{truncated.join(", ")}</span>. Large text
+                    and binary values are not transferred in full for previews.
                 </p>
             )}
         </>

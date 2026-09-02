@@ -7,14 +7,14 @@ import { Icon, type IconName } from "./Icon";
 // URL'deki tip segmentinin (tables, views ...) okunur karşılıkları.
 // Anahtarlar ObjectFilter.ValidTypes sözlüğüyle aynı: CLI, manifest ve URL tek dil konuşur.
 const SECTION_LABELS: Record<string, string> = {
-    tables: "Tablolar",
-    views: "View'lar",
-    procedures: "Procedure'lar",
-    functions: "Function'lar",
-    triggers: "Trigger'lar",
-    synonyms: "Synonym'lar",
-    sequences: "Sequence'lar",
-    types: "Tipler",
+    tables: "Tables",
+    views: "Views",
+    procedures: "Procedures",
+    functions: "Functions",
+    triggers: "Triggers",
+    synonyms: "Synonyms",
+    sequences: "Sequences",
+    types: "Types",
 };
 
 const SECTION_ICONS: Record<string, IconName> = {
@@ -29,14 +29,14 @@ const SECTION_ICONS: Record<string, IconName> = {
 };
 
 const OBJECT_LABELS: Record<string, string> = {
-    tables: "tablo",
+    tables: "table",
     views: "view",
     procedures: "procedure",
     functions: "function",
     triggers: "trigger",
     synonyms: "synonym",
     sequences: "sequence",
-    types: "tip",
+    types: "type",
 };
 
 interface Crumb {
@@ -63,14 +63,14 @@ function buildCrumbs(pathname: string, serverAddress: string | null): Crumb[] {
     const [, alias, db, section, schema, name] = parts;
     // İlk parça bir varlık değil, sayfa adı — ikonu yok. Aksi hâlde yanındaki
     // sunucu ikonuyla aynı görünüp iki ayrı şeyi aynı sanmaya yol açıyordu.
-    const crumbs: Crumb[] = [{ label: "Bağlantılar", href: "/app" }];
+    const crumbs: Crumb[] = [{ label: "Connections", href: "/app" }];
     if (!alias) {
         return crumbs;
     }
 
     const a = encodeURIComponent(alias);
     crumbs.push({
-        kind: "sunucu",
+        kind: "server",
         icon: "server",
         label: decodeURIComponent(alias),
         detail: serverAddress ?? undefined,
@@ -83,7 +83,7 @@ function buildCrumbs(pathname: string, serverAddress: string | null): Crumb[] {
 
     const d = encodeURIComponent(db);
     crumbs.push({
-        kind: "veritabanı",
+        kind: "database",
         icon: "database",
         label: decodeURIComponent(db),
         href: `/app/${a}/${d}`,
@@ -107,7 +107,7 @@ function buildCrumbs(pathname: string, serverAddress: string | null): Crumb[] {
     const s = encodeURIComponent(schema);
     // Şemanın ikonu yok: bulunduğu yer zaten ne olduğunu söylüyor.
     crumbs.push({
-        kind: "şema",
+        kind: "schema",
         label: decodeURIComponent(schema),
         href: `/app/${a}/${d}/${section}/${s}`,
         mono: true,
@@ -117,7 +117,7 @@ function buildCrumbs(pathname: string, serverAddress: string | null): Crumb[] {
     }
 
     crumbs.push({
-        kind: OBJECT_LABELS[section] ?? "nesne",
+        kind: OBJECT_LABELS[section] ?? "object",
         icon: SECTION_ICONS[section],
         label: decodeURIComponent(name),
         href: `/app/${a}/${d}/${section}/${s}/${encodeURIComponent(name)}`,
@@ -138,7 +138,7 @@ function Breadcrumbs() {
     const crumbs = buildCrumbs(pathname, address);
 
     return (
-        <nav className="crumbs" aria-label="Konum">
+        <nav className="crumbs" aria-label="Breadcrumb">
             {crumbs.map((crumb, index) => {
                 const last = index === crumbs.length - 1;
                 return (
