@@ -1,5 +1,5 @@
-// ECharts'ın tamamı ~1.4 MB bundle üretiyordu. Yalnızca kullandığımız parçaları
-// kaydedip ağaç budamasına izin veriyoruz.
+// All of ECharts produced a ~1.4 MB bundle. Only the pieces we use are registered, which lets
+// tree shaking do its work.
 import type { CSSProperties, ComponentType } from "react";
 import * as echarts from "echarts/core";
 import { TreemapChart } from "echarts/charts";
@@ -17,10 +17,10 @@ interface CoreProps {
     onEvents?: Record<string, (params: never) => void>;
 }
 
-// echarts-for-react/lib/core CommonJS. Bileşene ulaşmak için gereken "default"
-// katmanı sayısı ortama göre değişiyor (Vite dev, Rolldown build, Node), bu yüzden
-// sabit bir sarmalama yerine fonksiyona ulaşana kadar açıyoruz. Aksi hâlde React'e
-// bileşen yerine nesne geçiyor ve sayfa "Element type is invalid" ile hiç açılmıyor.
+// echarts-for-react/lib/core is CommonJS. How many "default" layers stand between us and the
+// component varies by environment (Vite dev, Rolldown build, Node), so instead of unwrapping a
+// fixed number of times we unwrap until we reach the function. Otherwise React is handed an
+// object instead of a component and the page never opens, failing with "Element type is invalid".
 function unwrapComponent(module: unknown): ComponentType<CoreProps> {
     let candidate = module;
     while (candidate && typeof candidate === "object" && "default" in candidate) {

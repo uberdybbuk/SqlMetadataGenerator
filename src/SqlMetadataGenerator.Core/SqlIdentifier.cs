@@ -1,11 +1,11 @@
 namespace SqlMetadataGenerator;
 
-// SQL Server tanımlayıcılarını yalnızca gerektiğinde köşeli parantezle sarar.
-// SSMS her zaman [..] kullanır; biz yalnızca gerçekten gerekli olduğunda kullanırız
-// (rezerve kelime, düzenli tanımlayıcı kurallarına uymayan ad, vb.) — aksi hâlde çıplak yazarız.
+// Wraps SQL Server identifiers in square brackets only where that is necessary.
+// SSMS always uses [..]; we use it only when it is genuinely required
+// (a reserved word, a name that breaks the regular identifier rules, and so on) — otherwise we write it bare.
 public static class SqlIdentifier
 {
-    // Microsoft "Reserved Keywords (Transact-SQL)" resmi listesi.
+    // The official Microsoft "Reserved Keywords (Transact-SQL)" list.
     private static readonly HashSet<string> Reserved = new(StringComparer.OrdinalIgnoreCase)
     {
         "ADD", "ALL", "ALTER", "AND", "ANY", "AS", "ASC", "AUTHORIZATION", "BACKUP", "BEGIN",
@@ -34,7 +34,7 @@ public static class SqlIdentifier
         "WRITETEXT",
     };
 
-    // Tanımlayıcıyı gerekiyorsa [..] ile sarar, gerekmiyorsa olduğu gibi döndürür.
+    // Wraps the identifier in [..] when needed, and returns it unchanged when not.
     public static string Quote(string name) =>
         NeedsQuoting(name) ? $"[{name.Replace("]", "]]")}]" : name;
 
@@ -53,9 +53,9 @@ public static class SqlIdentifier
         return !IsRegularIdentifier(name);
     }
 
-    // SQL Server "düzenli tanımlayıcı" kuralları: ilk karakter harf (Unicode) veya '_';
-    // sonraki karakterler harf, rakam, '_', '@', '$' veya '#'.
-    // '@'/'#' ile başlayanlar (değişken/temp tablo anlamı) güvenlik için tırnaklanır.
+    // SQL Server "regular identifier" rules: the first character is a letter (Unicode) or '_';
+    // the following characters are letters, digits, '_', '@', '$' or '#'.
+    // Names starting with '@' or '#' (variable/temp table meaning) are quoted for safety.
     private static bool IsRegularIdentifier(string name)
     {
         char first = name[0];

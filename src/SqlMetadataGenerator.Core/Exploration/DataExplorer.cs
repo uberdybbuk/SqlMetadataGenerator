@@ -4,16 +4,16 @@ using Microsoft.Data.SqlClient;
 
 namespace SqlMetadataGenerator.Exploration;
 
-// Veritabanı seviyesi keşif: tablo istatistikleri, satır önizleme ve WHERE sayımı.
+// Database-level exploration: table statistics, row preview and WHERE counts.
 //
-// Boyut/satır bilgisi için DMV KULLANILMAZ. sys.dm_db_partition_stats, SQL Server 2022'de
-// VIEW DATABASE PERFORMANCE STATE izni ister ve salt-okunur bir kullanıcıda yoktur.
-// sys.partitions + sys.allocation_units aynı sayıları verir ve yalnızca metadata
-// görünürlüğü gerektirir — bu aracın normal senaryosu az yetkili kullanıcıdır.
+// DMVs are NOT USED for size and row information. On SQL Server 2022 sys.dm_db_partition_stats
+// requires VIEW DATABASE PERFORMANCE STATE, which a read-only user does not have.
+// sys.partitions + sys.allocation_units give the same numbers and need only metadata
+// visibility — the normal scenario for this tool is a low-privilege user.
 public sealed class DataExplorer(string connectionString)
 {
-    // Önizlemede metin kolonlarının kesildiği karakter sayısı. Projeksiyon bu
-    // sınırla yazılır, kesilip kesilmediği de aynı sınırla anlaşılır.
+    // How many characters a text column is truncated to in the preview. The projection is written
+    // against this limit, and whether truncation happened is read off the same limit.
     internal const int TextLimit = 256;
 
     private readonly string _connectionString = connectionString;
@@ -25,14 +25,14 @@ public sealed class DataExplorer(string connectionString)
         return conn;
     }
 
-    // Treemap ve tablo grid'ini besleyen tek sorgu. Tarama yok; sayılar yaklaşıktır.
+    // The single query behind the treemap and the table grid. No scan; the numbers are approximate.
     public async Task<List<TableStats>> ReadTableStatsAsync(CancellationToken ct = default)
     {
-        // DİKKAT: satır sayısı ve boyut AYRI alt sorgulardan gelir.
-        // sys.partitions ile sys.allocation_units doğrudan join edilirse partition satırı
-        // allocation unit sayısınca çoğalır (IN_ROW + LOB + ROW_OVERFLOW) ve SUM(p.rows)
-        // katlanır — LOB kolonu olan tabloda satır sayısı 3 katına çıkıyordu.
-        // allocation join'i iki dallı: type 1/3 hobt_id ile, type 2 partition_id ile eşleşir.
+        // CAREFUL: the row count and the size come from SEPARATE sub-queries.
+        // Joining sys.partitions straight to sys.allocation_units multiplies the partition row by
+        // the number of allocation units (IN_ROW + LOB + ROW_OVERFLOW), so SUM(p.rows) is
+        // multiplied too — a table with a LOB column reported three times its real row count.
+        // The allocation join has two branches: type 1/3 match on hobt_id, type 2 on partition_id.
         const string sql = """
             SELECT
                 s.name,
@@ -81,7 +81,7 @@ public sealed class DataExplorer(string connectionString)
         return list;
     }
 
-    // DB dashboard'undaki sayaçlar. Tip adları ObjectFilter.ValidTypes sözlüğüyle aynı.
+    // The counters on the database dashboard. The type names match the ObjectFilter.ValidTypes vocabulary.
     public async Task<Dictionary<string, int>> ReadObjectCountsAsync(CancellationToken ct = default)
     {
         const string sql = """
@@ -120,13 +120,13 @@ public sealed class DataExplorer(string connectionString)
         return counts;
     }
 
-    // Tabloyu doğrular ve TÜM kolon metadatasını TEK gidiş-dönüşte okur.
-    // Daha önce üç ayrı sorgu vardı (varlık kontrolü, önizleme kolonları, detay
-    // kolonları) ve iki uç bunları ayrı ayrı çalıştırıyordu; Almanya'daki bir
-    // sunucuda her tur ~60 ms saf gecikme demekti.
+    // Validates the table and reads ALL of its column metadata in ONE round trip.
+    // There used to be three separate queries (existence check, preview columns, detail
+    // columns) and two endpoints ran them independently; against a server in Germany
+    // every round trip meant ~60 ms of pure latency.
     //
-    // Kanonik adlar katalogdan döner ve sonraki SQL'ler onlardan kurulur,
-    // kullanıcının yazdığı metinden değil — enjeksiyon yüzeyi böylece kapanır.
+    // The canonical names come back from the catalog and every later SQL statement is built
+    // from those, never from the text the user typed — which closes the injection surface.
     public async Task<TableShape?> ReadTableShapeAsync(
         string schema, string name, CancellationToken ct = default)
     {
@@ -199,10 +199,10 @@ public sealed class DataExplorer(string connectionString)
         };
     }
 
-    // TOP N satır önizlemesi. Büyük metin/binary kolonlar SUNUCU TARAFINDA kısaltılır;
-    // aksi hâlde tek satır megabaytlarca veri taşıyabilir (ör. nvarchar(max) JSON payload).
-    // Kolon metadatası çağıran tarafından verilir: aynı bilgiyi ikinci kez okumak
-    // fazladan bir gidiş-dönüş demekti.
+    // A TOP N row preview. Large text and binary columns are shortened ON THE SERVER;
+    // otherwise a single row could carry megabytes (e.g. an nvarchar(max) JSON payload).
+    // The column metadata is supplied by the caller: reading the same information a second
+    // time cost an extra round trip.
     public async Task<PreviewResult> PreviewAsync(
         TableShape shape, int top, string? where,
         int timeoutSeconds = 30, CancellationToken ct = default)
@@ -215,16 +215,16 @@ public sealed class DataExplorer(string connectionString)
 
         string displaySql = ComposeSql(columns, shape.Schema, shape.Name, top, where);
 
-        // Yalıtım seviyesi ReadOnlyCommand tarafından eklenir; kullanıcıya gösterilen
-        // metnin parçası değildir.
+        // The isolation level is prepended by ReadOnlyCommand; it is not part of the text
+        // shown to the user.
         string sql = displaySql;
 
         var rows = new List<object?[]>();
         var messages = new List<string>();
         await using var conn = await OpenAsync(ct);
 
-        // PRINT ve uyarılar hata değildir, istisna olarak gelmezler; ayrıca toplanıp
-        // kullanıcıya gösterilir (SSMS'teki Messages sekmesinin karşılığı).
+        // PRINT output and warnings are not errors and never arrive as exceptions; they are
+        // collected and shown to the user (the equivalent of the Messages tab in SSMS).
         void OnInfo(object _, SqlInfoMessageEventArgs e)
         {
             foreach (SqlError error in e.Errors)
@@ -256,10 +256,10 @@ public sealed class DataExplorer(string connectionString)
             conn.InfoMessage -= OnInfo;
         }
 
-        // Damga "kısaltılabilir" değil "kısaltıldı" anlamına gelmeli. nvarchar(max)
-        // tanımlı ama değerleri kısa bir kolonda projeksiyon LEFT ile sarmalanır,
-        // yine de tek bir karakter bile kesilmemiştir; orada uyarı göstermek gürültü.
-        // Sınıra dayanan bir değer varsa kolon gerçekten kısaltılmıştır.
+        // The badge must mean "was truncated", not "could be truncated". On a column declared
+        // nvarchar(max) whose values are short the projection is still wrapped in LEFT, yet not
+        // a single character was cut; a warning there is noise.
+        // When a value reaches the limit, the column really was truncated.
         var actuallyTruncated = new bool[columns.Count];
         for (int i = 0; i < columns.Count; i++)
         {
@@ -281,17 +281,17 @@ public sealed class DataExplorer(string connectionString)
         };
     }
 
-    // Önizleme sorgusunun metnini üretir. Metin yalnızca kolon metadatasına bağlıdır,
-    // sorgunun ÇALIŞMASINA değil — bu yüzden arayüz onu sonucu beklemeden gösterebilir.
+    // Builds the text of the preview query. The text depends only on the column metadata,
+    // never on the query RUNNING — which is why the UI can show it without waiting for the result.
     public static string BuildPreviewSql(TableShape shape, int top, string? where)
     {
         var columns = shape.Columns.Select(c => BuildPlan(c.Name, c.TypeName, c.MaxLength)).ToList();
         return columns.Count == 0 ? string.Empty : ComposeSql(columns, shape.Schema, shape.Name, top, where);
     }
 
-    // top çağıran tarafta sınırlanmış bir int; parametre yerine doğrudan yazılır.
-    // Böylece kullanıcıya gösterilen sorgu ile çalışan sorgu aynı metin olur —
-    // "TOP (@top)" gösterip "TOP 20" çalıştırmak gibi bir ayrım kalmaz.
+    // top is an int the caller has already bounded; it is written inline instead of as a parameter.
+    // That way the query shown to the user and the query that runs are the same text —
+    // no showing "TOP (@top)" while "TOP 20" executes.
     private static string ComposeSql(
         List<PreviewColumnPlan> columns, string schema, string table, int top, string? where)
     {
@@ -306,8 +306,8 @@ public sealed class DataExplorer(string connectionString)
             """;
     }
 
-    // WHERE koşuluna uyan satır sayısı. Büyük tablolarda tarama yapabilir; çağıran
-    // taraf mutlaka timeout ve iptal imkânı sunmalı.
+    // The number of rows matching the WHERE predicate. It can scan on a large table, so the
+    // caller must always offer a timeout and a way to cancel.
     public async Task<long> CountAsync(
         string schema, string table, string? where,
         int timeoutSeconds = 30, CancellationToken ct = default)
@@ -328,20 +328,20 @@ public sealed class DataExplorer(string connectionString)
     internal sealed record PreviewColumnPlan(string Name, string TypeName, bool Truncated, string Projection);
 
 
-    // Önizlemede kolon başına kısaltma stratejisi.
+    // The per-column truncation strategy used in the preview.
     internal static PreviewColumnPlan BuildPlan(string name, string typeName, short maxLength)
     {
         const int TextChars = TextLimit;
         const int BinaryBytes = 64;
 
-        // Tanımlayıcılar yalnızca gerektiğinde köşeli parantezlenir (SqlIdentifier.Quote).
-        // Takma ad da yalnızca ifade sarmalandığında yazılır: düz bir kolonda
-        // "Id AS Id" yazmanın hiçbir karşılığı yok.
+        // Identifiers are bracketed only where that is necessary (SqlIdentifier.Quote).
+        // The alias is likewise written only when the expression is wrapped: on a plain column
+        // there is nothing to be gained from writing "Id AS Id".
         string quoted = SqlIdentifier.Quote(name);
         string alias = $" AS {quoted}";
         string t = typeName.ToLowerInvariant();
 
-        // max_length: metin tiplerinde bayt cinsinden (-1 = max), nvarchar'da karakterin iki katı.
+        // max_length: in bytes for text types (-1 = max), twice the character count for nvarchar.
         bool longText = maxLength == -1 || maxLength > TextChars * 2;
         bool longBinary = maxLength == -1 || maxLength > BinaryBytes;
 
@@ -359,19 +359,19 @@ public sealed class DataExplorer(string connectionString)
                 return new PreviewColumnPlan(name, typeName, true,
                     $"CONVERT(varchar({BinaryBytes * 2 + 2}), CONVERT(varbinary({BinaryBytes}), {quoted}), 1){alias}");
 
-            // CLR tipleri nvarchar'a cast edilemez; hex gösterime düşülür.
+            // CLR types cannot be cast to nvarchar; they fall back to the hex representation.
             case "geography" or "geometry" or "hierarchyid":
                 return new PreviewColumnPlan(name, typeName, true,
                     $"CONVERT(varchar({BinaryBytes * 2 + 2}), CONVERT(varbinary({BinaryBytes}), CONVERT(varbinary(max), {quoted})), 1){alias}");
 
             default:
-                // Sarmalama yok: kolonun kendisi zaten sonuç kolonunun adını taşır.
+                // No wrapping: the column itself already carries the result column name.
                 return new PreviewColumnPlan(name, typeName, false, quoted);
         }
     }
 
-    // JSON'a güvenli değer dönüşümü. bigint ve decimal, JavaScript'in güvenli tam sayı
-    // aralığını aşabildiği için hassasiyet kaybetmemek adına metne çevrilir.
+    // Value conversion that is safe for JSON. bigint and decimal can exceed JavaScript's safe
+    // integer range, so they are turned into text rather than losing precision.
     internal static object? FormatValue(object? value)
     {
         return value switch

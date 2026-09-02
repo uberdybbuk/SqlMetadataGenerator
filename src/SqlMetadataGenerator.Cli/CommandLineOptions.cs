@@ -9,38 +9,38 @@ public enum AuthMode
     Integrated,
 }
 
-// Komut satırı argümanları. Property'ler kullanım grubuna göre düzenlenmiştir.
+// The command-line arguments. The properties are grouped by how they are used.
 public sealed class CommandLineOptions
 {
-    // --- Bağlantı, kimlik doğrulama ve güvenlik ---
+    // --- Connection, authentication and security ---
     public required string Server { get; init; }
     public required string Database { get; init; }
     public AuthMode AuthMode { get; init; } = AuthMode.Sql;
     public string? User { get; init; }
     public string? Password { get; init; }
-    // Varsayılan olarak sunucu sertifikasına güvenilir (geliştirme ortamı kolaylığı); --no-trust ile kapatılır.
+    // The server certificate is trusted by default (convenience in a development environment); --no-trust turns that off.
     public bool TrustServerCertificate { get; init; } = true;
     public bool Encrypt { get; init; } = true;
 
-    // --- Script üretimi (çıktı + biçim) ---
+    // --- Script generation (output + formatting) ---
     public string OutputRoot { get; init; } = "./output";
     public KeywordCase KeywordCase { get; init; } = KeywordCase.Lower;
     public bool EmitSetOptions { get; init; }
     public bool GroupColumns { get; init; } = true;
-    // null ise ScriptFormat'ın varsayılan audit kolon listesi kullanılır.
+    // When null, the default audit column list from ScriptFormat is used.
     public IReadOnlySet<string>? AuditColumns { get; init; }
 
     // --- Incremental ---
-    // true ise snapshot yok sayılır ve tüm nesneler yeniden çekilir.
+    // When true the snapshot is ignored and every object is fetched again.
     public bool FullRefresh { get; init; }
 
-    // --- Dışlama ---
+    // --- Exclusion ---
     public ObjectFilter Filter { get; init; } = ObjectFilter.Empty;
 
     // --- Deploy ---
-    // true ise script üretmek yerine kaynak dosyaları hedef DB'ye uygular.
+    // When true, applies the source files to the target database instead of generating scripts.
     public bool Deploy { get; init; }
-    // Deploy modunda kaynak database-root dizini (Tables/, Views/ ... içeren).
+    // In deploy mode, the source database-root directory (the one holding Tables/, Views/ ...).
     public string? SourceDir { get; init; }
 
     public ScriptFormat ToScriptFormat(string? databaseCollation = null) => new()
@@ -77,17 +77,17 @@ public sealed class CommandLineOptions
         return builder.ConnectionString;
     }
 
-    // Argümanları parse eder. Hata varsa error dolar ve null döner.
+    // Parses the arguments. On failure error is filled in and null is returned.
     public static CommandLineOptions? Parse(string[] args, out string? error)
     {
         error = null;
         string? err = null;
 
-        // Bağlantı, kimlik doğrulama ve güvenlik
+        // Connection, authentication and security
         string? server = null, database = null, user = null, password = null;
         var authMode = AuthMode.Sql;
         bool trust = true, encrypt = true, authExplicit = false;
-        // Script üretimi
+        // Script generation
         string output = "./output";
         var keywordCase = KeywordCase.Lower;
         bool emitSetOptions = false;
@@ -95,7 +95,7 @@ public sealed class CommandLineOptions
         IReadOnlySet<string>? auditColumns = null;
         // Incremental
         bool fullRefresh = false;
-        // Dışlama
+        // Exclusion
         string[] excludeTypes = [], excludeSchemas = [], excludeNames = [];
         // Deploy
         bool deploy = false;
@@ -116,7 +116,7 @@ public sealed class CommandLineOptions
 
             switch (arg)
             {
-                // Bağlantı, kimlik doğrulama ve güvenlik
+                // Connection, authentication and security
                 case "-s" or "--server":
                     server = Next();
                     break;
@@ -140,7 +140,7 @@ public sealed class CommandLineOptions
                     encrypt = false;
                     break;
 
-                // Script üretimi
+                // Script generation
                 case "-o" or "--output":
                     output = Next() ?? output;
                     break;
@@ -179,7 +179,7 @@ public sealed class CommandLineOptions
                     fullRefresh = true;
                     break;
 
-                // Dışlama
+                // Exclusion
                 case "--exclude":
                     excludeTypes = SplitList(Next());
                     foreach (var t in excludeTypes)
@@ -218,7 +218,7 @@ public sealed class CommandLineOptions
             }
         }
 
-        // Auth açıkça verilmediyse ama kullanıcı/parola varsa SQL auth varsay.
+        // When auth was not given explicitly but a user or password was, assume SQL auth.
         if (!authExplicit && (user is not null || password is not null))
         {
             authMode = AuthMode.Sql;

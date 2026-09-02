@@ -3,8 +3,8 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator.Scripting;
 
-// Foreign key'ler için ALTER TABLE ... ADD CONSTRAINT T-SQL'i üretir.
-// SSMS düzenini izler: önce kısıtı ekle, sonra ayrı bir ALTER ile CHECK/NOCHECK durumunu uygula.
+// Emits ALTER TABLE ... ADD CONSTRAINT T-SQL for foreign keys.
+// Follows the SSMS layout: add the constraint first, then apply the CHECK/NOCHECK state in a separate ALTER.
 public static class ForeignKeyScripter
 {
     public static string Script(ObjectName table, ForeignKeyInfo fk, ScriptFormat fmt)
@@ -14,7 +14,7 @@ public static class ForeignKeyScripter
         string cols = string.Join(", ", fk.Columns.Select(SqlIdentifier.Quote));
         string refCols = string.Join(", ", fk.ReferencedColumns.Select(SqlIdentifier.Quote));
 
-        // Güvenilmeyen (NOCHECK ile doğrulanmadan eklenmiş) kısıtlar WITH NOCHECK ile script'lenir.
+        // Untrusted constraints (added WITH NOCHECK and never verified) are scripted WITH NOCHECK.
         string withCheck = fk.IsNotTrusted ? fmt.Kw("WITH NOCHECK") : fmt.Kw("WITH CHECK");
 
         var sb = new StringBuilder();
@@ -42,9 +42,9 @@ public static class ForeignKeyScripter
         sb.AppendLine();
         sb.AppendLine("GO");
 
-        // İkinci ALTER yalnızca kısıt devre dışıysa gereklidir. İlk ifade kısıtı zaten etkin
-        // (ve WITH CHECK ise güvenilir) olarak ekler; bu yüzden normalde CHECK CONSTRAINT
-        // tekrarı gereksizdir. Devre dışı kısıtı disable bırakmak için NOCHECK CONSTRAINT yazılır.
+        // The second ALTER is only needed when the constraint is disabled. The first statement already adds
+        // the constraint enabled (and trusted when WITH CHECK), so repeating CHECK CONSTRAINT is normally
+        // redundant. NOCHECK CONSTRAINT is written to keep a disabled constraint disabled.
         if (fk.IsDisabled)
         {
             sb.AppendLine($"{fmt.Kw("ALTER TABLE")} {tableName} {fmt.Kw("NOCHECK CONSTRAINT")} {SqlIdentifier.Quote(fk.Name)}");
@@ -54,7 +54,7 @@ public static class ForeignKeyScripter
         return sb.ToString();
     }
 
-    // NO_ACTION ise null (yazılmaz); aksi hâlde "CASCADE" / "SET NULL" / "SET DEFAULT".
+    // null for NO_ACTION (nothing is written); otherwise "CASCADE" / "SET NULL" / "SET DEFAULT".
     private static string? ReferentialAction(string actionDesc, ScriptFormat fmt)
     {
         if (string.Equals(actionDesc, "NO_ACTION", StringComparison.OrdinalIgnoreCase))

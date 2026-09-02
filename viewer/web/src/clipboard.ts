@@ -1,31 +1,31 @@
 import { formatCellText } from "./cell";
 import type { ResultColumn } from "./ResultGrid";
 
-// Excel'e yapıştırma.
+// Pasting into Excel.
 //
-// Düz metin (TSV) tek başına yeterli değil: Excel her hücreyi kendi kurallarına
-// göre YORUMLAR ve sessizce bozar.
-//   - "2026-03-15 06:53:51.7400000" yerel ayara göre başka bir tarihe döner ya da
-//     saniye altı kısmı atılır; Türkçe Excel'de "15.03.2026" olarak görünür.
-//   - "00123" gibi kodların baştaki sıfırları uçar.
-//   - 16+ haneli bir bigint bilimsel gösterime düşer ve DEĞERİ değişir.
+// Plain text (TSV) is not enough on its own: Excel INTERPRETS every cell by its own
+// rules and silently corrupts it.
+//   - "2026-03-15 06:53:51.7400000" turns into a different date depending on the locale, or
+//     loses its sub-second part; in a Turkish Excel it shows up as "15.03.2026".
+//   - Codes like "00123" lose their leading zeros.
+//   - A bigint of 16+ digits falls back to scientific notation and its VALUE changes.
 //
-// Çözüm: panoya ayrıca text/html konur. Excel HTML'i tercih eder ve
-// mso-number-format ile hücre biçimini dinler. Varsayılan olarak her hücreyi
-// METİN ('\@') işaretliyoruz — ekranda ne görüyorsan Excel'e o gidiyor.
-// Yalnızca Excel'in kayıpsız tutabileceği sayılar gerçek sayı olarak gider.
+// The fix: a text/html flavour is put on the clipboard as well. Excel prefers HTML and
+// honours the cell format given by mso-number-format. By default every cell is marked as
+// TEXT ('\@') — what you see on screen is what reaches Excel.
+// Only numbers Excel can hold losslessly travel as real numbers.
 
 const TEXT_FORMAT = String.raw`mso-number-format:'\@'`;
 
-// Excel çift duyarlıklı sayı tutar: 15 anlamlı haneden sonrası bozulur.
+// Excel holds double-precision numbers: anything past 15 significant digits is corrupted.
 const MAX_SAFE_DIGITS = 15;
 
 const NUMERIC_TYPES = new Set([
     "int", "smallint", "tinyint", "decimal", "numeric", "float", "real", "money", "smallmoney",
 ]);
 
-// bigint bilerek listede yok: kimlik değerleri 15 haneyi aşabiliyor ve
-// aşınca Excel sayıyı yuvarlıyor. Metin olarak gitmesi daha güvenli.
+// bigint is deliberately off the list: identity values can exceed 15 digits, and past that
+// Excel rounds the number. Sending them as text is safer.
 function isSafeNumber(value: string | number | boolean | null, typeName: string): boolean {
     if (value === null || typeof value === "boolean") {
         return false;
@@ -46,14 +46,14 @@ function escapeHtml(text: string): string {
 
 export interface CopyRegion {
     columns: ResultColumn[];
-    // Satır başına, columns ile aynı sıradaki değerler.
+    // The values per row, in the same order as columns.
     rows: (string | number | boolean | null)[][];
     includeHeader: boolean;
 }
 
-// Ekranda görünen biçim panoya da gider; kullanıcı bir tarih görüp başka bir
-// tarih yapıştırmasın. NULL açıkça yazılır — Excel'de boş hücre ile "değer yok"
-// aynı şey değil.
+// What is on screen also goes to the clipboard, so the user never sees one date and pastes
+// another. NULL is written out explicitly — in Excel an empty cell and "no value" are not
+// the same thing.
 function asText(value: string | number | boolean | null, typeName: string): string {
     return formatCellText(value, typeName);
 }

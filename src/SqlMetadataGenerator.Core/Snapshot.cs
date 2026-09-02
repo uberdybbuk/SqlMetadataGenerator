@@ -3,19 +3,19 @@ using System.Text.Json.Serialization;
 
 namespace SqlMetadataGenerator;
 
-// Bir nesnenin önceki çalıştırmada yazılan durumunu temsil eder.
-// Anahtar olarak "schema.ad" (FileBaseName) kullanılır — bir şemada isim benzersizdir.
+// The state an object was written in on the previous run.
+// The key is "schema.name" (FileBaseName) — a name is unique within a schema.
 public sealed class SnapshotEntry
 {
     public required string Category { get; set; }
     public required string File { get; set; }
-    // Modüllerde modify_date ("o" formatı); tablo/synonym'de null (her zaman yeniden çekilir).
+    // modify_date ("o" format) for modules; null for tables and synonyms (they are always re-read).
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ModifyDate { get; set; }
 }
 
-// Önceki çalıştırmanın çıktısını tanımlayan manifest. Incremental karşılaştırma ve
-// silinen nesnelerin tespiti için kullanılır.
+// The manifest describing the previous run's output. Used for the incremental comparison
+// and to detect dropped objects.
 public sealed class Snapshot
 {
     public Dictionary<string, SnapshotEntry> Objects { get; set; } = new();
@@ -27,7 +27,7 @@ public static class SnapshotStore
 
     public static string PathFor(string databaseRoot) => Path.Combine(databaseRoot, FileName);
 
-    // Snapshot'ı yükler; yoksa veya bozuksa boş bir snapshot döner.
+    // Loads the snapshot; returns an empty one when it is missing or corrupt.
     public static Snapshot Load(string databaseRoot)
     {
         string path = PathFor(databaseRoot);
@@ -43,7 +43,7 @@ public static class SnapshotStore
         }
         catch (JsonException)
         {
-            // Bozuk snapshot'ı yok say; tam çekme gibi davran.
+            // Ignore a corrupt snapshot; behave like a full pull.
             return new Snapshot();
         }
     }
@@ -55,7 +55,7 @@ public static class SnapshotStore
     }
 }
 
-// Reflection yerine derleme zamanı (source-generated) serileştirme: AOT/trimming güvenli, daha hızlı.
+// Compile-time (source-generated) serialisation instead of reflection: AOT/trimming safe, and faster.
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(Snapshot))]
 internal partial class SnapshotJsonContext : JsonSerializerContext;

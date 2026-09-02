@@ -1,4 +1,4 @@
-// Backend DTO'larının aynası. ASP.NET Core camelCase serileştirdiği için adlar birebir.
+// A mirror of the backend DTOs. The names match exactly because ASP.NET Core serialises camelCase.
 
 export interface ConnectionSummary {
     alias: string;
@@ -72,26 +72,26 @@ export interface TableDetail {
 export interface PreviewColumn {
     name: string;
     typeName: string;
-    // Bu önizlemede değeri gerçekten kesildiyse true.
+    // True when the value really was cut in this preview.
     truncated: boolean;
-    // Kolon metadatasının tamamı sonuçla birlikte gelir; başlık kartı ayrı
-    // bir istek beklemez.
+    // The full column metadata arrives with the result; the header card waits on no
+    // separate request.
     column: ColumnSummary;
 }
 
 export interface PreviewResult {
     columns: PreviewColumn[];
     rows: (string | number | boolean | null)[][];
-    // Önizlemeyi üreten sorgunun kendisi; kullanıcıya gösterilir.
+    // The query that produced the preview; shown to the user.
     sql: string;
-    // Uygulama ile veritabanı arasındaki gidiş-dönüş süresi.
+    // The round-trip time between the application and the database.
     elapsedMs: number;
-    // Sunucunun döndürdüğü bilgi mesajları (PRINT, uyarılar).
+    // The informational messages the server returned (PRINT, warnings).
     messages: string[];
 }
 
-// Backend hataları RFC 7807 ProblemDetails olarak döner; "detail" alanı kullanıcıya
-// gösterilecek asıl mesajdır (ör. SQL Server'ın kendi sözdizimi hatası).
+// Backend errors come back as RFC 7807 ProblemDetails; the "detail" field carries the
+// message meant for the user (e.g. SQL Server's own syntax error).
 export class ApiError extends Error {
     readonly status: number;
 
@@ -109,7 +109,7 @@ async function get<T>(path: string): Promise<T> {
             const problem = await response.json();
             detail = problem.detail ?? problem.title ?? detail;
         } catch {
-            // Gövde JSON değilse durum satırıyla yetin.
+            // When the body is not JSON, settle for the status line.
         }
         throw new ApiError(detail, response.status);
     }

@@ -3,9 +3,9 @@ using Microsoft.Data.SqlClient;
 
 namespace SqlMetadataGenerator.Connections;
 
-// connections.json'ı okur ve alias -> bağlantı dizesi çözümlemesini yapar.
-// Alias URL'de segment olduğu için slug kurallarına zorlanır; böylece encode derdi
-// ve gerçek sunucu adlarındaki ',' / '\' karakterlerinin yarattığı kırılganlık olmaz.
+// Reads connections.json and resolves an alias to a connection string.
+// The alias is forced to the slug rules because it is a URL segment; that avoids both the
+// encoding hassle and the fragility that ',' and '\' in real server names would cause.
 public sealed class ConnectionRegistry
 {
     private readonly Dictionary<string, ConnectionEntry> _byAlias;
@@ -19,8 +19,8 @@ public sealed class ConnectionRegistry
 
     public static ConnectionRegistry Empty { get; } = new(new Dictionary<string, ConnectionEntry>(StringComparer.OrdinalIgnoreCase));
 
-    // Dosya yoksa boş kayıt döner (uygulama yine ayağa kalkar, sadece bağlantı listesi boştur).
-    // Bozuk JSON veya geçersiz alias sessizce yutulmaz: açık hata fırlatılır.
+    // Returns an empty registry when the file is missing (the app still starts, only the connection list is empty).
+    // Broken JSON or an invalid alias is never swallowed: it throws an explicit error.
     public static ConnectionRegistry Load(string path)
     {
         if (!File.Exists(path))
@@ -58,8 +58,8 @@ public sealed class ConnectionRegistry
 
     public ConnectionEntry? Find(string alias) => _byAlias.GetValueOrDefault(alias);
 
-    // Bağlantı dizesini üretir. database null ise sunucu seviyesi sorgular için 'master' kullanılır.
-    // SQL auth'ta parola ortam değişkeninden okunur; yoksa hangi değişkenin beklendiğini söyleyen hata verilir.
+    // Builds the connection string. When database is null, server-level queries use 'master'.
+    // Under SQL auth the password comes from the environment; without it the error names the variable that was expected.
     public static string BuildConnectionString(ConnectionEntry entry, string? database)
     {
         var builder = new SqlConnectionStringBuilder
@@ -90,8 +90,8 @@ public sealed class ConnectionRegistry
         return builder.ConnectionString;
     }
 
-    // Alias kuralı: ASCII harf/rakamla başlar, devamında ASCII harf, rakam, '-' veya '_'.
-    // Unicode harfler (ör. 'ş') bilerek dışarıda: URL'de encode gerektirir, elle yazılamaz.
+    // Alias rule: starts with an ASCII letter or digit, then ASCII letters, digits, '-' or '_'.
+    // Unicode letters (e.g. 'ş') are excluded on purpose: they need URL encoding and cannot be typed by hand.
     internal static bool IsValidAlias(string? alias)
     {
         if (string.IsNullOrEmpty(alias) || !IsAsciiLetterOrDigit(alias[0]))

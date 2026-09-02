@@ -10,7 +10,7 @@ import { TableListPage } from "./pages/TableListPage";
 import { TableDetailPage } from "./pages/TableDetailPage";
 import "./styles.css";
 
-// URL konumdur: her seviye gerçek bir sayfa, her sayfa bookmark'lanabilir.
+// The URL is the location: every level is a real page, and every page can be bookmarked.
 createRoot(document.getElementById("root")!).render(
     <StrictMode>
         <BrowserRouter>

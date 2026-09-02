@@ -3,10 +3,10 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator;
 
-// SQL Server sistem katalog view'larından tablo, view ve modül metadatasını okur.
-// Paralellik: her okuma kendi bağlantısını açar (SqlConnection thread-safe değildir), böylece
-// bağımsız sorgular aynı anda çalışabilir. Modül tanımları (view/sp/function/trigger) tek dev
-// result set yerine object_id'ye göre paketler hâlinde, paralel çekilir.
+// Reads table, view and module metadata from the SQL Server system catalog views.
+// Concurrency: every read opens its own connection (SqlConnection is not thread-safe), so
+// independent queries can run at the same time. Module definitions (view/sp/function/trigger) are
+// fetched in parallel, in batches keyed by object_id, instead of as one huge result set.
 public sealed class MetadataReader(string connectionString)
 {
     private const int ModuleBatchSize = 1000;
@@ -19,7 +19,7 @@ public sealed class MetadataReader(string connectionString)
         return conn;
     }
 
-    // Veritabanının varsayılan collation'ı (DB default ile eşleşen kolonlarda COLLATE yazmamak için).
+    // The database default collation (so COLLATE is omitted on columns that match it).
     public async Task<string?> ReadDatabaseCollationAsync(CancellationToken ct = default)
     {
         const string sql = "SELECT CONVERT(nvarchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation'));";
@@ -29,10 +29,10 @@ public sealed class MetadataReader(string connectionString)
         return result is null or DBNull ? null : (string)result;
     }
 
-    // Tablo metadatasını okur. progress verilirse her tamamlanan alt sorgu için 1 raporlar (toplam 7).
+    // Reads table metadata. When progress is supplied it reports 1 per finished sub-query (7 in total).
     public async Task<List<TableInfo>> ReadTablesAsync(IProgress<int>? progress = null, CancellationToken ct = default)
     {
-        // Bir alt sorgu tamamlandığında ilerleme raporla.
+        // Report progress whenever a sub-query finishes.
         async Task<T> Tracked<T>(Task<T> task)
         {
             T result = await task;
@@ -40,7 +40,7 @@ public sealed class MetadataReader(string connectionString)
             return result;
         }
 
-        // Bağımsız metadata sorgularını aynı anda çalıştır (her biri kendi bağlantısını açar).
+        // Run the independent metadata queries at the same time (each opens its own connection).
         var namesTask = Tracked(ReadTableNamesAsync(ct));
         var columnsTask = Tracked(ReadColumnsAsync(ct));
         var pkTask = Tracked(ReadPrimaryKeysAsync(ct));
@@ -146,7 +146,7 @@ public sealed class MetadataReader(string connectionString)
         return map;
     }
 
-    // ReadColumnsAsync ve table type kolon sorgusu ile aynı SELECT sırasını bekler (1..15).
+    // Expects the same SELECT order as ReadColumnsAsync and the table type column query (1..15).
     private static ColumnInfo MapColumn(SqlDataReader reader) => new()
     {
         Name = reader.GetString(1),
@@ -229,7 +229,7 @@ public sealed class MetadataReader(string connectionString)
             ORDER BY i.object_id, i.index_id, ic.key_ordinal;
             """;
 
-        // (object_id, index_id) -> birikim
+        // (object_id, index_id) -> accumulator
         var acc = new Dictionary<(int, int), (string Name, bool Clustered, List<(string, bool)> Cols, int ObjectId)>();
         await using var conn = await OpenConnectionAsync(ct);
         await using var cmd = ReadOnlyCommand.Create(conn, sql);
@@ -267,8 +267,8 @@ public sealed class MetadataReader(string connectionString)
 
     private async Task<Dictionary<int, List<IndexInfo>>> ReadIndexesAsync(CancellationToken ct)
     {
-        // PK ve unique constraint'ler ayrı ele alınır (PK inline; unique constraint sonraki adım).
-        // Yalnızca rowstore index'ler: type 1 = clustered, 2 = nonclustered.
+        // Primary keys and unique constraints are handled separately (PK inline; unique constraints are a later step).
+        // Rowstore indexes only: type 1 = clustered, 2 = nonclustered.
         const string sql = """
             SELECT
                 i.object_id,
@@ -291,7 +291,7 @@ public sealed class MetadataReader(string connectionString)
             ORDER BY i.object_id, i.index_id, ic.is_included_column, ic.key_ordinal, ic.index_column_id;
             """;
 
-        // (object_id, index_id) -> birikim
+        // (object_id, index_id) -> accumulator
         var acc = new Dictionary<(int, int), (IndexBuilder Builder, int ObjectId)>();
         await using var conn = await OpenConnectionAsync(ct);
         await using var cmd = ReadOnlyCommand.Create(conn, sql);
@@ -385,7 +385,7 @@ public sealed class MetadataReader(string connectionString)
             ORDER BY fk.parent_object_id, fk.object_id, fkc.constraint_column_id;
             """;
 
-        // fk.object_id -> birikim
+        // fk.object_id -> accumulator
         var acc = new Dictionary<int, (ForeignKeyBuilder Builder, int ParentObjectId)>();
         await using var conn = await OpenConnectionAsync(ct);
         await using var cmd = ReadOnlyCommand.Create(conn, sql);
@@ -493,8 +493,8 @@ public sealed class MetadataReader(string connectionString)
         return map;
     }
 
-    // Tüm modüllerin (view/sp/function/trigger) hafif başlıklarını okur — definition YOK.
-    // Incremental karşılaştırma ve silme tespiti bu listeden yapılır.
+    // Reads the lightweight headers of every module (view/sp/function/trigger) — NO definition.
+    // The incremental comparison and drop detection work off this list.
     public async Task<List<ModuleHeader>> ReadModuleHeadersAsync(CancellationToken ct = default)
     {
         const string sql = """
@@ -524,9 +524,9 @@ public sealed class MetadataReader(string connectionString)
         return headers;
     }
 
-    // Verilen başlıkların tanımlarını object_id'ye göre 1000'lik paketler hâlinde paralel çeker.
-    // Tek dev result set'in ağ/bellek maliyetinden kaçınır; sonuç başlık sırasını korur.
-    // progress verilirse her tamamlanan paket için 1 raporlar (toplam = paket sayısı).
+    // Fetches the definitions for the given headers in parallel, in batches of 1000 by object_id.
+    // Avoids the network and memory cost of one huge result set; the result keeps the header order.
+    // When progress is supplied it reports 1 per finished batch (max = the batch count).
     public async Task<List<RoutineInfo>> ReadModuleDefinitionsAsync(
         IReadOnlyList<ModuleHeader> headers, IProgress<int>? progress = null, CancellationToken ct = default)
     {
@@ -536,8 +536,8 @@ public sealed class MetadataReader(string connectionString)
             batches.Add(headers.Skip(i).Take(ModuleBatchSize).ToList());
         }
 
-        // Paralellik derecesini framework belirler (MaxDegreeOfParallelism verilmedi);
-        // sıra korunur çünkü sonuçlar batch indeksiyle toplanır.
+        // The framework picks the degree of parallelism (MaxDegreeOfParallelism is not set);
+        // order survives because the results are collected by batch index.
         var byBatch = new List<RoutineInfo>[batches.Count];
         await Parallel.ForEachAsync(
             Enumerable.Range(0, batches.Count),
@@ -551,12 +551,12 @@ public sealed class MetadataReader(string connectionString)
         return byBatch.SelectMany(b => b).ToList();
     }
 
-    // Verilen başlık sayısı için kaç paket (sorgu) çalışacağını döndürür — progress maxValue'su için.
+    // Returns how many batches (queries) will run for the given header count — the maxValue for progress.
     public static int BatchCount(int headerCount) => (headerCount + ModuleBatchSize - 1) / ModuleBatchSize;
 
     private async Task<List<RoutineInfo>> ReadDefinitionsForBatchAsync(List<ModuleHeader> batch, CancellationToken ct)
     {
-        // object_id'ler int olduğundan IN listesine doğrudan gömmek güvenlidir.
+        // object_id values are ints, so embedding them straight into the IN list is safe.
         string ids = string.Join(",", batch.Select(h => h.ObjectId));
         string sql = $"SELECT object_id, definition FROM sys.sql_modules WHERE object_id IN ({ids});";
 
@@ -587,7 +587,7 @@ public sealed class MetadataReader(string connectionString)
         _ => "Programmability",
     };
 
-    // Tip kodunu exclusion filtresinin anladığı kind'e çevirir.
+    // Maps a type code to the kind the exclusion filter understands.
     private static string KindForType(string type) => type switch
     {
         "V" => "views",
@@ -597,8 +597,8 @@ public sealed class MetadataReader(string connectionString)
         _ => "",
     };
 
-    // Kullanıcı tanımlı şemaları okur. Yerleşik şemalar (dbo/guest/sys/INFORMATION_SCHEMA ve
-    // sabit veritabanı rolü şemaları) hariç tutulur — bunlar schema_id aralığıyla ayrılır.
+    // Reads user-defined schemas. Built-in schemas (dbo/guest/sys/INFORMATION_SCHEMA and the
+    // fixed database role schemas) are excluded — the schema_id range separates them.
     public async Task<List<SchemaInfo>> ReadSchemasAsync(CancellationToken ct = default)
     {
         const string sql = """
@@ -621,10 +621,10 @@ public sealed class MetadataReader(string connectionString)
         return schemas;
     }
 
-    // Table type'ları (User-Defined Table Types) kolonları ve PK/UNIQUE kısıtlarıyla okur.
+    // Reads table types (User-Defined Table Types) with their columns and PK/UNIQUE constraints.
     public async Task<List<TableTypeInfo>> ReadTableTypesAsync(CancellationToken ct = default)
     {
-        // Başlıklar: type_table_object_id internal tabloyu işaret eder.
+        // Headers: type_table_object_id points at the internal table.
         const string headerSql = """
             SELECT tt.type_table_object_id, s.name, tt.name
             FROM sys.table_types tt
@@ -633,7 +633,7 @@ public sealed class MetadataReader(string connectionString)
             ORDER BY s.name, tt.name;
             """;
 
-        // Kolonlar: MapColumn ile aynı SELECT sırası (0 = object_id, 1..15 = kolon alanları).
+        // Columns: the same SELECT order as MapColumn (0 = object_id, 1..15 = the column fields).
         const string columnsSql = """
             SELECT
                 c.object_id, c.name, c.column_id, ty.name AS type_name, ty.is_user_defined,
@@ -649,7 +649,7 @@ public sealed class MetadataReader(string connectionString)
             ORDER BY c.object_id, c.column_id;
             """;
 
-        // PK ve UNIQUE kısıtlar (table type internal tablosu üzerinden).
+        // PK and UNIQUE constraints (through the table type internal table).
         const string keysSql = """
             SELECT i.object_id, i.name, i.type_desc, i.is_primary_key, c.name AS column_name, ic.is_descending_key
             FROM sys.table_types tt
@@ -691,7 +691,7 @@ public sealed class MetadataReader(string connectionString)
             }
         }
 
-        // (object_id, kısıt adı) bazında PK/UNIQUE birikimi.
+        // PK/UNIQUE accumulation keyed by (object_id, constraint name).
         var keyAcc = new Dictionary<(int, string), (int ObjectId, string Name, bool Clustered, bool IsPk, List<(string, bool)> Cols)>();
         await using (var cmd = ReadOnlyCommand.Create(conn, keysSql))
         await using (var reader = await cmd.ExecuteReaderAsync(ct))
@@ -736,7 +736,7 @@ public sealed class MetadataReader(string connectionString)
         }).ToList();
     }
 
-    // Alias tiplerini (User-Defined Data Types) okur — tablo tipleri hariç.
+    // Reads alias types (User-Defined Data Types) — table types excluded.
     public async Task<List<UserDefinedTypeInfo>> ReadUserDefinedTypesAsync(CancellationToken ct = default)
     {
         const string sql = """
@@ -793,7 +793,7 @@ public sealed class MetadataReader(string connectionString)
             ORDER BY s.name, seq.name;
             """;
 
-        // start/increment/min/max sql_variant'tır; tip-bağımsız metne çevrilir.
+        // start/increment/min/max are sql_variant; converted to type-independent text.
         static string Variant(object value) =>
             Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
 

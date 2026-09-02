@@ -1,6 +1,6 @@
 namespace SqlMetadataGenerator.Scripting;
 
-// Sistem veri tipini uzunluk/precision/scale ile biçimlendirir
+// Formats a system data type with its length/precision/scale
 // (varchar(50), nvarchar(max), decimal(18, 2), datetime2(7) ...).
 public static class SqlTypeFormatter
 {
@@ -20,7 +20,7 @@ public static class SqlTypeFormatter
             case "decimal" or "numeric":
                 return $"{name}({precision}, {scale})";
 
-            // Bu tipler için scale fractional second precision'ı belirtir.
+            // For these types scale carries the fractional-second precision.
             case "datetime2" or "datetimeoffset" or "time":
                 return $"{name}({scale})";
 

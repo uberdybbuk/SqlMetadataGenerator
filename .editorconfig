@@ -1,5 +1,5 @@
 root = true
 
 [*.cs]
-# Her zaman küme parantezi (tek satırlık bloklarda bile)
+# Always use braces (even for single-line blocks)
 csharp_prefer_braces = true:warning

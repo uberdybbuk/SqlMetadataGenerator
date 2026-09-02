@@ -3,8 +3,8 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator.Scripting;
 
-// Table type'lar için CREATE TYPE ... AS TABLE T-SQL'i üretir.
-// Kolon gövdesi TableScripter ile paylaşılır; constraint adları yazılmaz (sistem-üretimli).
+// Emits CREATE TYPE ... AS TABLE T-SQL for table types.
+// The column body is shared with TableScripter; constraint names are omitted (system-generated).
 public static class TableTypeScripter
 {
     public static string Script(TableTypeInfo type, ScriptFormat fmt)

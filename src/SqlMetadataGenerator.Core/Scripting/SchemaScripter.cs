@@ -3,7 +3,7 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator.Scripting;
 
-// Şemalar için CREATE SCHEMA T-SQL'i üretir.
+// Emits CREATE SCHEMA T-SQL for schemas.
 public static class SchemaScripter
 {
     public static string Script(SchemaInfo schema, ScriptFormat fmt)
@@ -11,7 +11,7 @@ public static class SchemaScripter
         string name = SqlIdentifier.Quote(schema.Name);
         var sb = new StringBuilder();
 
-        // Sahip dbo değilse AUTHORIZATION belirtilir; dbo varsayılandır, yazılmaz.
+        // AUTHORIZATION is written only when the owner is not dbo; dbo is the default and stays implicit.
         if (!schema.Owner.Equals("dbo", StringComparison.OrdinalIgnoreCase))
         {
             sb.AppendLine($"{fmt.Kw("CREATE SCHEMA")} {name} {fmt.Kw("AUTHORIZATION")} {SqlIdentifier.Quote(schema.Owner)}");

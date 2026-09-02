@@ -15,8 +15,8 @@ internal static class Program
 
         var app = builder.Build();
 
-        // Hangi dosyanın kullanıldığını (veya bulunamadığını) açıkça söyle: sessizce boş
-        // bağlantı listesiyle açılmak teşhis edilmesi zor bir durum yaratıyor.
+        // Say plainly which file was used (or that none was found): opening silently with an
+        // empty connection list produced a state that was hard to diagnose.
         var log = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Connections");
         if (resolved is null)
         {
@@ -29,18 +29,18 @@ internal static class Program
 
         app.MapExplorerEndpoints();
 
-        // Production'da SPA'yı wwwroot'tan sun. Fallback şart: /app/demo/Bpm/tables gibi
-        // istemci tarafı bir rotada sayfa yenilenince sunucuda o dosya yoktur.
-        // Geliştirmede SPA'yı Vite sunar (:5173) ve /api'yi buraya proxy'ler.
+        // In production the SPA is served from wwwroot. The fallback is required: on a client-side
+        // route like /app/demo/Bpm/tables the server has no such file when the page is refreshed.
+        // In development Vite serves the SPA (:5173) and proxies /api here.
         app.UseStaticFiles();
         app.MapFallbackToFile("index.html");
 
         app.Run();
     }
 
-    // Göreli yol için sırayla: çalışma dizini, content root, sonra content root'tan yukarı.
-    // Yukarı arama sayesinde 'dotnet run --project src/...' hangi dizinden çağrılırsa
-    // çağrılsın repo kökündeki dosya bulunur.
+    // For a relative path, in order: the working directory, the content root, then upwards from the content root.
+    // The upward search means 'dotnet run --project src/...' finds the file at the repository root
+    // no matter which directory it was invoked from.
     private static string? ResolveConnectionsPath(string configured, string contentRoot)
     {
         if (Path.IsPathRooted(configured))

@@ -1,11 +1,11 @@
 import type { SVGProps } from "react";
 
-// Tabler Icons'tan alınmış ikon gövdeleri (MIT, https://tabler.io/icons).
-// Paket bağımlılığı yerine kullanılan 14 ikon gömüldü: bundle'a ağırlık binmiyor
-// ve setin ne zaman değişeceği bizim kontrolümüzde.
+// Icon bodies taken from Tabler Icons (MIT, https://tabler.io/icons).
+// The 14 icons in use are embedded instead of depending on the package: nothing is added to
+// the bundle, and when the set changes is up to us.
 //
-// Hepsi currentColor ile çizilir, yani ikon bulunduğu metnin rengini alır ve
-// açık/koyu tema için ayrıca bir şey yapmak gerekmez.
+// They all draw with currentColor, so an icon takes the colour of the text around it and
+// light/dark mode needs nothing extra.
 
 export type IconName =
     | "server"
@@ -54,7 +54,7 @@ const PATHS: Record<IconName, string> = {
         '<path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0" /> <path d="M21 21l-6 -6" />',
 };
 
-// Etiketler ObjectFilter.ValidTypes sözlüğüyle aynı kavramlara karşılık gelir.
+// The labels map to the same concepts as the ObjectFilter.ValidTypes vocabulary.
 export const ICON_LABELS: Record<IconName, string> = {
     server: "server",
     database: "database",
@@ -75,7 +75,7 @@ export const ICON_LABELS: Record<IconName, string> = {
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {
     name: IconName;
     size?: number;
-    // Anlam taşıyorsa erişilebilir ad verilir; salt dekoratifse gizlenir.
+    // Given an accessible name when it carries meaning; hidden when it is purely decorative.
     label?: string;
 }
 

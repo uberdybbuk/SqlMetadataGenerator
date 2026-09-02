@@ -3,9 +3,9 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator.Scripting;
 
-// Tablo metadatasından CREATE TABLE T-SQL'i üretir.
-// İlk sürüm: kolonlar (tip, identity, computed, nullability, default) + primary key.
-// (Foreign key'ler, non-clustered index'ler sonraki adımlarda eklenecek.)
+// Emits CREATE TABLE T-SQL from table metadata.
+// First cut: columns (type, identity, computed, nullability, default) plus the primary key.
+// (Foreign keys and non-clustered indexes arrive in later steps.)
 public static class TableScripter
 {
     public static string Script(TableInfo table, ScriptFormat fmt)
@@ -26,21 +26,21 @@ public static class TableScripter
         sb.AppendLine($") {fmt.Kw("ON")} [PRIMARY]");
         sb.AppendLine("GO");
 
-        // Index'ler (CREATE TABLE'dan sonra)
+        // Indexes (after CREATE TABLE)
         foreach (var index in table.Indexes)
         {
             sb.AppendLine();
             sb.Append(IndexScripter.Script(table.Name, index, fmt));
         }
 
-        // Check constraint'ler
+        // Check constraints
         foreach (var check in table.CheckConstraints)
         {
             sb.AppendLine();
             sb.Append(CheckConstraintScripter.Script(table.Name, check, fmt));
         }
 
-        // Foreign key'ler (en sonda)
+        // Foreign keys (last)
         foreach (var fk in table.ForeignKeys)
         {
             sb.AppendLine();
@@ -50,16 +50,16 @@ public static class TableScripter
         return sb.ToString();
     }
 
-    // CREATE TABLE'ın iç gövdesini (kolonlar, PK, ayraç boş satırları) üretir.
-    // Hizalama: tanımlayıcı | veri tipi | geri kalanı, her sütun en uzun değere göre doldurulur.
-    // Boş satır kuralları: (1) PK constraint öncesi; (2) audit kolon bloklarının öncesi/sonrası.
-    // Tablolarda ve table type'larda paylaşılır. includeConstraintNames=false ise PK/UNIQUE
-    // constraint adı yazılmaz (table type constraint adları sistem-üretimlidir, taşınmaz).
+    // Builds the inner body of CREATE TABLE (columns, primary key, separating blank lines).
+    // Alignment: identifier | data type | the rest, each column padded to its longest value.
+    // Blank-line rules: (1) before the PK constraint; (2) around audit column blocks.
+    // Shared by tables and table types. With includeConstraintNames=false the PK/UNIQUE
+    // constraint name is omitted (table type constraint names are system-generated and do not travel).
     internal static string BuildColumnBody(
         IReadOnlyList<ColumnInfo> columns, PrimaryKeyInfo? primaryKey,
         IReadOnlyList<UniqueConstraintInfo> uniqueConstraints, ScriptFormat fmt, bool includeConstraintNames)
     {
-        // (Id, Type, Suffix) parçalarına böl; computed kolonlarda Type boştur.
+        // Split into (Id, Type, Suffix); Type is empty for computed columns.
         var parts = new List<(string Id, string Type, string Suffix)>();
         foreach (var col in columns)
         {
@@ -77,12 +77,12 @@ public static class TableScripter
         int idWidth = parts.Count == 0 ? 0 : parts.Max(p => p.Id.Length);
         int typeWidth = parts.Count == 0 ? 0 : parts.Max(p => p.Type.Length);
 
-        // items: hizalanmış kolon satırları + (varsa) PK constraint satırı.
+        // items: the aligned column lines plus the PK constraint line, when there is one.
         var items = parts
             .Select(p => $"\t{p.Id.PadRight(idWidth)} {p.Type.PadRight(typeWidth)} {p.Suffix}".TrimEnd())
             .ToList();
 
-        // Constraint bloğu: önce PK, sonra UNIQUE constraint'ler (inline).
+        // Constraint block: the primary key first, then UNIQUE constraints (inline).
         int firstConstraintIndex = items.Count;
         if (primaryKey is { } pk)
         {
@@ -96,8 +96,8 @@ public static class TableScripter
 
         bool hasConstraint = items.Count > firstConstraintIndex;
 
-        // Boş satır pozisyonları (item indeksine göre). Kolon indeksleri = item indeksleri,
-        // çünkü kolonlar items'ın başında yer alır.
+        // Blank-line positions (by item index). Column indexes equal item indexes,
+        // because the columns come first in items.
         var blankBefore = new HashSet<int>();
         var blankAfter = new HashSet<int>();
         DetectAuditBlocks(columns, fmt.AuditColumns, blankBefore, blankAfter);
@@ -139,8 +139,8 @@ public static class TableScripter
         return string.Join("\n", outLines);
     }
 
-    // Ardışık audit kolonu gruplarını (>= 2) bulur ve grubun başından önce / sonundan sonra
-    // boş satır işaretler. Grup tablonun en başındaysa öncesine boşluk konmaz.
+    // Finds consecutive runs (>= 2) of audit columns and marks a blank line before the first
+    // and after the last. A run at the very top of the table gets no leading blank line.
     private static void DetectAuditBlocks(
         IReadOnlyList<ColumnInfo> columns, IReadOnlySet<string> auditColumns,
         HashSet<int> blankBefore, HashSet<int> blankAfter)
@@ -173,9 +173,9 @@ public static class TableScripter
         }
     }
 
-    // Audit olmayan ardışık kolonları, ortak kelime paylaştıkları sürece zincirleyerek gruplar.
-    // En az 2 kolonluk grupların öncesine/sonrasına boş satır işaretler. Audit kolonları zinciri kırar
-    // (onlar ayrıca DetectAuditBlocks tarafından ele alınır).
+    // Chains consecutive non-audit columns into groups for as long as they share a word.
+    // Groups of at least 2 columns get a blank line before and after. Audit columns break the chain
+    // (DetectAuditBlocks handles those separately).
     private static void DetectWordGroups(
         IReadOnlyList<ColumnInfo> columns, IReadOnlySet<string> auditColumns,
         HashSet<int> blankBefore, HashSet<int> blankAfter)
@@ -212,7 +212,7 @@ public static class TableScripter
         }
     }
 
-    // Kolon adını kelimelerine ayırır: '_' ve camelCase/PascalCase sınırları (büyük/küçük harf duyarsız).
+    // Splits a column name into words at '_' and camelCase/PascalCase boundaries (case-insensitive).
     private static HashSet<string> Tokenize(string name)
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -232,7 +232,7 @@ public static class TableScripter
         int start = 0;
         for (int i = 1; i < s.Length; i++)
         {
-            // "UpdatedAt" -> Updated|At ; "XMLData" -> XML|Data ; "PROCESS" -> bütün kalır
+            // "UpdatedAt" -> Updated|At ; "XMLData" -> XML|Data ; "PROCESS" -> stays whole
             bool boundary = char.IsUpper(s[i])
                 && (char.IsLower(s[i - 1]) || (i + 1 < s.Length && char.IsLower(s[i + 1])));
             if (boundary)
@@ -247,13 +247,13 @@ public static class TableScripter
         }
     }
 
-    // Tipten sonraki kısım: COLLATE, IDENTITY, NULL/NOT NULL, DEFAULT.
+    // The part after the type: COLLATE, IDENTITY, NULL/NOT NULL, DEFAULT.
     private static string BuildColumnSuffix(ColumnInfo col, ScriptFormat fmt)
     {
         var sb = new StringBuilder();
 
-        // COLLATE yalnızca kolon collation'ı DB varsayılanından farklıysa yazılır
-        // (DB collation bilinmiyorsa güvenli tarafta kalıp yazarız).
+        // COLLATE is written only when the column collation differs from the database default
+        // (when the database collation is unknown we write it, to stay on the safe side).
         if (col.CollationName is not null && IsCharType(col.TypeName)
             && !string.Equals(col.CollationName, fmt.DatabaseCollation, StringComparison.OrdinalIgnoreCase))
         {

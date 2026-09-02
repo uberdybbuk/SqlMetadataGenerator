@@ -9,25 +9,25 @@ public sealed class ServerInfo
     public required string MachineName { get; init; }
 }
 
-// Sunucu dashboard'unun satırı. Boyutlar sys.master_files'tan gelir: bunlar AYRILMIŞ
-// dosya boyutudur, kullanılan alan değil. Kullanılan/boş kırılımı DB'ye girince hesaplanır.
+// A row of the server dashboard. The sizes come from sys.master_files: these are the ALLOCATED
+// file sizes, not the space in use. The used/free split is computed once you enter the database.
 public sealed class DatabaseInfo
 {
     public required string Name { get; init; }
     public required string State { get; init; }
     public required string RecoveryModel { get; init; }
     public required byte CompatibilityLevel { get; init; }
-    // Çevrimdışı veritabanlarında null olabilir.
+    // Can be null for offline databases.
     public string? Collation { get; init; }
     public required DateTime CreateDate { get; init; }
     public required long DataMb { get; init; }
     public required long LogMb { get; init; }
-    // Yalnızca ONLINE veritabanlarına girilebilir.
+    // Only ONLINE databases can be entered.
     public bool IsBrowsable => State.Equals("ONLINE", StringComparison.OrdinalIgnoreCase);
 }
 
-// Treemap'i besleyen satır. RowCount ve boyutlar katalog view'larından gelir (tarama yok),
-// bu yüzden yaklaşıktır; UI'da "~" ile gösterilmeli.
+// A row behind the treemap. RowCount and the sizes come from catalog views (no scan),
+// so they are approximate; the UI should show them with a "~".
 public sealed class TableStats
 {
     public required string Schema { get; init; }
@@ -37,7 +37,7 @@ public sealed class TableStats
     public required long UsedKb { get; init; }
 }
 
-// Bir tablonun kimliği ve tüm kolon metadatası — tek sorguda okunur.
+// A table's identity plus all of its column metadata — read in a single query.
 public sealed class TableShape
 {
     public required int ObjectId { get; init; }
@@ -48,10 +48,10 @@ public sealed class TableShape
 
 public sealed class PreviewColumn
 {
-    // Kolon metadatasının tamamı sonuçla birlikte döner; başlık bilgi kartı
-    // ayrı bir istek beklemez.
+    // The full column metadata travels with the result, so the header info card
+    // waits on no separate request.
     public required ColumnSummary Column { get; init; }
-    // Bu önizlemede değeri gerçekten kesildiyse true.
+    // True when the value really was cut in this preview.
     public required bool Truncated { get; init; }
 
     public string Name => Column.Name;
@@ -61,21 +61,21 @@ public sealed class PreviewColumn
 public sealed class PreviewResult
 {
     public required List<PreviewColumn> Columns { get; init; }
-    // Satır başına kolon sırasına göre değerler; null'lar korunur.
+    // The values per row, in column order; nulls are preserved.
     public required List<object?[]> Rows { get; init; }
-    // Gerçekten çalıştırılan sorgu. Kullanıcıya gösterilir: kısaltmanın nereden
-    // geldiği de dahil, önizlemenin nasıl üretildiği görünür olsun.
+    // The query that actually ran. Shown to the user so that how the preview was produced —
+    // including where the truncation comes from — stays visible.
     public required string Sql { get; init; }
-    // Komutun gönderilmesinden son satırın okunmasına kadar geçen süre —
-    // yani uygulama ile veritabanı arasındaki gidiş-dönüş.
+    // The time from sending the command to reading the last row —
+    // that is, the round trip between the application and the database.
     public required long ElapsedMs { get; init; }
-    // Sunucunun döndürdüğü bilgi mesajları (PRINT, uyarılar). Hata değildir;
-    // hatalar istisna olarak yükselir.
+    // The informational messages the server returned (PRINT, warnings). These are not errors;
+    // errors surface as exceptions.
     public required List<string> Messages { get; init; }
 }
 
-// Tablo detay sayfasının kolon satırı. Script üretimi için değil, GÖSTERİM için —
-// tam DDL üretimi Scripting/ katmanının işi.
+// A column row on the table detail page. For DISPLAY, not for script generation —
+// full DDL generation is the job of the Scripting/ layer.
 public sealed class ColumnSummary
 {
     public required string Name { get; init; }
@@ -88,6 +88,6 @@ public sealed class ColumnSummary
     public required bool IsIdentity { get; init; }
     public required bool IsComputed { get; init; }
     public string? DefaultDefinition { get; init; }
-    // Bu kolon birincil anahtarın parçası mı (anahtar sırası; değilse null).
+    // Whether this column is part of the primary key (the key ordinal; null when it is not).
     public int? PrimaryKeyOrdinal { get; init; }
 }

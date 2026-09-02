@@ -15,14 +15,14 @@ export function useDarkMode(): boolean {
     return dark;
 }
 
-// Tek hue (mavi), açıktan koyuya sequential rampa — büyüklük kodlaması için.
-// Renk ŞEMA KİMLİĞİNİ taşımıyor: şema sayısı kategorik palet slotlarını (8) aşıyor
-// ve renk döngüsü yasak. Kimliği treemap'in hiyerarşik gruplaması taşır; renk
-// ikinci bir büyüklüğü (satır sayısı) kodlar.
+// A single hue (blue), a sequential ramp from light to dark — for encoding magnitude.
+// The colour does NOT carry SCHEMA IDENTITY: the number of schemas exceeds the categorical
+// palette's slots (8), and recycling colours is forbidden. Identity is carried by the treemap's
+// hierarchical grouping; the colour encodes a second magnitude (the row count).
 //
-// Rampa uçları her modda metnin okunabileceği yarıda tutuldu: açık modda açık
-// tonlar + koyu metin, koyu modda koyu tonlar + açık metin. Böylece kutu üstündeki
-// etiket her zaman okunur.
+// The ends of the ramp stay where text remains readable in either mode: light tones plus dark
+// text in light mode, dark tones plus light text in dark mode. That keeps the label on a box
+// legible in every case.
 const RAMP_LIGHT = ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7"];
 const RAMP_DARK = ["#104281", "#184f95", "#1c5cab", "#256abf", "#2a78d6", "#3987e5"];
 
@@ -34,7 +34,7 @@ export function labelColorFor(dark: boolean): string {
     return dark ? "#ffffff" : "#0b0b0b";
 }
 
-// t = 0..1 -> rampadaki renk (adımlar arası doğrusal karışım).
+// t = 0..1 -> the colour on the ramp (linear blend between the steps).
 export function sampleRamp(ramp: string[], t: number): string {
     const clamped = Math.max(0, Math.min(1, t));
     const scaled = clamped * (ramp.length - 1);

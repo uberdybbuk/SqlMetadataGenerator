@@ -3,7 +3,7 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator.Scripting;
 
-// Sequence'ler için CREATE SEQUENCE T-SQL'i üretir.
+// Emits CREATE SEQUENCE T-SQL for sequences.
 public static class SequenceScripter
 {
     public static string Script(SequenceInfo seq, ScriptFormat fmt)

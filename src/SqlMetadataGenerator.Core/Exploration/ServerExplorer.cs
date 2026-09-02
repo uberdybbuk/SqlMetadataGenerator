@@ -2,9 +2,9 @@ using Microsoft.Data.SqlClient;
 
 namespace SqlMetadataGenerator.Exploration;
 
-// Sunucu seviyesi keşif: sürüm bilgisi ve veritabanı listesi.
-// Bağlantı 'master'a açılır; veritabanı başına AYRI bağlantı açılmaz (SMO'nun aksine),
-// çünkü sys.master_files sunucu genelindedir.
+// Server-level exploration: version information and the database list.
+// The connection opens against 'master'; no SEPARATE connection is opened per database (unlike SMO),
+// because sys.master_files is server-wide.
 public sealed class ServerExplorer(string connectionString)
 {
     private readonly string _connectionString = connectionString;
@@ -18,8 +18,8 @@ public sealed class ServerExplorer(string connectionString)
 
     public async Task<ServerInfo> ReadServerInfoAsync(CancellationToken ct = default)
     {
-        // SERVERPROPERTY sql_variant döner; CONVERT edilmezse sürücü de istemci de
-        // gereksiz geniş alan ayırır.
+        // SERVERPROPERTY returns sql_variant; without a CONVERT both the driver and the client
+        // reserve a needlessly wide field.
         const string sql = """
             SELECT
                 CONVERT(nvarchar(64),  SERVERPROPERTY('ProductVersion')),
@@ -47,12 +47,12 @@ public sealed class ServerExplorer(string connectionString)
         };
     }
 
-    // Tüm veritabanlarını boyutlarıyla birlikte TEK sorguda döner.
-    // sys.databases izne göre filtrelenir: yetkisi olmayan kullanıcı yalnızca kendi
-    // veritabanlarını görür — bu bir hata değil, normal davranıştır.
+    // Returns every database with its sizes in a SINGLE query.
+    // sys.databases is filtered by permission: a user without rights sees only their own
+    // databases — that is normal behaviour, not an error.
     public async Task<List<DatabaseInfo>> ReadDatabasesAsync(CancellationToken ct = default)
     {
-        // SUM içinde ELSE 0 şart: atlanırsa "Null value is eliminated by an aggregate" uyarısı gelir.
+        // ELSE 0 inside the SUM is required: without it you get a "Null value is eliminated by an aggregate" warning.
         const string sql = """
             SELECT
                 d.name,

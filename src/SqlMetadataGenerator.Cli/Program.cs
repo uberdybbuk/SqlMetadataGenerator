@@ -48,7 +48,7 @@ internal static class Program
         }
     }
 
-    // Kaynak dosyaları hedef veritabanına multi-pass retry ile uygular.
+    // Applies the source files to the target database with a multi-pass retry.
     private static async Task<int> RunDeployAsync(CommandLineOptions options, string connectionString)
     {
         string sourceRoot = options.SourceDir!;
@@ -95,7 +95,7 @@ internal static class Program
         return 0;
     }
 
-    // Veritabanı metadatasını okuyup (incremental) script dosyalarını üretir.
+    // Reads the database metadata (incrementally) and generates the script files.
     private static async Task<int> RunGenerateAsync(CommandLineOptions options, string connectionString)
     {
         var reader = new MetadataReader(connectionString);
@@ -109,7 +109,7 @@ internal static class Program
 
         var filter = options.Filter;
 
-        // Modül başlıklarını önce çek (hafif), filtre uygula, incremental kararını ver.
+        // Fetch the module headers first (they are light), apply the filter, then decide on incremental.
         var allHeaders = filter.HasAnyModuleType ? await reader.ReadModuleHeadersAsync() : [];
         var moduleHeaders = allHeaders
             .Where(h => filter.IncludesType(h.Kind) && filter.IncludesObject(h.Name.Schema, h.Name.Name))
@@ -124,7 +124,7 @@ internal static class Program
             (isUnchanged ? unchanged : changed).Add(h);
         }
 
-        // Progress lambda'sı içinde doldurulup dışında raporlanacak değerler.
+        // Values filled in inside the progress lambda and reported outside it.
         List<SchemaInfo> schemas = [];
         List<UserDefinedTypeInfo> userTypes = [];
         List<TableTypeInfo> tableTypes = [];
@@ -145,7 +145,7 @@ internal static class Program
                 new RemainingTimeColumn())
             .StartAsync(async ctx =>
             {
-                // ---- Okuma fazı (paralel) ----
+                // ---- Read phase (parallel) ----
                 var tblMetaTask = ctx.AddTask("[green]Tablo metadatası[/]", maxValue: 7);
                 if (!filter.IncludesType("tables"))
                 {
@@ -162,7 +162,7 @@ internal static class Program
                 var tblProgress = new Progress<int>(_ => tblMetaTask.Increment(1));
                 var modProgress = new Progress<int>(_ => modDefTask.Increment(1));
 
-                // Tip bazlı dışlamada ilgili sorgu hiç çalışmaz.
+                // With a type-level exclusion the matching query never runs at all.
                 var collationTask = reader.ReadDatabaseCollationAsync();
                 var schemasTask = filter.IncludesType("schemas") ? reader.ReadSchemasAsync() : Task.FromResult(new List<SchemaInfo>());
                 var userTypesTask = filter.IncludesType("types") ? reader.ReadUserDefinedTypesAsync() : Task.FromResult(new List<UserDefinedTypeInfo>());
@@ -174,7 +174,7 @@ internal static class Program
                 await Task.WhenAll(collationTask, schemasTask, userTypesTask, tableTypesTask, sequencesTask, synonymsTask, tablesTask, modulesTask);
 
                 dbCollation = await collationTask;
-                // Şema/isim bazlı dışlamayı uygula.
+                // Apply the schema- and name-level exclusions.
                 schemas = (await schemasTask).Where(s => filter.IncludesObject(s.Name, s.Name)).ToList();
                 userTypes = (await userTypesTask).Where(t => filter.IncludesObject(t.Name.Schema, t.Name.Name)).ToList();
                 tableTypes = (await tableTypesTask).Where(t => filter.IncludesObject(t.Name.Schema, t.Name.Name)).ToList();
@@ -184,7 +184,7 @@ internal static class Program
                 modules = await modulesTask;
                 var fmt = options.ToScriptFormat(dbCollation);
 
-                // ---- Yazma fazı ----
+                // ---- Write phase ----
                 int totalWrite = schemas.Count + userTypes.Count + tableTypes.Count + sequences.Count + tables.Count + modules.Count + synonyms.Count;
                 var writeTask = ctx.AddTask("[blue]Script yazılıyor[/]", maxValue: Math.Max(totalWrite, 1));
                 if (totalWrite == 0)
@@ -192,7 +192,7 @@ internal static class Program
                     writeTask.Value = writeTask.MaxValue;
                 }
 
-                // Şemalar (en başta — diğer nesneler bunlara bağlı). Şema kendisi alt dizinsiz.
+                // Schemas (first — everything else depends on them). A schema itself gets no sub-directory.
                 foreach (var schema in schemas)
                 {
                     var wf = await writer.WriteAsync("Security/Schemas", null, schema.Name, SchemaScripter.Script(schema, fmt));
@@ -200,7 +200,7 @@ internal static class Program
                     writeTask.Increment(1);
                 }
 
-                // Alias tipleri (şemalardan sonra, tablolardan önce — kolonlar bunlara bağlı olabilir).
+                // Alias types (after schemas, before tables — columns can depend on them).
                 foreach (var userType in userTypes)
                 {
                     var wf = await writer.WriteAsync("Programmability/Types/User-Defined Data Types", userType.Name.Schema, userType.Name.Name, UserDefinedTypeScripter.Script(userType, fmt));
@@ -208,7 +208,7 @@ internal static class Program
                     writeTask.Increment(1);
                 }
 
-                // Table type'lar (alias tiplerden sonra — kolonları alias tip kullanabilir).
+                // Table types (after alias types — their columns can use an alias type).
                 foreach (var tableType in tableTypes)
                 {
                     var wf = await writer.WriteAsync("Programmability/Types/User-Defined Table Types", tableType.Name.Schema, tableType.Name.Name, TableTypeScripter.Script(tableType, fmt));
@@ -216,7 +216,7 @@ internal static class Program
                     writeTask.Increment(1);
                 }
 
-                // Sequence'ler (şemalardan sonra, tablolardan önce — tablolar bunlara bağlı olabilir).
+                // Sequences (after schemas, before tables — tables can depend on them).
                 foreach (var sequence in sequences)
                 {
                     var wf = await writer.WriteAsync("Programmability/Sequences", sequence.Name.Schema, sequence.Name.Name, SequenceScripter.Script(sequence, fmt));
@@ -224,7 +224,7 @@ internal static class Program
                     writeTask.Increment(1);
                 }
 
-                // Tablolar — Tables/{şema}/{ad}.sql
+                // Tables — Tables/{schema}/{name}.sql
                 foreach (var table in tables)
                 {
                     var wf = await writer.WriteAsync("Tables", table.Name.Schema, table.Name.Name, TableScripter.Script(table, fmt));
@@ -232,7 +232,7 @@ internal static class Program
                     writeTask.Increment(1);
                 }
 
-                // Değişen modüller (view / stored procedure / function / trigger)
+                // Changed modules (view / stored procedure / function / trigger)
                 var changedModifyByKey = changed.ToDictionary(h => h.Name.FileBaseName, h => h.ModifyDate.ToString("o"));
                 foreach (var module in modules)
                 {
@@ -242,7 +242,7 @@ internal static class Program
                     writeTask.Increment(1);
                 }
 
-                // Değişmeyen modüller: dosya zaten diskte, eski snapshot kaydını taşı.
+                // Unchanged modules: the file is already on disk, so carry the old snapshot record over.
                 foreach (var h in unchanged)
                 {
                     if (oldSnapshot.Objects.TryGetValue(h.Name.FileBaseName, out var prev))
@@ -251,7 +251,7 @@ internal static class Program
                     }
                 }
 
-                // Synonyms — Synonyms/{şema}/{ad}.sql
+                // Synonyms — Synonyms/{schema}/{name}.sql
                 foreach (var synonym in synonyms)
                 {
                     var wf = await writer.WriteAsync("Synonyms", synonym.Name.Schema, synonym.Name.Name, SynonymScripter.Script(synonym, fmt));
@@ -260,7 +260,7 @@ internal static class Program
                 }
             });
 
-        // ---- Özet (progress sonrası) ----
+        // ---- Summary (after the progress display) ----
         Console.WriteLine($"Veritabanı collation: {dbCollation ?? "(okunamadı)"}");
         Console.WriteLine($"Şemalar: {schemas.Count} | Tipler: {userTypes.Count} | Table type: {tableTypes.Count} | Sequence: {sequences.Count} | Tablolar: {tables.Count} | Synonyms: {synonyms.Count}");
         foreach (var group in moduleHeaders.GroupBy(m => m.CategoryFolder).OrderBy(g => g.Key))
@@ -268,7 +268,7 @@ internal static class Program
             Console.WriteLine($"{group.Key}: {group.Count()} nesne ({changed.Count(c => c.CategoryFolder == group.Key)} yeniden çekildi).");
         }
 
-        // Silinen nesneler: eski snapshot'ta olup yenisinde olmayanların dosyalarını sil.
+        // Dropped objects: delete the files that were in the old snapshot but not in the new one.
         int deleted = 0;
         foreach (var key in oldSnapshot.Objects.Keys.Except(newSnapshot.Objects.Keys))
         {

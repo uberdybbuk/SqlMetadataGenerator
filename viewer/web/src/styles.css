@@ -67,7 +67,7 @@ a:hover {
     padding: 0 24px 64px;
 }
 
-/* ---- Breadcrumb: her parçanın NE olduğu yazıyla görünür ---- */
+/* ---- Breadcrumb: what each part IS is spelled out in words ---- */
 .crumbs {
     display: flex;
     align-items: baseline;
@@ -132,7 +132,7 @@ h2 {
     color: var(--muted);
 }
 
-/* ---- Kartlar ---- */
+/* ---- Cards ---- */
 .cards {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -164,7 +164,7 @@ a.card:hover {
     font-family: var(--mono);
 }
 
-/* ---- Sayaç rozetleri ---- */
+/* ---- Counter badges ---- */
 .badges {
     display: flex;
     flex-wrap: wrap;
@@ -186,7 +186,7 @@ a.card:hover {
     font-weight: 600;
 }
 
-/* ---- Tablolar ---- */
+/* ---- Tables ---- */
 .table-wrap {
     overflow-x: auto;
     border: 1px solid var(--border);
@@ -205,7 +205,7 @@ td {
     text-align: left;
     padding: 7px 12px;
     border-bottom: 1px solid var(--border);
-    /* Dikey ayraç: hangi değerin hangi kolona ait olduğu yan yana okunabilsin. */
+    /* A vertical separator, so which value belongs to which column reads at a glance. */
     border-right: 1px solid var(--border);
     white-space: nowrap;
 }
@@ -215,10 +215,10 @@ td:last-child {
     border-right: none;
 }
 
-/* Kolon adları veritabanındaki hâliyle yazılır. Büyük harfe çevirmek
-   PascalCase adları (CorrelationId) okunmaz hâle getiriyordu. */
-/* Başlık satırı gövdeden açıkça ayrılır: kendi zemini, kalın alt kenarı
-   ve gövdeden farklı yazı rengi var. */
+/* Column names are written exactly as they are in the database. Upper-casing them made
+   PascalCase names (CorrelationId) unreadable. */
+/* The header row is clearly separated from the body: its own background, a heavy bottom
+   border, and a different text colour from the body. */
 th {
     font-weight: 600;
     color: var(--text);
@@ -230,7 +230,7 @@ th {
     z-index: 1;
 }
 
-/* resizer mutlak konumlanıyor; th konumlandırma bağlamı olmalı. */
+/* The resizer is absolutely positioned; the th has to be the positioning context. */
 th {
     position: sticky;
 }
@@ -239,7 +239,7 @@ th .hname {
     font-weight: 600;
 }
 
-/* Kolonun SQL tipi: her başlıkta adın ARDINDAN gelir. */
+/* The column's SQL type: it comes AFTER the name in every header. */
 th .htype {
     font-weight: 400;
     color: var(--muted);
@@ -264,7 +264,7 @@ th.num {
     text-align: right;
 }
 
-/* ---- Kontroller ---- */
+/* ---- Controls ---- */
 .toolbar {
     display: flex;
     gap: 10px;
@@ -305,7 +305,7 @@ input[type="search"]:focus {
     color: #fff;
 }
 
-/* ---- Durumlar ---- */
+/* ---- States ---- */
 .state {
     padding: 40px 0;
     color: var(--muted);
@@ -334,7 +334,7 @@ input[type="search"]:focus {
     font-style: italic;
 }
 
-/* ---- Sıralanabilir başlık ---- */
+/* ---- Sortable header ---- */
 th .sort {
     background: none;
     border: none;
@@ -369,8 +369,8 @@ th .arrow {
     font-size: 11px;
 }
 
-/* Sayısal kolon sağa yaslanır ama içerik SIRASI değişmez:
-   ad, tip, ok — her başlıkta aynı. */
+/* A numeric column is right-aligned, but the ORDER of its contents does not change:
+   name, type, arrow — the same in every header. */
 th.num .sort {
     justify-content: flex-end;
 }
@@ -382,12 +382,12 @@ th .htype {
     white-space: nowrap;
 }
 
-/* ---- İkonlar ---- */
+/* ---- Icons ---- */
 .icon {
     flex: 0 0 auto;
 }
 
-/* İkon + metin çiftini tek satırda, taban hizasında tutar. */
+/* Keeps an icon + text pair on one line, aligned on the baseline. */
 .with-icon {
     display: inline-flex;
     align-items: center;
@@ -423,7 +423,7 @@ h1.with-icon {
 }
 
 
-/* ---- Veri ızgarası: yoğun yerleşim ---- */
+/* ---- Data grid: dense layout ---- */
 .table-wrap.dense table {
     font-size: 12px;
 }
@@ -434,24 +434,24 @@ h1.with-icon {
     line-height: 1.45;
 }
 
-/* Ölçüm turunda (henüz sabit yerleşim yokken) tek bir uzun değer kolonu
-   şişirmesin; sonrasında genişliği colgroup belirler. */
+/* During the measuring pass (before the layout is fixed) one long value must not inflate
+   the column; afterwards the colgroup determines the width. */
 .table-wrap.dense td {
     max-width: 320px;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-/* Saniye altı kesir ve saat dilimi eki: değer tam görünür ama göz
-   önce anlamlı kısmı yakalar. */
+/* The sub-second fraction and the time-zone suffix: the value is fully visible, but the eye
+   catches the meaningful part first. */
 .sub {
     color: var(--muted);
 }
 
-/* SSMS'teki gibi NULL kendi rengiyle işaretlenir; boş metin ayrı ve daha
-   silik durur, böylece "değer yok" ile "değer boş" karışmaz. */
-/* SSMS'te NULL hücrenin ZEMİNİ sarıdır, yazısı değil. Boş bir hücreyle
-   karışmaz ve göz taranırken kolonun neresi boş hemen görünür. */
+/* As in SSMS, NULL is marked with its own colour; an empty string is separate and fainter,
+   so "no value" is never confused with "empty value". */
+/* In SSMS it is the BACKGROUND of a NULL cell that is yellow, not its text. That way it does
+   not blend into an empty cell, and where a column is empty stands out while scanning. */
 td.isnull {
     background: var(--null-bg);
 }
@@ -470,14 +470,14 @@ tbody tr:hover td.isnull {
     font-size: 11px;
 }
 
-/* ---- Kısaltılmış kolon uyarısı ---- */
+/* ---- Truncated column warning ---- */
 .trunc {
     color: var(--warn);
     font-weight: 600;
     cursor: help;
 }
 
-/* ---- Kolon genişliği sürükleme ---- */
+/* ---- Column width dragging ---- */
 th .resizer {
     position: absolute;
     top: 0;
@@ -499,7 +499,7 @@ body.resizing {
     user-select: none;
 }
 
-/* ---- Monaco sarmalayıcı ---- */
+/* ---- Monaco wrapper ---- */
 .editor-wrap {
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -509,10 +509,10 @@ body.resizing {
 }
 
 
-/* ---- Satır numarası kolonu ---- */
+/* ---- Row number column ---- */
 td.rownum,
 th:first-child:has(+ th) {
-    /* yalnızca hizalama; genişlik içeriğe göre */
+    /* alignment only; the width follows the content */
 }
 
 td.rownum {
@@ -527,7 +527,7 @@ tbody tr:hover td.rownum {
     background: var(--head-line);
 }
 
-/* ---- Başlık bilgi kartı ---- */
+/* ---- Header info card ---- */
 th .colinfo {
     display: none;
     position: absolute;
@@ -542,8 +542,8 @@ th:hover .colinfo {
 }
 
 th .colinfo .card {
-    /* Kart, sağa yaslı bir başlığın (satır numarası kolonu) hizasını miras
-       almasın; içeriği her zaman soldan başlar. */
+    /* The card must not inherit the alignment of a right-aligned header (the row number
+       column); its content always starts from the left. */
     text-align: left;
     display: flex;
     flex-direction: column;
@@ -565,7 +565,7 @@ th .colinfo .warn-line {
     color: var(--warn);
 }
 
-/* ---- Sonuç bileşeni: sekmeler ve durum çubuğu ---- */
+/* ---- Result component: tabs and status bar ---- */
 .result {
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -640,15 +640,15 @@ th .colinfo .warn-line {
     flex: 1;
 }
 
-/* Monaco modülü henüz inmemişse editörün yerini tutar; yerleşim zıplamasın. */
+/* Holds the editor's place while the Monaco module is still downloading, so the layout does not jump. */
 .editor-placeholder {
     height: 73px;
 }
 
-/* ---- Sonuç ızgarası: sabit genişlikler ---- */
-/* Kolonlar tüm genişliğe yayılmasın; içeriğe göre boyutlanıp sağda boşluk bıraksın.
-   min-width:100% VERİLMEZ — verilince az kolonlu bir sonuçta artan alan son
-   kolona dağılıyor ve iki kolon ekranı boydan boya kaplıyordu. */
+/* ---- Result grid: fixed widths ---- */
+/* The columns must not spread across the full width; they size to their content and leave space
+   on the right. min-width:100% is NOT SET — with it, the spare room in a result with few
+   columns went to the last column and two columns spanned the whole screen. */
 .result table {
     width: max-content;
 }
@@ -662,8 +662,8 @@ th .colinfo .warn-line {
     padding-right: 8px;
 }
 
-/* Köşe hücresi: tüm ızgarayı seçer. Düğme hücrenin TAMAMINI kaplar —
-   11px'lik bir simgeyi hedeflemek gereksiz bir isabet testi. */
+/* The corner cell: it selects the entire grid. The button covers the WHOLE cell —
+   aiming at an 11px glyph is a pointless test of accuracy. */
 th .corner {
     position: absolute;
     inset: 0;
@@ -684,7 +684,7 @@ th .corner:hover {
     background: var(--sel-head);
 }
 
-/* Başlıkta ad kolonu seçer, ok sıralar. */
+/* In the header the name selects and the arrow sorts. */
 th .hname.pick {
     background: none;
     border: none;
@@ -718,7 +718,7 @@ th .sortbtn.active {
     color: var(--accent);
 }
 
-/* ---- Seçim ---- */
+/* ---- Selection ---- */
 th.selected {
     background: var(--sel-head);
 }
@@ -731,8 +731,8 @@ tbody tr:hover td.selected {
     background: var(--sel);
 }
 
-/* Boş durum bildirimleri — sonuç ızgarası ve mesajlar aynı biçimi paylaşır:
-   aynı yazı tipi, aynı boşluk, paralel cümle. */
+/* Empty-state notices — the result grid and the messages share one form:
+   the same type, the same spacing, parallel sentences. */
 .empty-note {
     padding: 22px 16px;
     font-family: var(--mono);
@@ -741,10 +741,10 @@ tbody tr:hover td.selected {
     text-align: left;
 }
 
-/* Sabit yerleşimli tabloda hücre genişliği colgroup'tan gelir; boş durum
-   satırı tüm genişliği kullanabilsin diye kısıtlamalar kaldırılır.
-   Seçici, .table-wrap.dense td kuralını geçecek kadar spesifik olmalı —
-   aksi hâlde yoğun ızgaranın 2px dolgusu boş durumu da eziyor. */
+/* In a fixed-layout table the cell width comes from the colgroup; those constraints are lifted
+   so the empty-state row can use the full width.
+   The selector has to be specific enough to beat the .table-wrap.dense td rule — otherwise
+   the dense grid's 2px padding crushes the empty state as well. */
 .table-wrap.dense td.empty-note,
 tr.norows td.empty-note {
     padding: 22px 16px;

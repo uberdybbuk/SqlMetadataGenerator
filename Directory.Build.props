@@ -1,11 +1,11 @@
 <Project>
 
-    <!-- Tüm projeler için ortak ayarlar; tek tek csproj'larda tekrarlanmaz. -->
+    <!-- Settings shared by every project; not repeated in each csproj. -->
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <!-- Klasör yapısı değişse de namespace'ler SqlMetadataGenerator kökünde kalır. -->
+        <!-- Namespaces stay rooted at SqlMetadataGenerator even when the folders move. -->
         <RootNamespace>SqlMetadataGenerator</RootNamespace>
     </PropertyGroup>
 

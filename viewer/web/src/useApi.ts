@@ -6,11 +6,11 @@ export interface AsyncState<T> {
     loading: boolean;
 }
 
-// Basit veri çekme kancası. İstek sonucu, bileşen sökülmüşse veya bağımlılıklar
-// değişip yeni bir istek başlamışsa yok sayılır — böylece geç gelen eski cevap
-// yeni veriyi ezmez.
-// enabled false iken istek HİÇ gönderilmez. Sekmesine basılmadan çalışmaması
-// gereken sorgular (ör. kolon listesi) ana sorgunun hızını etkilemesin diye.
+// A simple data-fetching hook. The result is ignored when the component has unmounted, or when
+// the dependencies changed and a newer request has started — so a stale answer arriving late
+// never overwrites fresh data.
+// While enabled is false NO request is sent at all. For queries that should not run until their
+// tab is opened (the column list, say), so they cannot slow the main query down.
 export function useApi<T>(
     fetcher: () => Promise<T>,
     deps: unknown[],

@@ -6,7 +6,7 @@ export default defineConfig({
     server: {
         port: 5173,
         proxy: {
-            // Tek origin görüntüsü: frontend her iki modda da "/api/..." yazar, CORS derdi olmaz.
+            // A single-origin illusion: the frontend writes "/api/..." in both modes, so CORS never comes up.
             "/api": {
                 target: "http://localhost:5099",
                 changeOrigin: true,
@@ -14,7 +14,7 @@ export default defineConfig({
         },
     },
     build: {
-        // Production'da ASP.NET Core bu klasörü wwwroot olarak sunar.
+        // In production ASP.NET Core serves this folder as wwwroot.
         outDir: "../../src/SqlMetadataGenerator.Web/wwwroot",
         emptyOutDir: true,
     },

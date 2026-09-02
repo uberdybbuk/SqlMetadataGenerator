@@ -1,16 +1,16 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 
-// "monaco-editor" ana girişi HER dili ve dil servisini paketliyor — TypeScript
-// worker'ı tek başına ~7 MB. Bize yalnızca editör çekirdeği ve SQL renklendirmesi
-// lazım, o yüzden editor.api girişini kullanıp tek dil katkısını elle ekliyoruz.
+// The "monaco-editor" main entry bundles EVERY language and language service — the TypeScript
+// worker alone is ~7 MB. All we need is the editor core and SQL highlighting, so we use the
+// editor.api entry and add the single language contribution by hand.
 import * as monaco from "monaco-editor/editor/editor.api";
 import "monaco-editor/languages/definitions/sql/register";
 import editorWorker from "monaco-editor/editor/editor.worker?worker";
 
 import { useDarkMode } from "./theme";
 
-// Monaco varsayılan olarak kendini bir CDN'den yükler. Bu yerel bir araç ve
-// internet olmadan da çalışmalı, o yüzden paketten gelen kopyayı veriyoruz.
+// By default Monaco loads itself from a CDN. This is a local tool and has to work without
+// internet access, so we hand it the copy that comes from the bundle.
 self.MonacoEnvironment = { getWorker: () => new editorWorker() };
 
 const LINE_HEIGHT = 19;
@@ -34,10 +34,10 @@ const OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
     automaticLayout: true,
 };
 
-// Uygulama tek sayfa; editörü her açılışta yeniden kurmanın anlamı yok.
-// Bir örnek bir kez kurulur, kullanılmadığı sürece ekran dışında bir "park
-// yerinde" bekler, gerektiğinde ilgili slota taşınır. Böylece Monaco'nun pahalı
-// ilk kurulumu (tema, font ölçümü, tokenizer) uygulama ömrü boyunca bir kez olur.
+// The application is a single page; there is no point rebuilding the editor on every open.
+// One instance is created once and, while it is unused, waits off-screen in a "parking spot",
+// moving into the relevant slot when it is needed. That way Monaco's expensive first setup
+// (theme, font measurement, tokenizer) happens once for the lifetime of the application.
 interface Instance {
     host: HTMLDivElement;
     editor: monaco.editor.IStandaloneCodeEditor;
@@ -65,16 +65,16 @@ function build(isShared: boolean): Instance {
     return { host, editor: monaco.editor.create(host, { ...OPTIONS, value: "" }), shared: isShared };
 }
 
-// Uygulama açılışında çağrılır: pahalı kurulum kullanıcı beklerken değil,
-// boşta yapılır. Örnek atılmaz, park yerinde ilk kullanımı bekler.
+// Called at application start: the expensive setup happens while idle, not while the user is
+// waiting. The instance is not discarded; it waits in the parking spot for its first use.
 export function warmUp(): void {
     if (!shared) {
         shared = build(true);
     }
 }
 
-// Aynı anda ikinci bir editör gerekirse (ileride sorgu + WHERE alanı) paylaşılan
-// örnek meşguldür; o durumda ayrı bir örnek kurulur ve bırakılırken yok edilir.
+// If a second editor is ever needed at the same time (a query plus a WHERE field, later on) the
+// shared instance is busy; a separate instance is created then and disposed of on release.
 function acquire(): Instance {
     if (!sharedBusy) {
         warmUp();
@@ -119,8 +119,8 @@ export default function SqlEditor({ value }: SqlEditorProps) {
         if (!editor) {
             return;
         }
-        // setValue geri alma yığınını da sıfırlar; önceki tablonun kaydırma
-        // konumu yeni sorguda kalmasın diye başa alınır.
+        // setValue also resets the undo stack; the scroll position is sent back to the top so
+        // the previous table's position does not carry into the new query.
         editor.setValue(value);
         editor.setScrollTop(0);
     }, [value]);

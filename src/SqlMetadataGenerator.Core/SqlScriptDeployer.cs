@@ -3,17 +3,17 @@ using Microsoft.Data.SqlClient;
 
 namespace SqlMetadataGenerator;
 
-// Üretilmiş .sql dosyalarını hedef veritabanına uygular.
-// Yaklaşım: her dosya GO ile batch'lere bölünür; tüm batch'ler kabaca faz sırasıyla (schemas →
-// tables → ...) bir kuyruğa konur. Çok turlu (multi-pass) çalıştırılır: bağımlılık eksikliğinden
-// hata veren batch'ler sonraki tura ertelenir. Bir turda hiç ilerleme olmazsa kalanlar gerçek hata
-// kabul edilir. Başarılı batch tekrar çalıştırılmaz, dolayısıyla "zaten var" hataları oluşmaz.
-// Bu sayede bağımlılık grafiğine gerek kalmadan (karşılıklı FK dâhil) doğru sıra elde edilir.
+// Applies the generated .sql files to the target database.
+// Approach: every file is split into batches at GO; all batches go into a queue in rough phase order
+// (schemas → tables → ...). It runs in multiple passes: batches that fail on a missing dependency are
+// deferred to the next pass. When a pass makes no progress at all, whatever is left counts as a real
+// error. A successful batch is never re-run, so "already exists" errors cannot happen.
+// This gets the order right without building a dependency graph (mutual foreign keys included).
 public sealed class SqlScriptDeployer(string connectionString)
 {
     private readonly string _connectionString = connectionString;
 
-    // GO batch ayıracı: tek başına satırda "GO" (opsiyonel boşluk), büyük/küçük harf duyarsız.
+    // The GO batch separator: "GO" alone on a line (optional whitespace), case-insensitive.
     private static readonly Regex GoSeparator =
         new(@"^\s*GO\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
@@ -26,7 +26,7 @@ public sealed class SqlScriptDeployer(string connectionString)
 
     public sealed record DeployReport(int Total, int Succeeded, int Rounds, IReadOnlyList<Batch> Failed);
 
-    // onProgress: (tamamlanan, toplam, tur).
+    // onProgress: (completed, total, pass).
     public async Task<DeployReport> DeployAsync(
         string databaseRoot, Action<int, int, int>? onProgress = null, CancellationToken ct = default)
     {
@@ -49,8 +49,8 @@ public sealed class SqlScriptDeployer(string connectionString)
         }, onProgress);
     }
 
-    // Çok turlu retry döngüsü. tryExecute başarılıysa null, hata varsa mesaj döner.
-    // SqlConnection'dan bağımsızdır (test edilebilir): sıra mantığı buradadır.
+    // The multi-pass retry loop. tryExecute returns null on success, or the message on failure.
+    // Independent of SqlConnection (so it is testable): the ordering logic lives here.
     internal static async Task<DeployReport> RunPassesAsync(
         List<Batch> batches, Func<Batch, Task<string?>> tryExecute, Action<int, int, int>? onProgress = null)
     {
@@ -83,7 +83,7 @@ public sealed class SqlScriptDeployer(string connectionString)
                 }
             }
 
-            // İlerleme yoksa kalanlar bağımlılıkla çözülemez (gerçek hata).
+            // No progress means the rest cannot be resolved by dependencies (a real error).
             if (successThisRound == 0)
             {
                 break;
@@ -95,7 +95,7 @@ public sealed class SqlScriptDeployer(string connectionString)
         return new DeployReport(total, succeeded, round, pending);
     }
 
-    // Tüm .sql dosyalarını faz sırasıyla toplar ve GO ile batch'lere böler.
+    // Collects every .sql file in phase order and splits it into batches at GO.
     private static List<Batch> CollectBatches(string databaseRoot)
     {
         var files = Directory
@@ -117,7 +117,7 @@ public sealed class SqlScriptDeployer(string connectionString)
         return batches;
     }
 
-    // Faz önceliği: bağımlı nesneler sonra gelsin (yalnızca ilk tur verimliliği için).
+    // Phase priority: dependent objects come later (only for first-pass efficiency).
     private static int PhaseOrder(string relativePath)
     {
         string p = relativePath.Replace('\\', '/');
@@ -145,7 +145,7 @@ public sealed class SqlScriptDeployer(string connectionString)
         return 99;
     }
 
-    // Script'i GO batch ayıraçlarından böler (tek başına satırda GO, opsiyonel boşluk).
+    // Splits the script at GO batch separators (GO alone on a line, optional whitespace).
     internal static IEnumerable<string> SplitBatches(string script)
     {
         foreach (var part in GoSeparator.Split(script))

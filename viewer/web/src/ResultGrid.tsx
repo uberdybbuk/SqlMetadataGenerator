@@ -4,25 +4,24 @@ import { DataTable, type Column } from "./DataTable";
 import { formatCell, isNumericType } from "./cell";
 import { buildHtml, buildPlainText, type CopyRegion } from "./clipboard";
 
-// Sorgu sonucunu gösteren genel bileşen. Yalnızca tablo önizlemesi için değil:
-// ileride serbest sorgu, WHERE doğrulama ve üretim raporları da bunu kullanacak,
-// bu yüzden tablo/şema kavramlarını hiç bilmiyor — yalnızca kolonlar, satırlar,
-// süre ve mesajlar.
+// The general component for showing a query result. Not just for the table preview: free-form
+// queries, WHERE validation and generation reports will all use it later, which is why it knows
+// nothing about tables or schemas — only columns, rows, elapsed time and messages.
 
 export interface ResultColumn {
     name: string;
     typeName: string;
     truncated: boolean;
-    // Başlığın üzerine gelince açılacak ek bilgi; çağıran doldurur.
+    // Extra information to open on hovering the header; the caller fills it in.
     details?: ReactNode;
 }
 
-// Seçim SSMS'teki gibi: satır numarasına tıklamak satırı, başlığa tıklamak
-// kolonu, sol üst köşeye tıklamak tümünü seçer. Ctrl/Cmd ile eklenir.
+// Selection works as it does in SSMS: clicking the row number selects the row, clicking the
+// header selects the column, and clicking the top-left corner selects everything. Ctrl/Cmd adds.
 interface Selection {
     rows: Set<number>;
     cols: Set<string>;
-    // "satırIndeksi:kolonAnahtarı"
+    // "rowIndex:columnKey"
     cells: Set<string>;
     all: boolean;
 }
@@ -36,7 +35,7 @@ export interface ResultGridProps {
     rows: (string | number | boolean | null)[][];
     elapsedMs: number;
     messages: string[];
-    // Satır sayısı sınırlıysa gösterilecek üst sınır (ör. TOP 20).
+    // The upper bound to display when the row count is limited (e.g. TOP 20).
     limitNote?: string;
 }
 
@@ -49,7 +48,7 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
     const [tab, setTab] = useState<"results" | "messages">("results");
     const [selection, setSelection] = useState<Selection>(EMPTY);
 
-    // Yeni bir sonuç geldiğinde eski seçim anlamını yitirir.
+    // When a new result arrives the old selection has lost its meaning.
     useEffect(() => setSelection(EMPTY), [rows, columns]);
 
     const gridRows: GridRow[] = useMemo(
@@ -59,8 +58,8 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
 
     const columnKeys = useMemo(() => columns.map((c, i) => `${i}-${c.name}`), [columns]);
 
-    // Her seçim türü diğerlerini temizler: bir hücreye tıklamak, önceki satır/
-    // kolon/tümü seçimini bırakır ve aktif seçim o hücre olur.
+    // Every kind of selection clears the others: clicking a cell drops the previous row,
+    // column or select-all, and that cell becomes the active selection.
     const selectRow = useCallback((row: GridRow, additive: boolean) => {
         setSelection((current) => {
             const next = additive && !current.all ? new Set(current.rows) : new Set<number>();
@@ -89,8 +88,8 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
         setSelection((current) => (current.all ? EMPTY : { ...EMPTY, all: true, cells: new Set() }));
     }, []);
 
-    // Seçim ancak kopyalanabiliyorsa işe yarar. Panoya iki biçim birden yazılır:
-    // düz metin (editör/terminal) ve HTML (Excel — bkz. clipboard.ts).
+    // A selection is only useful if it can be copied. Two flavours go on the clipboard at once:
+    // plain text (editor/terminal) and HTML (Excel — see clipboard.ts).
     useEffect(() => {
         function onCopy(event: ClipboardEvent) {
             const region = buildRegion(selection, columns, columnKeys, gridRows);
@@ -107,10 +106,10 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
         return () => document.removeEventListener("copy", onCopy);
     }, [selection, columns, columnKeys, gridRows]);
 
-    // Sol kenarda satır numarası; başlığındaki köşe hücresi tümünü seçer.
+    // The row number down the left edge; the corner cell in its header selects everything.
     const numberColumn: Column<GridRow> = {
         key: "__rownum",
-        // Düğme hücrenin tamamını kaplar: küçük bir simgeyi tutturmak gerekmesin.
+        // The button covers the whole cell, so nobody has to hit a tiny glyph.
         header: (
             <>
                 <button type="button" className="corner" onClick={selectAll} aria-label="Select all">
@@ -152,7 +151,7 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
         sortValue: (row) => row.values[i],
         render: (row) => formatCell(row.values[i], column.typeName),
         className: isNumericType(column.typeName) ? undefined : "mono",
-        // NULL hücresinin zemini boyanır; "değer yok" ile "değer boş" karışmasın.
+        // The background of a NULL cell is painted, so "no value" is never confused with "empty value".
         cellClassName: (row) => (row.values[i] === null ? "isnull" : undefined),
     }));
 
@@ -168,8 +167,8 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
             </div>
 
             {tab === "results" ? (
-                // Satır gelmese bile başlıklar gösterilir: hangi kolonların
-                // sorgulandığı sonucun boş olmasından bağımsız bir bilgi.
+                // The headers show even when no rows came back: which columns were queried is
+                // information independent of the result being empty.
                 <DataTable
                     columns={[numberColumn, ...dataColumns]}
                     rows={gridRows}
@@ -224,9 +223,9 @@ function toggle<T>(set: Set<T>, value: T): void {
     }
 }
 
-// Seçimi kopyalanabilir bir dikdörtgene çevirir. Tek tek hücre seçiminde
-// başlık yazılmaz; satır/kolon/tümü seçiminde yazılır, yoksa yapıştırılan
-// sütunların ne olduğu kaybolur.
+// Turns the selection into a copyable rectangle. With individual cells selected no header is
+// written; with a row, column or select-all it is, because otherwise what the pasted columns
+// are gets lost.
 function buildRegion(
     selection: Selection,
     columns: ResultColumn[],
@@ -255,8 +254,8 @@ function buildRegion(
     }
 
     if (selection.cells.size > 0) {
-        // Seçili hücreleri kapsayan en küçük dikdörtgen: Excel'e yapıştırınca
-        // şekil bozulmasın diye satır/kolon hizası korunur.
+        // The smallest rectangle covering the selected cells: the row and column alignment is
+        // preserved so the shape survives a paste into Excel.
         const usedColumns = columns
             .map((c, i) => ({ c, i }))
             .filter(({ i }) => gridRows.some((r) => selection.cells.has(cellKey(r.index, columnKeys[i]))));

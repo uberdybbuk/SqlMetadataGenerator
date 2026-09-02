@@ -4,13 +4,13 @@ using SqlMetadataGenerator.Exploration;
 
 namespace SqlMetadataGenerator.Web.Endpoints;
 
-// API rotaları UI rotalarını birebir aynalar:
+// The API routes mirror the UI routes exactly:
 //   app/<alias>/<db>/tables/<schema>/<name>
 //   /api/servers/<alias>/databases/<db>/tables/<schema>/<name>
-// Tek zihinsel model; adres çubuğundaki yolu API'de aramak zorunda kalmazsın.
+// One mental model; you never have to hunt for the address-bar path in the API.
 internal static class ExplorerEndpoints
 {
-    // Tablo detayında gösterilen örnek önizleme sorgusunun satır sınırı.
+    // The row limit of the sample preview query shown on the table detail page.
     private const int DefaultPreviewTop = 20;
 
     public static void MapExplorerEndpoints(this WebApplication app)
@@ -19,7 +19,7 @@ internal static class ExplorerEndpoints
 
         api.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
-        // Bağlantı listesi. Parola veya bağlantı dizesi ASLA dönmez.
+        // The connection list. A password or a connection string is NEVER returned.
         api.MapGet("/servers", (ConnectionRegistry registry) =>
             Results.Ok(registry.All.Select(c => new
             {
@@ -32,7 +32,7 @@ internal static class ExplorerEndpoints
                 passwordSet = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(c.ResolvedPasswordEnv)),
             })));
 
-        // Sunucu dashboard'u: sürüm + tüm veritabanları, tek bağlantı üzerinden.
+        // Server dashboard: version plus every database, over a single connection.
         api.MapGet("/servers/{alias}", (string alias, ConnectionRegistry registry, CancellationToken ct) =>
             WithServer(alias, registry, async explorer =>
             {
@@ -45,7 +45,7 @@ internal static class ExplorerEndpoints
         api.MapGet("/servers/{alias}/databases", (string alias, ConnectionRegistry registry, CancellationToken ct) =>
             WithServer(alias, registry, async explorer => Results.Ok(await explorer.ReadDatabasesAsync(ct))));
 
-        // DB dashboard'u: nesne sayaçları + şemalar.
+        // Database dashboard: object counters plus schemas.
         api.MapGet("/servers/{alias}/databases/{db}", (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
             WithDatabase(alias, db, registry, async (explorer, connectionString) =>
             {
@@ -55,12 +55,12 @@ internal static class ExplorerEndpoints
                 return Results.Ok(new { database = db, counts = await countsTask, schemas = await schemasTask });
             }));
 
-        // Treemap ve tablo grid'ini besleyen istatistikler.
+        // The statistics behind the treemap and the table grid.
         api.MapGet("/servers/{alias}/databases/{db}/tables", (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
             WithDatabase(alias, db, registry, async (explorer, _) => Results.Ok(await explorer.ReadTableStatsAsync(ct))));
 
-        // Kolon listesi. Veri sekmesi bunu BEKLEMEZ — önizleme kendi metadatasını
-        // taşır; bu uç yalnızca "columns" sekmesine geçilince çağrılır.
+        // The column list. The data tab does NOT WAIT on this — the preview carries its own
+        // metadata; this endpoint is called only when the "columns" tab is opened.
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}",
             (string alias, string db, string schema, string name, ConnectionRegistry registry, CancellationToken ct) =>
             WithDatabase(alias, db, registry, async (explorer, _) =>
@@ -74,8 +74,8 @@ internal static class ExplorerEndpoints
                 return Results.Ok(new { shape.Schema, shape.Name, shape.Columns });
             }));
 
-        // TOP N önizleme. Opsiyonel where ile filtrelenebilir; URL'de olduğu için
-        // filtrelenmiş bir önizleme de bookmark'lanabilir.
+        // The TOP N preview. It can be filtered with an optional where; because that lives in the
+        // URL, a filtered preview can be bookmarked too.
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}/preview",
             (string alias, string db, string schema, string name, ConnectionRegistry registry,
              CancellationToken ct, int top = 20, string? where = null) =>
@@ -96,7 +96,7 @@ internal static class ExplorerEndpoints
                 return Results.Ok(await explorer.PreviewAsync(shape, capped, where, ct: ct));
             }));
 
-        // "Doğrula & Say": WHERE'i hem sözdizimsel olarak sınar hem eşleşen satır sayısını verir.
+        // "Validate & Count": tests the WHERE syntactically and returns the number of matching rows.
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}/count",
             (string alias, string db, string schema, string name, ConnectionRegistry registry,
              CancellationToken ct, string? where = null) =>
@@ -151,8 +151,8 @@ internal static class ExplorerEndpoints
         });
     }
 
-    // SQL hatalarını 400'e çevirir: kullanıcının yazdığı WHERE hatalıysa bunu hata
-    // mesajıyla birlikte görmesi gerekir — 500 sayfası işe yaramaz.
+    // Turns SQL errors into a 400: when the WHERE the user typed is wrong they need to see it
+    // with the error message — a 500 page is no help.
     private static async Task<IResult> Guarded(Func<Task<IResult>> action)
     {
         try

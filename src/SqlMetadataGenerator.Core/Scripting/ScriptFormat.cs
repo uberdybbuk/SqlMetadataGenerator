@@ -6,21 +6,21 @@ public enum KeywordCase
     Upper,
 }
 
-// Üretilen script'in biçim ayarları: anahtar kelime büyük/küçük harf tercihi ve
-// SET ANSI_NULLS / QUOTED_IDENTIFIER bloklarının yazılıp yazılmayacağı.
+// Formatting options for the generated script: keyword casing and whether the
+// SET ANSI_NULLS / QUOTED_IDENTIFIER blocks are written.
 public sealed class ScriptFormat
 {
     public KeywordCase KeywordCase { get; init; } = KeywordCase.Lower;
     public bool EmitSetOptions { get; init; }
 
-    // Veritabanının varsayılan collation'ı. Bir kolonun collation'ı buna eşitse COLLATE yazılmaz.
-    // null ise (okunamadıysa) güvenli tarafta kalmak için collation her zaman yazılır.
+    // The database default collation. COLLATE is omitted for columns that already match it.
+    // When null (it could not be read) collation is always written, to stay on the safe side.
     public string? DatabaseCollation { get; init; }
 
-    // Audit kolonları. Bir tabloda bunlardan ardışık (>= 2) bir grup varsa,
-    // o grubun öncesine ve sonrasına boş satır eklenerek ayrı bir blok gibi yazılır.
-    // Açıksa, audit olmayan ardışık kolonlar ortak kelime paylaştıkça gruplanır ve
-    // (en az 2 kolonluk) grupların öncesine/sonrasına boş satır eklenir.
+    // Audit columns. When a table holds a consecutive run (>= 2) of them,
+    // a blank line is inserted before and after the run so it reads as its own block.
+    // When enabled, consecutive non-audit columns are grouped while they share a word, and
+    // groups of at least 2 columns get a blank line before and after them.
     public bool GroupColumns { get; init; } = true;
 
     public IReadOnlySet<string> AuditColumns { get; init; } = DefaultAuditColumns;
@@ -32,7 +32,7 @@ public sealed class ScriptFormat
             "UpdatedAt", "UpdatedBy", "UpdatedCorrelationId", "UpdatedChannelCode",
         };
 
-    // Bir anahtar kelimeyi seçili büyük/küçük harf tercihine göre döndürür.
+    // Returns a keyword in the configured casing.
     public string Kw(string keyword) =>
         KeywordCase == KeywordCase.Upper
             ? keyword.ToUpperInvariant()

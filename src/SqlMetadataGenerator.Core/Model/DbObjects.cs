@@ -1,11 +1,11 @@
 namespace SqlMetadataGenerator.Model;
 
-// Bir tablo veya view'ı tanımlayan şema + ad çifti.
+// The schema + name pair that identifies a table or view.
 public sealed record ObjectName(string Schema, string Name)
 {
     public override string ToString() => $"[{Schema}].[{Name}]";
 
-    // Dosya adı için "schema.name" biçimi (uzantısız).
+    // The "schema.name" form used for the file name (without extension).
     public string FileBaseName => $"{Schema}.{Name}";
 }
 
@@ -33,7 +33,7 @@ public sealed class PrimaryKeyInfo
 {
     public required string Name { get; init; }
     public required bool IsClustered { get; init; }
-    // Kolon adı + azalan mı bilgisi, key sırasına göre.
+    // The column name plus whether it is descending, in key order.
     public required List<(string Column, bool Descending)> Columns { get; init; }
 }
 
@@ -44,7 +44,7 @@ public sealed class IndexInfo
     public required bool IsClustered { get; init; }
     public required List<(string Column, bool Descending)> KeyColumns { get; init; }
     public required List<string> IncludedColumns { get; init; }
-    // Filtered index ise WHERE koşulu, aksi hâlde null.
+    // The WHERE predicate when the index is filtered, otherwise null.
     public string? FilterDefinition { get; init; }
 }
 
@@ -72,7 +72,7 @@ public sealed class UniqueConstraintInfo
 public sealed class CheckConstraintInfo
 {
     public required string Name { get; init; }
-    // sys.check_constraints.definition — koşul (kendi parantezini içerir).
+    // sys.check_constraints.definition — the predicate (it brings its own parentheses).
     public required string Definition { get; init; }
     public required bool IsDisabled { get; init; }
     public required bool IsNotTrusted { get; init; }
@@ -90,39 +90,39 @@ public sealed class TableInfo
     public List<ForeignKeyInfo> ForeignKeys { get; init; } = [];
 }
 
-// Modül başlığı: tanım çekmeden önce hafif kimlik bilgisi. Incremental karşılaştırma için
-// ModifyDate, paketli definition sorgusu için ObjectId kullanılır.
+// Module header: lightweight identity read before the definition. ModifyDate drives the
+// incremental comparison, ObjectId drives the batched definition query.
 public sealed class ModuleHeader
 {
     public required int ObjectId { get; init; }
     public required ObjectName Name { get; init; }
     public required string CategoryFolder { get; init; }
-    // Filtre tipi: views | procedures | functions | triggers.
+    // Filter type: views | procedures | functions | triggers.
     public required string Kind { get; init; }
     public required DateTime ModifyDate { get; init; }
 }
 
-// sys.sql_modules tabanlı nesneler (view, stored procedure, function, trigger).
-// Tanım sunucudan tam CREATE metni olarak gelir; hedef klasör nesnenin türüne göre belirlenir.
+// Objects backed by sys.sql_modules (view, stored procedure, function, trigger).
+// The definition arrives from the server as the full CREATE text; the target folder follows the object kind.
 public sealed class RoutineInfo
 {
     public required ObjectName Name { get; init; }
     public required string Definition { get; init; }
-    // Hedef alt klasör, ör. "Programmability/Stored Procedures".
+    // The target sub-folder, e.g. "Programmability/Stored Procedures".
     public required string CategoryFolder { get; init; }
 }
 
 public sealed class SynonymInfo
 {
     public required ObjectName Name { get; init; }
-    // sys.synonyms.base_object_name — hedef nesnenin (çok parçalı) adı.
+    // sys.synonyms.base_object_name — the (multi-part) name of the target object.
     public required string BaseObjectName { get; init; }
 }
 
 public sealed class SchemaInfo
 {
     public required string Name { get; init; }
-    // Şema sahibi (principal). dbo ise AUTHORIZATION yazılmaz (varsayılan).
+    // The schema owner (principal). AUTHORIZATION is omitted for dbo (the default).
     public required string Owner { get; init; }
 }
 
@@ -135,7 +135,7 @@ public sealed class TableTypeInfo
     public List<UniqueConstraintInfo> UniqueConstraints { get; init; } = [];
 }
 
-// Alias tipi (User-Defined Data Type): bir sistem tipinin adlandırılmış türevi.
+// Alias type (User-Defined Data Type): a named derivative of a system type.
 public sealed class UserDefinedTypeInfo
 {
     public required ObjectName Name { get; init; }
@@ -149,15 +149,15 @@ public sealed class UserDefinedTypeInfo
 public sealed class SequenceInfo
 {
     public required ObjectName Name { get; init; }
-    // Sequence'in temel sistem tipi (ör. bigint).
+    // The base system type of the sequence (e.g. bigint).
     public required string TypeName { get; init; }
-    // Değerler sql_variant olduğundan tip-bağımsız metin olarak tutulur.
+    // The values are sql_variant, so they are kept as type-independent text.
     public required string StartValue { get; init; }
     public required string Increment { get; init; }
     public required string MinValue { get; init; }
     public required string MaxValue { get; init; }
     public required bool IsCycling { get; init; }
     public required bool IsCached { get; init; }
-    // Cache açıkken belirli bir boyut varsa; yoksa (varsayılan cache) null.
+    // The size when caching is on and one is set; null otherwise (the default cache).
     public long? CacheSize { get; init; }
 }

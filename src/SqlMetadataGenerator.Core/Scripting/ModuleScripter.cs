@@ -2,8 +2,8 @@ using System.Text;
 
 namespace SqlMetadataGenerator.Scripting;
 
-// sys.sql_modules tabanlı nesneler (view, stored procedure, function, trigger) için ortak script üretimi.
-// Tanım sunucudan tam CREATE metni olarak geldiği için olduğu gibi sarılır.
+// Shared script generation for sys.sql_modules objects (view, stored procedure, function, trigger).
+// The definition arrives from the server as the full CREATE text, so it is wrapped verbatim.
 public static class ModuleScripter
 {
     public static string Script(string definition, ScriptFormat fmt)

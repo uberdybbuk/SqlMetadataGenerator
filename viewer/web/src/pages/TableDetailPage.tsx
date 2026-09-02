@@ -12,15 +12,15 @@ const SqlEditor = lazy(() => import("../SqlEditor"));
 
 export function TableDetailPage() {
     const { alias = "", db = "", schema = "", name = "" } = useParams();
-    // Bir tabloya tıklayan kişi önce VERİYİ görmek ister; kolon listesi ikinci sorudur.
+    // Whoever clicks a table wants to see the DATA first; the column list is the second question.
     const [tab, setTab] = useState<"columns" | "data">("data");
 
-    // İki istek PARALEL başlar. Önizleme, tablo metadatasına bağlı değil — yalnızca
-    // URL'deki adlara. Daha önce önizleme bileşeni metadata geldikten sonra mount
-    // olduğu için iki gidiş-dönüş arka arkaya diziliyordu.
-    // Kolon listesi YALNIZCA sekmesine basılınca istenir. Veri sekmesi onu
-    // beklemiyor — önizleme kendi kolon metadatasını taşıyor — ve eşzamanlı
-    // ikinci bir sorgu ana sorgunun hızını düşürüyordu.
+    // The two requests start in PARALLEL. The preview does not depend on the table metadata — only
+    // on the names in the URL. Previously the preview component mounted after the metadata had
+    // arrived, which put the two round trips back to back.
+    // The column list is requested ONLY when its tab is opened. The data tab does not wait on it
+    // — the preview carries its own column metadata — and a second concurrent query was slowing
+    // the main query down.
     const [columnsWanted, setColumnsWanted] = useState(false);
     const detail = useApi(
         () => api.table(alias, db, schema, name),
@@ -39,7 +39,7 @@ export function TableDetailPage() {
                 <span className="mono">{db}</span> database · <span className="mono">{alias}</span> server
             </p>
 
-            {/* Sekmeler hiçbir isteği beklemez: iskelet hemen görünür, içerik dolar. */}
+            {/* The tabs wait on no request: the skeleton shows at once and the content fills in. */}
             <div className="toolbar">
                 <button className="chip" aria-pressed={tab === "data"} onClick={() => setTab("data")}>
                     data (first 20)
@@ -66,7 +66,7 @@ export function TableDetailPage() {
 }
 
 function DataTab({ preview }: { preview: AsyncState<PreviewResult> }) {
-    // Başlık kartındaki bilgiler önizlemenin kendisiyle gelir; ayrı istek yok.
+    // The information on the header card arrives with the preview itself; no separate request.
     const columns: ResultColumn[] = (preview.data?.columns ?? []).map((column) => {
         const meta = column.column;
         return {
@@ -94,8 +94,8 @@ function DataTab({ preview }: { preview: AsyncState<PreviewResult> }) {
 
     return (
         <>
-            {/* Editör iskeleti hemen görünür; metni önizlemeyle gelir. Önizleme
-                artık iki gidiş-dönüş (metadata + veri), üç değil. */}
+            {/* The editor skeleton shows immediately; its text arrives with the preview. The preview
+                is now two round trips (metadata + data), not three. */}
             <div className="editor-wrap">
                 <Suspense fallback={<div className="editor-placeholder" />}>
                     <SqlEditor value={preview.data?.sql ?? ""} />
@@ -142,7 +142,7 @@ function ColumnsTab({ detail }: { detail: AsyncState<{ columns: ColumnSummary[] 
         {
             key: "key",
             header: "Key",
-            // Birincil anahtar kolonları önce, anahtar sırasına göre.
+            // Primary key columns first, in key order.
             sortValue: (c) => c.primaryKeyOrdinal,
             render: (c) => (
                 <>

@@ -3,22 +3,22 @@ using System.Text;
 
 namespace SqlMetadataGenerator;
 
-// SQL Server obje isimlerini her platformda geçerli, çakışmasız dosya adlarına çevirir.
-// Neden gerekli:
-// - Path.GetInvalidFileNameChars platform bağımlıdır (macOS/Linux'ta neredeyse
-// hiçbir şeyi engellemez), o yüzden tüm platformların geçersiz karakter kümesini sabit tutarız.
-// - Windows'ta CON/PRN/NUL/COM1... gibi rezerve isimler ve sonu nokta/boşlukla biten adlar yasaktır.
-// - Sanitize sonrası iki farklı SQL objesi aynı ada düşebilir (ör. "A/B" ve "A_B"); ayrıca
-// macOS/Windows dosya sistemleri case-insensitive olduğundan "Order" ve "order" da çakışır.
-// Bu durumda orijinal adın kısa hash'i eklenerek benzersizlik garanti edilir.
-// Dosya adı yalnızca bir etikettir; gerçek obje adı script içinde korunduğundan bilgi kaybı olmaz.
+// Turns SQL Server object names into file names that are valid, and collision-free, on every platform.
+// Why this is needed:
+// - Path.GetInvalidFileNameChars is platform-dependent (on macOS/Linux it blocks
+// almost nothing), so we keep a fixed set covering every platform's invalid characters.
+// - Windows forbids reserved names such as CON/PRN/NUL/COM1... and names ending in a dot or a space.
+// - After sanitising, two different SQL objects can land on the same name (e.g. "A/B" and "A_B"); and
+// because the macOS/Windows file systems are case-insensitive, "Order" and "order" collide too.
+// A short hash of the original name is appended in that case, which guarantees uniqueness.
+// The file name is only a label; nothing is lost, because the real object name is preserved inside the script.
 public sealed class SafeFileName
 {
-    // Tüm platformlarda yasak sayacağımız karakterler (Windows kümesi en geniştir).
+    // The characters we treat as forbidden on every platform (the Windows set is the widest).
     private static readonly char[] InvalidChars =
         ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
 
-    // Windows rezerve cihaz isimleri (uzantıdan bağımsız, case-insensitive).
+    // Windows reserved device names (extension-independent, case-insensitive).
     private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "CON", "PRN", "AUX", "NUL", "CLOCK$",
@@ -26,14 +26,14 @@ public sealed class SafeFileName
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     };
 
-    // .sql uzantısı + olası "__<hash>" eki için pay bırakarak güvenli üst sınır.
+    // A safe upper bound that leaves room for the .sql extension and a possible "__<hash>" suffix.
     private const int MaxBaseLength = 200;
 
-    // Verilmiş dosya adlarını (uzantısız) case-insensitive izleyerek çakışmaları çözer.
+    // Tracks the file names handed out (without extension), case-insensitively, to resolve collisions.
     private readonly HashSet<string> _used = new(StringComparer.OrdinalIgnoreCase);
 
-    // Verilen ham obje adından (ör. "dbo.MyTable") bu kapsamda benzersiz, güvenli,
-    // uzantısız bir dosya adı üretir ve sonraki çağrılar için rezerve eder.
+    // Produces a safe, unique, extension-less file name for the given raw object name (e.g. "dbo.MyTable")
+    // within this scope, and reserves it for later calls.
     public string Reserve(string rawName)
     {
         string safe = MakeSafe(rawName);
@@ -43,14 +43,14 @@ public sealed class SafeFileName
             return safe;
         }
 
-        // Çakışma: orijinal adın kısa hash'iyle ayrıştır (deterministik).
+        // Collision: disambiguate with a short hash of the original name (deterministic).
         string hashed = Append(safe, ShortHash(rawName));
         if (_used.Add(hashed))
         {
             return hashed;
         }
 
-        // Aşırı nadir: hash de çakışırsa artan sayaçla benzersizleştir.
+        // Extremely rare: when the hash collides too, uniquify with an increasing counter.
         for (int i = 2; ; i++)
         {
             string candidate = Append(safe, ShortHash(rawName) + "_" + i);
@@ -61,7 +61,7 @@ public sealed class SafeFileName
         }
     }
 
-    // Adı geçerli bir dosya adına indirger (çakışma yönetimi yok).
+    // Reduces a name to a valid file name (no collision handling).
     public static string MakeSafe(string rawName)
     {
         var sb = new StringBuilder(rawName.Length);
@@ -77,7 +77,7 @@ public sealed class SafeFileName
             }
         }
 
-        // Windows: sondaki nokta ve boşluklar yasak.
+        // Windows: trailing dots and spaces are forbidden.
         string result = sb.ToString().TrimEnd('.', ' ');
 
         if (result.Length == 0)
@@ -85,7 +85,7 @@ public sealed class SafeFileName
             result = "_";
         }
 
-        // Rezerve cihaz ismiyse çakışmayı önlemek için başına alt çizgi ekle.
+        // Prefix a reserved device name with an underscore to avoid the clash.
         if (ReservedNames.Contains(result))
         {
             result = "_" + result;
@@ -101,7 +101,7 @@ public sealed class SafeFileName
 
     private static string Append(string baseName, string suffix) => $"{baseName}__{suffix}";
 
-    // Çakışmayı çözmeye yetecek kadar kısa, deterministik hash (8 hex).
+    // A deterministic hash, short enough to resolve collisions (8 hex).
     private static string ShortHash(string value)
     {
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));

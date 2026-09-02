@@ -10,7 +10,7 @@ import { Icon } from "../Icon";
 export function ServerPage() {
     const { alias = "" } = useParams();
     const { data, error, loading } = useApi(() => api.server(alias), [alias]);
-    // Alias tek başına hangi sunucuya baktığını söylemiyor; gerçek adresi de göster.
+    // The alias alone does not say which server you are looking at; show the real address too.
     const connections = useApi(() => api.connections(), []);
 
     if (loading) {

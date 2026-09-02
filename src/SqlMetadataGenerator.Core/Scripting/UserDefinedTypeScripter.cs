@@ -3,7 +3,7 @@ using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator.Scripting;
 
-// Alias tipleri (User-Defined Data Types) için CREATE TYPE ... FROM T-SQL'i üretir.
+// Emits CREATE TYPE ... FROM T-SQL for alias types (User-Defined Data Types).
 public static class UserDefinedTypeScripter
 {
     public static string Script(UserDefinedTypeInfo type, ScriptFormat fmt)

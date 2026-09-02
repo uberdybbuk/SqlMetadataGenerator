@@ -1,13 +1,13 @@
 namespace SqlMetadataGenerator.Exploration;
 
-// Kullanıcının girdiği WHERE ifadesi için hafif bir güvenlik süzgeci.
+// A light safety filter for the WHERE expression the user types.
 //
-// Asıl koruma bu DEĞİL — asıl koruma salt-okunur bir SQL login'i kullanmaktır; ifade
-// zaten kullanıcının kendi yetkisiyle çalışır. Buradaki amaç, tek ifade beklenen yere
-// yanlışlıkla ya da kasten ikinci bir cümle sokulmasını engellemek.
+// This is NOT the real protection — the real protection is using a read-only SQL login; the
+// expression runs with the user's own rights anyway. The goal here is to stop a second statement
+// being slipped, by accident or on purpose, into a place that expects a single expression.
 //
-// Önce string literal'leri ve tırnaklı tanımlayıcıları atlarız, sonra geri kalanda
-// yasak belirteç ararız. Bu sayede WHERE Note LIKE '%--%' gibi meşru ifadeler reddedilmez.
+// String literals and quoted identifiers are skipped first, then forbidden tokens are looked for
+// in what remains. That way a legitimate expression like WHERE Note LIKE '%--%' is not rejected.
 public static class WhereClauseGuard
 {
     public const int MaxLength = 4000;
@@ -90,8 +90,8 @@ public static class WhereClauseGuard
         return true;
     }
 
-    // i, açılış karakterinin üzerindeyken çağrılır ve kapanış karakterinin üzerinde bırakılır.
-    // İkiye katlanmış kapanış karakteri ('' veya ]]) kaçış sayılır ve atlanır.
+    // Called with i on the opening character, and left on the closing character.
+    // A doubled closing character ('' or ]]) counts as an escape and is skipped.
     private static bool SkipDelimited(string text, ref int i, char closing, char escapeDouble)
     {
         for (int j = i + 1; j < text.Length; j++)

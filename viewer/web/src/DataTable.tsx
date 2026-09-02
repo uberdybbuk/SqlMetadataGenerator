@@ -5,20 +5,20 @@ export type SortValue = string | number | boolean | null;
 export interface Column<T> {
     key: string;
     header: ReactNode;
-    // Başlığın üzerine gelince açılan kart. Tip gibi ikincil bilgiler burada
-    // durur: başlık satırına yazıldıklarında kolonu gereksiz yere genişletiyorlardı.
+    // The card that opens on hovering the header. Secondary information such as the type lives
+    // here: written into the header row it widened the column for no good reason.
     info?: ReactNode;
-    // Sayısal kolonlar sağa yaslanır ve ilk tıklamada büyükten küçüğe sıralanır.
+    // Numeric columns are right-aligned and sort descending on the first click.
     numeric?: boolean;
-    // Sıralamada kullanılacak ham değer. Verilmezse kolon sıralanamaz.
+    // The raw value used for sorting. Without it the column cannot be sorted.
     sortValue?: (row: T) => SortValue;
     render: (row: T) => ReactNode;
     className?: string;
-    // Satıra göre değişen hücre sınıfı (ör. NULL hücresini boyamak için).
+    // A cell class that varies by row (e.g. to paint a NULL cell).
     cellClassName?: (row: T) => string | undefined;
-    // Başlık olduğu gibi çizilir: sıralama/seçim düğmesi sarmalanmaz ve
-    // genişliği ölçülmez. Satır numarası oluğu gibi kendi kontrolünü taşıyan
-    // kolonlar için — aksi hâlde düğme içine düğme yerleşiyor.
+    // The header is drawn as-is: it is not wrapped in a sort/selection button and its
+    // width is not measured. For columns that carry their own control, like the row
+    // number — otherwise a button ends up nested inside a button.
     plain?: boolean;
 }
 
@@ -27,16 +27,16 @@ interface DataTableProps<T> {
     rows: T[];
     rowKey: (row: T) => string;
     initialSort?: { key: string; desc?: boolean };
-    // Sıralamadan SONRA uygulanır: "şuna göre ilk N" anlamı korunur.
+    // Applied AFTER sorting, so "the first N by this" keeps its meaning.
     limit?: number;
-    // Veri ızgarası için daha sıkı satır yüksekliği ve küçük yazı.
+    // Tighter row height and smaller type, for the data grid.
     dense?: boolean;
-    // Kolon kenarlarından sürükleyerek genişlik ayarlama.
+    // Width adjustment by dragging the column edges.
     resizable?: boolean;
-    // Ölçülen genişliğin üst sınırı; tek bir uzun değer kolonu ekranı yutmasın.
+    // The upper bound on a measured width, so one long value cannot swallow the screen.
     maxWidth?: number;
-    // Seçim: başlığa tıklamak kolonu seçer, sıralama ayrı bir düğmeye taşınır.
-    // Verilmezse başlığın tamamı sıralama düğmesidir (liste sayfalarındaki davranış).
+    // Selection: clicking the header selects the column, and sorting moves to its own button.
+    // Without it the whole header is the sort button (the behaviour on the list pages).
     selection?: {
         isRowSelected: (row: T) => boolean;
         isColumnSelected: (key: string) => boolean;
@@ -66,8 +66,8 @@ export function DataTable<T>({
     const [widths, setWidths] = useState<Record<string, number> | null>(null);
     const tableRef = useRef<HTMLTableElement>(null);
 
-    // Genişlikleri tarayıcının otomatik yerleşiminden ölçüp sabitleriz. Aksi hâlde
-    // table-layout:fixed baştan devreye girip her kolona eşit genişlik verirdi.
+    // The widths are measured from the browser's automatic layout and then frozen. Otherwise
+    // table-layout:fixed would kick in from the start and give every column the same width.
     useLayoutEffect(() => {
         if (!resizable || widths || !tableRef.current) {
             return;
@@ -77,8 +77,8 @@ export function DataTable<T>({
         cells.forEach((cell, i) => {
             const column = columns[i];
             if (column) {
-                // plain kolonlar da ölçülür: genişlikleri CSS'ten gelse bile
-                // tablonun toplam genişliğine katkıları sayılmalı.
+                // plain columns are measured too: even when their width comes from CSS, their
+                // contribution to the table's total width still has to count.
                 measured[column.key] = Math.min(
                     maxWidth,
                     Math.max(MIN_WIDTH, Math.round(cell.getBoundingClientRect().width)),
@@ -90,7 +90,7 @@ export function DataTable<T>({
         }
     }, [resizable, widths, columns, maxWidth]);
 
-    // Kolon değişince (başka tabloya geçince) ölçüm sıfırlanmalı.
+    // When the columns change (moving to another table) the measurement has to reset.
     const columnKeys = columns.map((c) => c.key).join("|");
     const previousKeys = useRef(columnKeys);
     if (previousKeys.current !== columnKeys) {
@@ -138,15 +138,15 @@ export function DataTable<T>({
         setSort((current) =>
             current?.key === column.key
                 ? { key: column.key, desc: !current.desc }
-                : // Sayısalda ilk tıklama büyükten küçüğe: aranan genelde en büyüktür.
+                : // Numeric columns sort descending first: what you are after is usually the largest.
                   { key: column.key, desc: column.numeric === true },
         );
     }
 
     const fixed = resizable && widths !== null;
-    // Sabit yerleşimde tablo genişliği AÇIKÇA verilir. "max-content" bırakılırsa
-    // tarayıcı hücre içeriğine göre büyüyüp colgroup'taki genişlikleri eziyor;
-    // "auto" bırakılırsa kapsayıcıya yayılıyor. İkisi de kolonları şişiriyordu.
+    // Under a fixed layout the table width is given EXPLICITLY. Left as "max-content" the
+    // browser grows to fit the cell content and overrides the colgroup widths; left as
+    // "auto" it stretches to the container. Both inflated the columns.
     const totalWidth = fixed ? Object.values(widths!).reduce((sum, w) => sum + w, 0) : undefined;
 
     return (
@@ -179,7 +179,7 @@ export function DataTable<T>({
                                     {column.plain ? (
                                         column.header
                                     ) : selection ? (
-                                        // Ad kolonu seçer, ok sıralar: ikisi ayrı düğme.
+                                        // The name selects and the arrow sorts: two separate buttons.
                                         <span className="sort">
                                             <button
                                                 type="button"
@@ -280,7 +280,7 @@ export function DataTable<T>({
     );
 }
 
-// null/undefined her zaman sona gider; yön değişse bile boş değerler öne çıkmaz.
+// null/undefined always sort last; empty values never come first, whichever direction is chosen.
 function compare(a: SortValue, b: SortValue): number {
     const aEmpty = a === null || a === undefined || a === "";
     const bEmpty = b === null || b === undefined || b === "";

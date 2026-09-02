@@ -9,8 +9,8 @@ import { labelColorFor, rampFor, sampleRamp, useDarkMode } from "../theme";
 import { DataTable, type Column } from "../DataTable";
 import { Icon, type IconName } from "../Icon";
 
-// Nesne tipi sayaçları: gösterim sırası, tekil etiket ve ikon.
-// Çoğul biçim sayıya göre üretilir — "1 procedures" gibi çıktı olmasın.
+// Object type counters: display order, singular label and icon.
+// The plural form is derived from the number — so nothing reads "1 procedures".
 const KINDS: [key: string, singular: string, icon: IconName][] = [
     ["tables", "table", "table"],
     ["views", "view", "view"],
@@ -28,9 +28,9 @@ export function DatabasePage() {
     const navigate = useNavigate();
     const dark = useDarkMode();
 
-    // Tek tablo veritabanının %90'ını kaplayabiliyor; o durumda üst seviye harita
-    // gerçeği doğru söyler ama kuyruğu okunmaz kılar. Şemaya inince ölçek yeniden
-    // anlamlı hale gelir — alanı çarpıtmadan (alan = büyüklük sözleşmesi korunur).
+    // A single table can take up 90% of a database; the top-level map then tells the truth but
+    // makes the tail unreadable. Drilling into a schema makes the scale meaningful again —
+    // without distorting area (the area = magnitude contract holds).
     const [drill, setDrill] = useState<string | null>(null);
 
     const overview = useApi(() => api.database(alias, db), [alias, db]);
@@ -49,9 +49,9 @@ export function DatabasePage() {
     const totalRows = rows.reduce((sum, t) => sum + t.rowCount, 0);
     const ranked = [...rows].sort((a, b) => b.reservedKb - a.reservedKb);
 
-    // Tek tablo alanın yarısından fazlasını kaplıyorsa asıl bilgi budur ve bir
-    // grafikten değil bir cümleden daha hızlı okunur. Treemap bu durumda "bir şey
-    // her şeyi kaplıyor" der ama kuyruk hakkında hiçbir şey söyleyemez.
+    // When one table covers more than half the area, that is the real finding, and a sentence
+    // conveys it faster than a chart. In that situation the treemap says "one thing covers
+    // everything" but can say nothing at all about the tail.
     const top = ranked[0];
     const dominance = top && totalKb > 0 ? (top.reservedKb / totalKb) * 100 : 0;
 
@@ -207,8 +207,8 @@ export function DatabasePage() {
     );
 }
 
-// Rampanın ne anlama geldiğini gösteren küçük ölçek. Renk sürekli bir büyüklüğü
-// kodladığı için kategorik bir legend uygun değil.
+// A small scale showing what the ramp means. A categorical legend does not fit, because the
+// colour encodes a continuous magnitude.
 function ColorScale({ dark }: { dark: boolean }) {
     const ramp = rampFor(dark);
     return (
@@ -242,8 +242,8 @@ function buildTreemap(rows: TableStats[], dark: boolean, flat: boolean) {
     const labelColor = labelColorFor(dark);
     const surface = dark ? "#1d1f23" : "#ffffff";
 
-    // Satır sayıları büyüklük mertebeleri arasında dağıldığı için logaritmik
-    // normalizasyon: aksi hâlde tek dev tablo diğer her şeyi aynı renge ezer.
+    // Row counts are spread across orders of magnitude, so the normalisation is logarithmic:
+    // otherwise one huge table crushes everything else into the same colour.
     const logs = rows.map((t) => Math.log10(t.rowCount + 1));
     const maxLog = Math.max(...logs, 1);
 
@@ -266,8 +266,8 @@ function buildTreemap(rows: TableStats[], dark: boolean, flat: boolean) {
         itemStyle: { color: sampleRamp(ramp, Math.log10(t.rowCount + 1) / maxLog) },
     });
 
-    // Şemaya inildiğinde tek seviye: gruplama katmanı artık bilgi taşımıyor,
-    // yalnızca yer kaplıyor.
+    // Inside a schema there is a single level: the grouping layer no longer carries information,
+    // it only takes up room.
     const data = flat
         ? rows.map(leaf).sort((a, b) => b.value - a.value)
         : [...bySchema.entries()]
@@ -299,7 +299,7 @@ function buildTreemap(rows: TableStats[], dark: boolean, flat: boolean) {
                 left: 8,
                 right: 8,
                 bottom: 8,
-                // Şema bloğunun başlığı: kimliği renk değil, gruplama ve etiket taşır.
+                // The schema block's header: identity is carried by the grouping and the label, not the colour.
                 upperLabel: {
                     show: !flat,
                     height: 20,

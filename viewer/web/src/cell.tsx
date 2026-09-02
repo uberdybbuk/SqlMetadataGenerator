@@ -1,22 +1,22 @@
 import type { ReactNode } from "react";
 
-// Değerleri SQL tipine göre biçimlendirir.
+// Formats values according to their SQL type.
 //
-// Backend tarih/saat değerlerini ISO 8601 ("o") olarak gönderir; bu makine için
-// doğru ama ekranda okumak için kötü: bir `date` kolonunda "2026-07-22T00:00:00.0000000"
-// yazmanın anlamı yok, saat kısmı tanım gereği sıfır. Aradaki 'T' de ISO'nun
-// ayracı, insana bir şey söylemiyor.
+// The backend sends date and time values as ISO 8601 ("o"), which is right for a machine but
+// bad to read on screen: writing "2026-07-22T00:00:00.0000000" in a `date` column says nothing,
+// since the time part is zero by definition. The 'T' in the middle is ISO's separator and tells
+// a person nothing either.
 //
-// Saniye altı kısım ayrı bir <span> olarak döner: değer tam gösterilir ama
-// göz önce anlamlı kısmı yakalar.
+// The sub-second part comes back as its own <span>: the value is shown in full, but the eye
+// catches the meaningful part first.
 
 const DATE_ONLY = new Set(["date"]);
 const DATE_TIME = new Set(["datetime", "datetime2", "smalldatetime", "datetimeoffset"]);
 const TIME_ONLY = new Set(["time"]);
 
 export function formatCell(value: unknown, typeName: string): ReactNode {
-    // NULL ile boş metin ekranda aynı görünmemeli: biri "değer yok", diğeri
-    // "değer var ve boş". SSMS'teki gibi NULL ayrı bir renkle işaretlenir.
+    // NULL and an empty string must not look the same on screen: one is "no value", the other
+    // is "a value, and it is empty". As in SSMS, NULL is marked with its own colour.
     if (value === null || value === undefined) {
         return <span className="null">NULL</span>;
     }
@@ -50,7 +50,7 @@ export function formatCell(value: unknown, typeName: string): ReactNode {
     return text.length > 300 ? text.slice(0, 300) + "…" : text;
 }
 
-// "2026-07-22T20:27:03.1717949" -> "2026-07-22 20:27:03" + soluk ".1717949"
+// "2026-07-22T20:27:03.1717949" -> "2026-07-22 20:27:03" plus a faint ".1717949"
 function splitTimestamp(text: string): ReactNode {
     const t = text.indexOf("T");
     if (t < 0) {
@@ -67,7 +67,7 @@ function splitTimestamp(text: string): ReactNode {
     );
 }
 
-// Saniye altı kısmı ve varsa saat dilimi ekini ayırır.
+// Separates the sub-second part and the time-zone suffix, when there is one.
 function splitFraction(time: string): [string, string] {
     const dot = time.indexOf(".");
     if (dot < 0) {
@@ -76,10 +76,10 @@ function splitFraction(time: string): [string, string] {
     return [time.slice(0, dot), time.slice(dot)];
 }
 
-// formatCell'in düz metin karşılığı — panoya kopyalarken kullanılır.
-// Ekranda görüneni yazar: aynı tarih biçimi, ISO 'T' ayracı olmadan.
-// Tek ayrım boş metin: ekranda "empty" etiketi görünür ama panoya BOŞ gider,
-// yoksa hücreye "empty" kelimesi yapıştırılırdı.
+// The plain-text counterpart of formatCell — used when copying to the clipboard.
+// It writes what is on screen: the same date format, without ISO's 'T' separator.
+// The one difference is the empty string: the screen shows an "empty" label, but EMPTY goes to
+// the clipboard, otherwise the word "empty" would be pasted into the cell.
 export function formatCellText(value: unknown, typeName: string): string {
     if (value === null || value === undefined) {
         return "NULL";
@@ -97,7 +97,7 @@ export function formatCellText(value: unknown, typeName: string): string {
     return text;
 }
 
-// Sayısal tipler sağa yaslanır; metin ve tarih sola.
+// Numeric types are right-aligned; text and dates go left.
 const NUMERIC = new Set([
     "bigint", "int", "smallint", "tinyint", "decimal", "numeric",
     "float", "real", "money", "smallmoney", "bit",

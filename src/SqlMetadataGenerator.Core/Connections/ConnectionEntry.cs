@@ -3,24 +3,24 @@ using System.Text.Json.Serialization;
 
 namespace SqlMetadataGenerator.Connections;
 
-// connections.json içindeki tek bir kayıt. Parola BİLEREK yok: yalnızca hangi ortam
-// değişkeninden okunacağı tutulur, böylece dosya repoya girse bile sır sızmaz.
+// A single record inside connections.json. The password is DELIBERATELY absent: only the
+// environment variable it is read from is stored, so no secret leaks even if the file is committed.
 public sealed class ConnectionEntry
 {
-    // URL'de segment olarak kullanılır; bu yüzden slug kurallarına uymak zorunda.
+    // Used as a URL segment, which is why it has to obey the slug rules.
     public required string Alias { get; set; }
     public required string Server { get; set; }
-    // "sql" veya "integrated".
+    // Either "sql" or "integrated".
     public string Auth { get; set; } = "sql";
     public string? User { get; set; }
-    // Parolanın okunacağı ortam değişkeni. Verilmezse SQLMETA_PW_{ALIAS} varsayılır.
+    // The environment variable the password is read from. Defaults to SQLMETA_PW_{ALIAS}.
     public string? PasswordEnv { get; set; }
     public bool TrustServerCertificate { get; set; } = true;
     public bool Encrypt { get; set; } = true;
-    // UI'da gösterilecek serbest açıklama.
+    // Free-form description shown in the UI.
     public string? Description { get; set; }
 
-    // Parola verilmediğinde bakılacak varsayılan ortam değişkeni adı.
+    // The default environment variable name to look at when none is given.
     public string ResolvedPasswordEnv =>
         string.IsNullOrWhiteSpace(PasswordEnv)
             ? "SQLMETA_PW_" + new string(Alias.Select(c => char.IsLetterOrDigit(c) ? char.ToUpperInvariant(c) : '_').ToArray())

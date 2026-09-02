@@ -485,15 +485,15 @@ $RECYCLE.BIN/
 
 output/
 
-# Gerçek bağlantı tanımları — sunucu adresi ve kullanıcı adı içerir, repoya girmez.
-# Şablon için connections.example.json'a bakın. Parolalar hiçbir dosyada tutulmaz,
-# connections.json'daki passwordEnv'in gösterdiği ortam değişkeninden okunur.
+# Real connection definitions — they carry the server address and the user name, so they never
+# reach the repository. See connections.example.json for the template. Passwords are kept in no
+# file at all; they are read from the environment variable passwordEnv names in connections.json.
 #
-# Kalıp bilerek geniş: connections.local.json gibi varyantları ve
-# connections..json gibi yazım hatalarını da yakalar. Tam adı yazan bir kural,
-# adı bir karakter kayan dosyayı sessizce commit'e sokuyordu.
+# The pattern is deliberately broad: it catches variants like connections.local.json and typos
+# like connections..json. A rule spelling out the exact name let a file whose name was one
+# character off slip silently into a commit.
 connections*.json
 !connections.example.json
 
-# Vite build çıktısı Web projesinin wwwroot'una kopyalanır.
+# The Vite build output is copied into the Web project's wwwroot.
 src/SqlMetadataGenerator.Web/wwwroot/
