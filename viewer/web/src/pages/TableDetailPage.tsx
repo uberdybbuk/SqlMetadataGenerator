@@ -6,7 +6,7 @@ import { useApi } from "../useApi";
 import { formatType } from "../format";
 import { DataTable, type Column } from "../DataTable";
 import { Icon } from "../Icon";
-import { formatCell, isNumericType } from "../cell";
+import { ResultGrid, type ResultColumn } from "../ResultGrid";
 
 // Monaco büyük; yalnızca veri sekmesi açılınca indirilsin.
 const SqlEditor = lazy(() => import("../SqlEditor"));
@@ -95,24 +95,34 @@ export function TableDetailPage() {
                         />
                     )}
 
-                    {tab === "data" && <PreviewTab alias={alias} db={db} schema={schema} name={name} />}
+                    {tab === "data" && (
+                        <PreviewTab
+                            alias={alias}
+                            db={db}
+                            schema={schema}
+                            name={name}
+                            columnInfo={new Map(detail.data.columns.map((c) => [c.name, c]))}
+                        />
+                    )}
                 </>
             )}
         </>
     );
 }
 
-// Önizleme satırı: kolonlar çalışma zamanında belirlendiği için dizi olarak gelir.
-// Sıralama için satırın kendisini sarmalıyoruz.
-interface PreviewRow {
-    index: number;
-    values: (string | number | boolean | null)[];
-}
-
-const TRUNCATION_NOTE =
-    "Truncated server-side. Large text and binary values are not transferred in full for previews.";
-
-function PreviewTab({ alias, db, schema, name }: { alias: string; db: string; schema: string; name: string }) {
+function PreviewTab({
+    alias,
+    db,
+    schema,
+    name,
+    columnInfo,
+}: {
+    alias: string;
+    db: string;
+    schema: string;
+    name: string;
+    columnInfo: Map<string, ColumnSummary>;
+}) {
     const { data, error, loading } = useApi(
         () => api.preview(alias, db, schema, name, 20),
         [alias, db, schema, name],
@@ -128,29 +138,32 @@ function PreviewTab({ alias, db, schema, name }: { alias: string; db: string; sc
         return null;
     }
 
-    const rows: PreviewRow[] = data.rows.map((values, index) => ({ index, values }));
-
-    const columns: Column<PreviewRow>[] = data.columns.map((column, i) => ({
-        key: `${i}-${column.name}`,
-        numeric: isNumericType(column.typeName),
-        header: column.name,
-        subHeader: (
-            <>
-                {column.typeName}
-                {column.truncated && (
-                    <>
-                        {" · "}
-                        <span className="trunc" title={TRUNCATION_NOTE}>
-                            truncated
-                        </span>
-                    </>
-                )}
-            </>
-        ),
-        sortValue: (row) => row.values[i],
-        render: (row) => formatCell(row.values[i], column.typeName),
-        className: isNumericType(column.typeName) ? undefined : "mono",
-    }));
+    // Başlık kartındaki ek bilgiler tablo metadatasından gelir; ResultGrid'in
+    // kendisi tablo kavramını bilmez, yalnızca hazır içeriği gösterir.
+    const columns: ResultColumn[] = data.columns.map((column) => {
+        const meta = columnInfo.get(column.name);
+        return {
+            name: column.name,
+            typeName: column.typeName,
+            truncated: column.truncated,
+            details: meta && (
+                <>
+                    <span className="muted">
+                        {formatType(meta.typeName, meta.maxLength, meta.precision, meta.scale)} ·{" "}
+                        {meta.isNullable ? "nullable" : "not null"}
+                    </span>
+                    {meta.primaryKeyOrdinal !== null && (
+                        <span className="muted">primary key ({meta.primaryKeyOrdinal})</span>
+                    )}
+                    {meta.isIdentity && <span className="muted">identity</span>}
+                    {meta.isComputed && <span className="muted">computed</span>}
+                    {meta.defaultDefinition && (
+                        <span className="mono muted">default {meta.defaultDefinition}</span>
+                    )}
+                </>
+            ),
+        };
+    });
 
     return (
         <>
@@ -160,17 +173,13 @@ function PreviewTab({ alias, db, schema, name }: { alias: string; db: string; sc
                 </Suspense>
             </div>
 
-            {data.rows.length === 0 ? (
-                <div className="state">Table is empty.</div>
-            ) : (
-                <DataTable
-                    columns={columns}
-                    rows={rows}
-                    rowKey={(row) => String(row.index)}
-                    dense
-                    resizable
-                />
-            )}
+            <ResultGrid
+                columns={columns}
+                rows={data.rows}
+                elapsedMs={data.elapsedMs}
+                messages={data.messages}
+                limitNote="limited to 20"
+            />
         </>
     );
 }

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 
 import { api } from "./api";
@@ -161,6 +162,24 @@ function Breadcrumbs() {
 }
 
 export function Layout() {
+    // Monaco ~2.6 MB'lık ayrı bir parça. İlk tabloya tıklandığında indirilmesini
+    // beklemek yerine uygulama açılır açılmaz arka planda çekilir; modülün üst
+    // seviye kodu da (dil kaydı, worker ayarı) o sırada çalışır. Kullanıcı veri
+    // sekmesine geldiğinde editör hazır olur.
+    useEffect(() => {
+        // timeout şart: boşta kalma anı gelmezse (uzun tablo listesi render'ı gibi)
+        // ısınma hiç çalışmıyor ve ilk editör yine yarım saniye geciktiriyordu.
+        const warm = () => {
+            void import("./SqlEditor").then((module) => module.warmUp());
+        };
+        const handle = window.requestIdleCallback
+            ? window.requestIdleCallback(warm, { timeout: 1200 })
+            : window.setTimeout(warm, 300);
+        return () => {
+            window.cancelIdleCallback?.(handle as number);
+        };
+    }, []);
+
     return (
         <div className="shell">
             <Breadcrumbs />

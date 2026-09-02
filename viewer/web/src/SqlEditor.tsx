@@ -14,6 +14,36 @@ import { useDarkMode } from "./theme";
 self.MonacoEnvironment = { getWorker: () => new editorWorker() };
 loader.config({ monaco });
 
+// Monaco'nun İLK editör örneği pahalı: tema kurulumu, font ölçümü ve tokenizer
+// başlatma o anda olur (ölçüldü: ~500 ms). Sonraki örnekler ucuzdur. Bu yüzden
+// uygulama açılırken görünmeyen bir editör bir kez kurulup atılır; kullanıcı veri
+// sekmesine geldiğinde pahalı iş çoktan yapılmış olur.
+let warmed = false;
+
+export function warmUp() {
+    if (warmed) {
+        return;
+    }
+    warmed = true;
+
+    const host = document.createElement("div");
+    host.setAttribute("aria-hidden", "true");
+    host.style.cssText = "position:absolute;left:-10000px;top:0;width:600px;height:120px;";
+    document.body.appendChild(host);
+
+    const editor = monaco.editor.create(host, {
+        value: "SELECT 1;",
+        language: "sql",
+        automaticLayout: false,
+    });
+
+    // Bir kare bekle ki yerleşim ve font ölçümü gerçekten çalışsın, sonra bırak.
+    requestAnimationFrame(() => {
+        editor.dispose();
+        host.remove();
+    });
+}
+
 interface SqlEditorProps {
     value: string;
     // Şimdilik salt-okunur: burada gösterilen, önizlemeyi üreten sorgunun kendisi.

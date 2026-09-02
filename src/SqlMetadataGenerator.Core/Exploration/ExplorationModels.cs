@@ -53,6 +53,12 @@ public sealed class PreviewResult
     // Gerçekten çalıştırılan sorgu. Kullanıcıya gösterilir: kısaltmanın nereden
     // geldiği de dahil, önizlemenin nasıl üretildiği görünür olsun.
     public required string Sql { get; init; }
+    // Komutun gönderilmesinden son satırın okunmasına kadar geçen süre —
+    // yani uygulama ile veritabanı arasındaki gidiş-dönüş.
+    public required long ElapsedMs { get; init; }
+    // Sunucunun döndürdüğü bilgi mesajları (PRINT, uyarılar). Hata değildir;
+    // hatalar istisna olarak yükselir.
+    public required List<string> Messages { get; init; }
 }
 
 // Tablo detay sayfasının kolon satırı. Script üretimi için değil, GÖSTERİM için —

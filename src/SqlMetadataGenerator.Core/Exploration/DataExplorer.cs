@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Data.SqlClient;
 
@@ -153,7 +154,7 @@ public sealed class DataExplorer(string connectionString)
         var columns = await ReadPreviewColumnsAsync(objectId, ct);
         if (columns.Count == 0)
         {
-            return new PreviewResult { Columns = [], Rows = [], Sql = string.Empty };
+            return new PreviewResult { Columns = [], Rows = [], Sql = string.Empty, ElapsedMs = 0, Messages = [] };
         }
 
         string projection = string.Join(",\n       ", columns.Select(c => c.Projection));
@@ -174,18 +175,40 @@ public sealed class DataExplorer(string connectionString)
         string sql = displaySql;
 
         var rows = new List<object?[]>();
+        var messages = new List<string>();
         await using var conn = await OpenAsync(ct);
-        await using var cmd = ReadOnlyCommand.Create(conn, sql);
-        cmd.CommandTimeout = timeoutSeconds;
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+
+        // PRINT ve uyarılar hata değildir, istisna olarak gelmezler; ayrıca toplanıp
+        // kullanıcıya gösterilir (SSMS'teki Messages sekmesinin karşılığı).
+        void OnInfo(object _, SqlInfoMessageEventArgs e)
         {
-            var values = new object?[reader.FieldCount];
-            for (int i = 0; i < reader.FieldCount; i++)
+            foreach (SqlError error in e.Errors)
             {
-                values[i] = FormatValue(reader.IsDBNull(i) ? null : reader.GetValue(i));
+                messages.Add(error.Message);
             }
-            rows.Add(values);
+        }
+
+        conn.InfoMessage += OnInfo;
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await using var cmd = ReadOnlyCommand.Create(conn, sql);
+            cmd.CommandTimeout = timeoutSeconds;
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var values = new object?[reader.FieldCount];
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    values[i] = FormatValue(reader.IsDBNull(i) ? null : reader.GetValue(i));
+                }
+                rows.Add(values);
+            }
+        }
+        finally
+        {
+            stopwatch.Stop();
+            conn.InfoMessage -= OnInfo;
         }
 
         // Damga "kısaltılabilir" değil "kısaltıldı" anlamına gelmeli. nvarchar(max)
@@ -209,6 +232,8 @@ public sealed class DataExplorer(string connectionString)
             }).ToList(),
             Rows = rows,
             Sql = displaySql,
+            ElapsedMs = stopwatch.ElapsedMilliseconds,
+            Messages = messages,
         };
     }
 

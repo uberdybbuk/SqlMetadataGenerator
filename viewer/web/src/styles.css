@@ -11,8 +11,9 @@
     --warn: #b25000;
     --head: #f2f1ee;
     --head-line: #cfcdc8;
-    --null: #8a6100;
-    --null-bg: #fdf3d7;
+    --null: #7a6420;
+    --null-bg: #fbf3ce;
+    --null-bg-hover: #f5ebc0;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -30,8 +31,9 @@
         --warn: #e8963c;
         --head: #24262b;
         --head-line: #3d4149;
-        --null: #e3c07b;
-        --null-bg: #33291a;
+        --null: #cbb583;
+        --null-bg: #33301f;
+        --null-bg-hover: #3d3926;
     }
 }
 
@@ -424,7 +426,8 @@ h1.with-icon {
 
 .table-wrap.dense th,
 .table-wrap.dense td {
-    padding: 4px 10px;
+    padding: 2px 7px;
+    line-height: 1.45;
 }
 
 .table-wrap.dense td {
@@ -441,13 +444,18 @@ h1.with-icon {
 
 /* SSMS'teki gibi NULL kendi rengiyle işaretlenir; boş metin ayrı ve daha
    silik durur, böylece "değer yok" ile "değer boş" karışmaz. */
+/* SSMS'te NULL hücrenin ZEMİNİ sarıdır, yazısı değil. Boş bir hücreyle
+   karışmaz ve göz taranırken kolonun neresi boş hemen görünür. */
+td.isnull {
+    background: var(--null-bg);
+}
+
+tbody tr:hover td.isnull {
+    background: var(--null-bg-hover);
+}
+
 .null {
     color: var(--null);
-    background: var(--null-bg);
-    border-radius: 3px;
-    padding: 0 5px;
-    font-size: 11px;
-    letter-spacing: 0.03em;
 }
 
 .empty {
@@ -492,4 +500,133 @@ body.resizing {
     overflow: hidden;
     margin-bottom: 14px;
     background: var(--panel);
+}
+
+
+/* ---- Satır numarası kolonu ---- */
+td.rownum,
+th:first-child:has(+ th) {
+    /* yalnızca hizalama; genişlik içeriğe göre */
+}
+
+td.rownum {
+    text-align: right;
+    color: var(--muted);
+    background: var(--head);
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+}
+
+tbody tr:hover td.rownum {
+    background: var(--head-line);
+}
+
+/* ---- Başlık bilgi kartı ---- */
+th .colinfo {
+    display: none;
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    z-index: 5;
+    white-space: normal;
+}
+
+th:hover .colinfo {
+    display: block;
+}
+
+th .colinfo .card {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 180px;
+    max-width: 320px;
+    padding: 8px 10px;
+    background: var(--panel);
+    border: 1px solid var(--head-line);
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.14);
+    font-weight: 400;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text);
+}
+
+th .colinfo .warn-line {
+    color: var(--warn);
+}
+
+/* ---- Sonuç bileşeni: sekmeler ve durum çubuğu ---- */
+.result {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--panel);
+}
+
+.result .table-wrap {
+    border: none;
+    border-radius: 0;
+    max-height: 60vh;
+    overflow: auto;
+}
+
+.result-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 6px;
+    background: var(--head);
+    border-bottom: 1px solid var(--head-line);
+}
+
+.tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    margin-bottom: -1px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.tab[aria-selected="true"] {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+}
+
+.tab .count {
+    display: inline-block;
+    margin-left: 6px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 999px;
+    padding: 0 6px;
+    font-size: 10px;
+}
+
+.messages {
+    padding: 12px 14px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.7;
+    max-height: 60vh;
+    overflow: auto;
+}
+
+.status {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 4px 12px;
+    background: var(--head);
+    border-top: 1px solid var(--head-line);
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--muted);
+}
+
+.status .grow {
+    flex: 1;
 }

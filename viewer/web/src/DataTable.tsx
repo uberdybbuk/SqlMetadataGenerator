@@ -5,14 +5,17 @@ export type SortValue = string | number | boolean | null;
 export interface Column<T> {
     key: string;
     header: ReactNode;
-    // Başlığın altına/yanına yazılan ikincil bilgi (ör. kolonun SQL tipi).
-    subHeader?: ReactNode;
+    // Başlığın üzerine gelince açılan kart. Tip gibi ikincil bilgiler burada
+    // durur: başlık satırına yazıldıklarında kolonu gereksiz yere genişletiyorlardı.
+    info?: ReactNode;
     // Sayısal kolonlar sağa yaslanır ve ilk tıklamada büyükten küçüğe sıralanır.
     numeric?: boolean;
     // Sıralamada kullanılacak ham değer. Verilmezse kolon sıralanamaz.
     sortValue?: (row: T) => SortValue;
     render: (row: T) => ReactNode;
     className?: string;
+    // Satıra göre değişen hücre sınıfı (ör. NULL hücresini boyamak için).
+    cellClassName?: (row: T) => string | undefined;
 }
 
 interface DataTableProps<T> {
@@ -136,7 +139,6 @@ export function DataTable<T>({
                             const label = (
                                 <>
                                     <span className="hname">{column.header}</span>
-                                    {column.subHeader && <span className="htype">{column.subHeader}</span>}
                                     <span className="arrow">{active ? (sort!.desc ? "↓" : "↑") : ""}</span>
                                 </>
                             );
@@ -157,6 +159,7 @@ export function DataTable<T>({
                                     ) : (
                                         <span className="sort">{label}</span>
                                     )}
+                                    {column.info && <span className="colinfo">{column.info}</span>}
                                     {resizable && (
                                         <span
                                             className="resizer"
@@ -177,7 +180,11 @@ export function DataTable<T>({
                             {columns.map((column) => (
                                 <td
                                     key={column.key}
-                                    className={[column.numeric ? "num" : "", column.className ?? ""]
+                                    className={[
+                                        column.numeric ? "num" : "",
+                                        column.className ?? "",
+                                        column.cellClassName?.(row) ?? "",
+                                    ]
                                         .filter(Boolean)
                                         .join(" ")}
                                 >

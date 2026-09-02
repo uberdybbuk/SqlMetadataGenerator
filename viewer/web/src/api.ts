@@ -80,6 +80,10 @@ export interface PreviewResult {
     rows: (string | number | boolean | null)[][];
     // Önizlemeyi üreten sorgunun kendisi; kullanıcıya gösterilir.
     sql: string;
+    // Uygulama ile veritabanı arasındaki gidiş-dönüş süresi.
+    elapsedMs: number;
+    // Sunucunun döndürdüğü bilgi mesajları (PRINT, uyarılar).
+    messages: string[];
 }
 
 // Backend hataları RFC 7807 ProblemDetails olarak döner; "detail" alanı kullanıcıya
