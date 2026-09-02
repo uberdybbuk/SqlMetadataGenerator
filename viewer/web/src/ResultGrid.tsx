@@ -114,10 +114,22 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
     // Sol kenarda satır numarası; başlığındaki köşe hücresi tümünü seçer.
     const numberColumn: Column<GridRow> = {
         key: "__rownum",
+        // Düğme hücrenin tamamını kaplar: küçük bir simgeyi tutturmak gerekmesin.
         header: (
-            <button type="button" className="corner" onClick={selectAll} aria-label="Select all">
-                ◧
-            </button>
+            <>
+                <button type="button" className="corner" onClick={selectAll} aria-label="Select all">
+                    ◧
+                </button>
+                <span className="colinfo">
+                    <span className="card">
+                        <b>Select all</b>
+                        <span className="muted">
+                            Selects every row and column. Ctrl/Cmd+C copies the selection as
+                            tab-separated text.
+                        </span>
+                    </span>
+                </span>
+            </>
         ),
         render: (row) => row.index + 1,
         className: "rownum",

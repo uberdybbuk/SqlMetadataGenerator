@@ -542,6 +542,9 @@ th:hover .colinfo {
 }
 
 th .colinfo .card {
+    /* Kart, sağa yaslı bir başlığın (satır numarası kolonu) hizasını miras
+       almasın; içeriği her zaman soldan başlar. */
+    text-align: left;
     display: flex;
     flex-direction: column;
     gap: 3px;
@@ -659,8 +662,14 @@ th .colinfo .warn-line {
     padding-right: 8px;
 }
 
-/* Köşe hücresi: tüm ızgarayı seçer. */
+/* Köşe hücresi: tüm ızgarayı seçer. Düğme hücrenin TAMAMINI kaplar —
+   11px'lik bir simgeyi hedeflemek gereksiz bir isabet testi. */
 th .corner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: none;
     border: none;
     padding: 0;
@@ -672,6 +681,7 @@ th .corner {
 
 th .corner:hover {
     color: var(--accent);
+    background: var(--sel-head);
 }
 
 /* Başlıkta ad kolonu seçer, ok sıralar. */
