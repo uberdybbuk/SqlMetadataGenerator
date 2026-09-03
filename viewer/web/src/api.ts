@@ -101,7 +101,26 @@ export class ApiError extends Error {
     }
 }
 
-async function get<T>(path: string): Promise<T> {
+// React StrictMode mounts every component twice in development, so a page that fires one request
+// ends up sending it twice — a pointless second round trip to the database on every click. A path
+// that is already in flight shares the running promise instead of opening a new request.
+// Only in-flight ones: the entry is dropped the moment it settles, so nothing is served from a
+// cache and coming back to a page always asks the server again.
+const inFlight = new Map<string, Promise<unknown>>();
+
+function get<T>(path: string): Promise<T> {
+    const running = inFlight.get(path) as Promise<T> | undefined;
+    if (running) {
+        return running;
+    }
+    const request = fetchJson<T>(path).finally(() => {
+        inFlight.delete(path);
+    });
+    inFlight.set(path, request);
+    return request;
+}
+
+async function fetchJson<T>(path: string): Promise<T> {
     const response = await fetch(path);
     if (!response.ok) {
         let detail = `${response.status} ${response.statusText}`;
@@ -133,6 +152,12 @@ export const api = {
     table: (alias: string, db: string, schema: string, name: string) =>
         get<TableDetail>(
             `/api/servers/${seg(alias)}/databases/${seg(db)}/tables/${seg(schema)}/${seg(name)}`,
+        ),
+
+    // The query text alone, so the editor does not have to wait for the rows.
+    previewSql: (alias: string, db: string, schema: string, name: string, top = 20) =>
+        get<{ sql: string }>(
+            `/api/servers/${seg(alias)}/databases/${seg(db)}/tables/${seg(schema)}/${seg(name)}/sql?top=${top}`,
         ),
 
     preview: (alias: string, db: string, schema: string, name: string, top = 20) =>

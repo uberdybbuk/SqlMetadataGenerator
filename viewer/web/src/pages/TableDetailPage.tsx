@@ -28,6 +28,10 @@ export function TableDetailPage() {
         columnsWanted,
     );
     const preview = useApi(() => api.preview(alias, db, schema, name, 20), [alias, db, schema, name]);
+    // Fired alongside the preview, not after it. It only reads the catalog, so the editor fills in
+    // while the rows are still on their way — on a slow table that is the difference between
+    // seeing the query and staring at an empty pane.
+    const previewSql = useApi(() => api.previewSql(alias, db, schema, name, 20), [alias, db, schema, name]);
 
     return (
         <>
@@ -57,7 +61,7 @@ export function TableDetailPage() {
             </div>
 
             {tab === "data" ? (
-                <DataTab preview={preview} />
+                <DataTab preview={preview} sql={previewSql.data?.sql ?? preview.data?.sql ?? ""} />
             ) : (
                 <ColumnsTab detail={detail} />
             )}
@@ -65,7 +69,7 @@ export function TableDetailPage() {
     );
 }
 
-function DataTab({ preview }: { preview: AsyncState<PreviewResult> }) {
+function DataTab({ preview, sql }: { preview: AsyncState<PreviewResult>; sql: string }) {
     // The information on the header card arrives with the preview itself; no separate request.
     const columns: ResultColumn[] = (preview.data?.columns ?? []).map((column) => {
         const meta = column.column;
@@ -94,11 +98,11 @@ function DataTab({ preview }: { preview: AsyncState<PreviewResult> }) {
 
     return (
         <>
-            {/* The editor skeleton shows immediately; its text arrives with the preview. The preview
-                is now two round trips (metadata + data), not three. */}
+            {/* The query text comes from its own endpoint, which only reads the catalog, so it is on
+                screen while the rows are still being fetched. The preview's copy is the fallback. */}
             <div className="editor-wrap">
                 <Suspense fallback={<div className="editor-placeholder" />}>
-                    <SqlEditor value={preview.data?.sql ?? ""} />
+                    <SqlEditor value={sql} />
                 </Suspense>
             </div>
 

@@ -74,6 +74,31 @@ internal static class ExplorerEndpoints
                 return Results.Ok(new { shape.Schema, shape.Name, shape.Columns });
             }));
 
+        // The query text on its own, without the rows. The preview endpoint knows the text as soon
+        // as the catalog answers, but only ships it once the data has been read as well — so on a
+        // large table the editor sat empty for as long as the scan took, which reads as the
+        // application being stuck rather than as loading. This endpoint costs one catalog round
+        // trip and runs alongside the preview.
+        api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}/sql",
+            (string alias, string db, string schema, string name, ConnectionRegistry registry,
+             CancellationToken ct, int top = DefaultPreviewTop, string? where = null) =>
+            WithDatabase(alias, db, registry, async (explorer, _) =>
+            {
+                if (where is not null && !WhereClauseGuard.TryValidate(where, out string? guardError))
+                {
+                    return BadRequest(guardError!);
+                }
+
+                var shape = await explorer.ReadTableShapeAsync(schema, name, ct);
+                if (shape is null)
+                {
+                    return NotFound($"Table not found: {schema}.{name}");
+                }
+
+                int capped = Math.Clamp(top, 1, 500);
+                return Results.Ok(new { Sql = DataExplorer.BuildPreviewSql(shape, capped, where) });
+            }));
+
         // The TOP N preview. It can be filtered with an optional where; because that lives in the
         // URL, a filtered preview can be bookmarked too.
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}/preview",

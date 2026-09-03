@@ -85,17 +85,6 @@ a:hover {
     gap: 6px;
 }
 
-.crumbs .detail {
-    color: var(--muted);
-    font-family: var(--mono);
-    font-size: 12px;
-}
-
-.crumbs .detail::before {
-    content: "·";
-    margin-right: 6px;
-}
-
 .crumbs .sep {
     color: var(--border);
     margin-left: 2px;
@@ -394,10 +383,6 @@ th .htype {
     gap: 6px;
 }
 
-.crumbs .icon {
-    color: var(--muted);
-}
-
 .badge {
     display: inline-flex;
     align-items: center;
@@ -500,7 +485,14 @@ body.resizing {
 }
 
 /* ---- Monaco wrapper ---- */
+/* A fixed height: 14 lines of 19px plus the editor's own 16px of padding. The query pane must
+   not resize itself per table — the column count decides how tall the text is, so a pane that
+   fits the text jumped by ~200px the moment the preview arrived and shoved the grid down.
+   In this database no query is shorter than 12 lines and three quarters of them already reach
+   this cap, so a fixed pane costs almost nothing and the page stops moving.
+   The extra 2px covers the border, since box-sizing is border-box. */
 .editor-wrap {
+    height: 284px;
     border: 1px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
@@ -641,8 +633,9 @@ th .colinfo .warn-line {
 }
 
 /* Holds the editor's place while the Monaco module is still downloading, so the layout does not jump. */
+.editor-slot,
 .editor-placeholder {
-    height: 73px;
+    height: 100%;
 }
 
 /* ---- Result grid: fixed widths ---- */

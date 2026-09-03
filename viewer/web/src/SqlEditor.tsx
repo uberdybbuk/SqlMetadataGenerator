@@ -13,8 +13,6 @@ import { useDarkMode } from "./theme";
 // internet access, so we hand it the copy that comes from the bundle.
 self.MonacoEnvironment = { getWorker: () => new editorWorker() };
 
-const LINE_HEIGHT = 19;
-
 const OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
     language: "sql",
     readOnly: true,
@@ -129,6 +127,8 @@ export default function SqlEditor({ value }: SqlEditorProps) {
         monaco.editor.setTheme(dark ? "vs-dark" : "vs");
     }, [dark]);
 
-    const lines = Math.min(Math.max(value.split("\n").length, 3), 14);
-    return <div ref={slot} style={{ height: lines * LINE_HEIGHT + 16 }} />;
+    // The height is fixed by .editor-wrap and never follows the query. Sizing to the text meant
+    // every table opened at three lines and then jumped to its real height once the preview
+    // landed, pushing the grid down the page — which read as slowness, not as loading.
+    return <div ref={slot} className="editor-slot" />;
 }
