@@ -38,8 +38,7 @@ export function TableListPage() {
             header: "Schema",
             sortValue: (t) => t.schema,
             render: (t) => (
-                <Link className="mono muted with-icon" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
-                    <Icon name="schema" />
+                <Link className="mono muted" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
                     {t.schema}
                 </Link>
             ),
@@ -50,10 +49,9 @@ export function TableListPage() {
             sortValue: (t) => t.name,
             render: (t) => (
                 <Link
-                    className="mono with-icon"
+                    className="mono"
                     to={`${base}/tables/${encodeURIComponent(t.schema)}/${encodeURIComponent(t.name)}`}
                 >
-                    <Icon name="table" />
                     {t.name}
                 </Link>
             ),
@@ -125,6 +123,7 @@ export function TableListPage() {
                 rows={shown}
                 rowKey={(t) => `${t.schema}.${t.name}`}
                 initialSort={{ key: "reserved", desc: true }}
+                dense
             />
             {shown.length === 0 && <div className="state">No matching tables.</div>}
         </>
