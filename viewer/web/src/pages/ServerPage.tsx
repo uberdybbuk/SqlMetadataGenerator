@@ -104,6 +104,7 @@ export function ServerPage() {
                 rows={databases}
                 rowKey={(db) => db.name}
                 initialSort={{ key: "data", desc: true }}
+                dense
             />
             <p className="subtitle" style={{ marginTop: 12 }}>
                 Sizes come from <code>sys.master_files</code>: allocated file size, not space in use.

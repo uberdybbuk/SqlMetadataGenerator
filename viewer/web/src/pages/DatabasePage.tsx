@@ -196,6 +196,7 @@ export function DatabasePage() {
                         rows={rows}
                         rowKey={(t) => `${t.schema}.${t.name}`}
                         initialSort={{ key: "reserved", desc: true }}
+                        dense
                         limit={15}
                     />
                     <p style={{ marginTop: 12 }}>

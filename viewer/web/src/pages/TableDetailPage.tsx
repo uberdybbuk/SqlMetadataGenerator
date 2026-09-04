@@ -181,6 +181,7 @@ function ColumnsTab({ detail }: { detail: AsyncState<{ columns: ColumnSummary[] 
             rows={detail.data.columns}
             rowKey={(c) => String(c.columnId)}
             initialSort={{ key: "id" }}
+            dense
         />
     );
 }

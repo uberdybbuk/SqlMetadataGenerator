@@ -38,7 +38,8 @@ export function TableListPage() {
             header: "Schema",
             sortValue: (t) => t.schema,
             render: (t) => (
-                <Link className="mono muted" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
+                <Link className="mono muted with-icon" to={`${base}/tables/${encodeURIComponent(t.schema)}`}>
+                    <Icon name="schema" />
                     {t.schema}
                 </Link>
             ),
@@ -49,9 +50,10 @@ export function TableListPage() {
             sortValue: (t) => t.name,
             render: (t) => (
                 <Link
-                    className="mono"
+                    className="mono with-icon"
                     to={`${base}/tables/${encodeURIComponent(t.schema)}/${encodeURIComponent(t.name)}`}
                 >
+                    <Icon name="table" />
                     {t.name}
                 </Link>
             ),
