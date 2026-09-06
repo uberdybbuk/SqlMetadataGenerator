@@ -171,6 +171,20 @@ a.card:hover {
     color: inherit;
 }
 
+/* The badges are links to the object list behind each counter. They keep the body text colour
+   rather than the link colour: a row of eight blue pills reads as decoration, not as navigation.
+   The affordance is the hover state instead. */
+a.badge {
+    text-decoration: none;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
+}
+
+a.badge:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
 .badge b {
     font-weight: 600;
 }
@@ -496,6 +510,14 @@ body.resizing {
    In this database no query is shorter than 12 lines and three quarters of them already reach
    this cap, so a fixed pane costs almost nothing and the page stops moving.
    The extra 2px covers the border, since box-sizing is border-box. */
+/* The detail page shows a whole module, not a twenty-line preview, so it gets a taller frame.
+   Still a fixed height: a pane that grows with the definition would shove the page around exactly
+   as the preview editor used to. */
+.editor-wrap.tall {
+    height: 68vh;
+    min-height: 320px;
+}
+
 .editor-wrap {
     height: 284px;
     border: 1px solid var(--border);

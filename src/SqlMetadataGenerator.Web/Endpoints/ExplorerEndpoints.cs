@@ -1,6 +1,8 @@
 using Microsoft.Data.SqlClient;
 using SqlMetadataGenerator.Connections;
 using SqlMetadataGenerator.Exploration;
+using SqlMetadataGenerator.Model;
+using SqlMetadataGenerator.Scripting;
 
 namespace SqlMetadataGenerator.Web.Endpoints;
 
@@ -53,6 +55,45 @@ internal static class ExplorerEndpoints
                 var schemasTask = new MetadataReader(connectionString).ReadSchemasAsync(ct);
                 await Task.WhenAll(countsTask, schemasTask);
                 return Results.Ok(new { database = db, counts = await countsTask, schemas = await schemasTask });
+            }));
+
+        // One object kind, listed. The dashboard badges link here, so the counter and the list
+        // read the same catalog query — a badge saying "9 synonyms" opens exactly nine rows.
+        api.MapGet("/servers/{alias}/databases/{db}/objects/{kind}",
+            (string alias, string db, string kind, ConnectionRegistry registry, CancellationToken ct) =>
+            WithDatabase(alias, db, registry, async (explorer, _) =>
+            {
+                if (!DataExplorer.IsKnownKind(kind))
+                {
+                    return BadRequest($"Unknown object kind: {kind}");
+                }
+
+                return Results.Ok(await explorer.ReadObjectsAsync(kind, ct));
+            }));
+
+        // One object's DDL. Modules (view, procedure, function, trigger) come back as the server's
+        // own CREATE text; synonyms, sequences and table types are stored as parts rather than as a
+        // statement, so the same Scripting layer the generator uses composes one — the response says
+        // which of the two you are looking at.
+        api.MapGet("/servers/{alias}/databases/{db}/objects/{kind}/{schema}/{name}",
+            (string alias, string db, string kind, string schema, string name,
+             ConnectionRegistry registry, CancellationToken ct) =>
+            WithDatabase(alias, db, registry, async (explorer, connectionString) =>
+            {
+                if (!DataExplorer.IsKnownKind(kind))
+                {
+                    return BadRequest($"Unknown object kind: {kind}");
+                }
+
+                if (kind.Equals("tables", StringComparison.OrdinalIgnoreCase))
+                {
+                    return BadRequest("Tables have their own page; use the table endpoints.");
+                }
+
+                var detail = await ReadObjectDetailAsync(explorer, connectionString, kind, schema, name, ct);
+                return detail is null
+                    ? NotFound($"Not found: {schema}.{name}")
+                    : Results.Ok(detail);
             }));
 
         // The statistics behind the treemap and the table grid.
@@ -175,6 +216,65 @@ internal static class ExplorerEndpoints
             return action(new DataExplorer(cs), cs);
         });
     }
+
+    // Modules answer from sys.sql_modules. The other three kinds have no stored statement, so the
+    // whole-database reader runs and the one row is picked out: these lists are a handful of rows
+    // each, and reusing the tested readers beats a second, near-duplicate single-object query.
+    private static async Task<ObjectDetail?> ReadObjectDetailAsync(
+        DataExplorer explorer,
+        string connectionString,
+        string kind,
+        string schema,
+        string name,
+        CancellationToken ct)
+    {
+        if (kind is "views" or "procedures" or "functions" or "triggers")
+        {
+            return await explorer.ReadModuleDefinitionAsync(schema, name, ct);
+        }
+
+        var reader = new MetadataReader(connectionString);
+        var fmt = new ScriptFormat();
+        bool Matches(ObjectName n) =>
+            string.Equals(n.Schema, schema, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(n.Name, name, StringComparison.OrdinalIgnoreCase);
+
+        switch (kind)
+        {
+            case "synonyms":
+            {
+                var hit = (await reader.ReadSynonymsAsync(ct)).FirstOrDefault(x => Matches(x.Name));
+                return hit is null ? null : Compose(hit.Name, "SYNONYM", SynonymScripter.Script(hit, fmt));
+            }
+
+            case "sequences":
+            {
+                var hit = (await reader.ReadSequencesAsync(ct)).FirstOrDefault(x => Matches(x.Name));
+                return hit is null ? null : Compose(hit.Name, "SEQUENCE_OBJECT", SequenceScripter.Script(hit, fmt));
+            }
+
+            case "types":
+            {
+                var hit = (await reader.ReadTableTypesAsync(ct)).FirstOrDefault(x => Matches(x.Name));
+                return hit is null ? null : Compose(hit.Name, "TYPE_TABLE", TableTypeScripter.Script(hit, fmt));
+            }
+
+            default:
+                return null;
+        }
+    }
+
+    private static ObjectDetail Compose(ObjectName name, string typeDesc, string definition) => new()
+    {
+        Schema = name.Schema,
+        Name = name.Name,
+        TypeDesc = typeDesc,
+        Definition = definition,
+        Generated = true,
+        // These catalogs carry no create/modify timestamps on the path we read them from.
+        CreateDate = default,
+        ModifyDate = default,
+    };
 
     // Turns SQL errors into a 400: when the WHERE the user typed is wrong they need to see it
     // with the error message — a 500 page is no help.

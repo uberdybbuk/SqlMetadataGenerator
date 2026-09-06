@@ -8,6 +8,8 @@ import { ServerPage } from "./pages/ServerPage";
 import { DatabasePage } from "./pages/DatabasePage";
 import { TableListPage } from "./pages/TableListPage";
 import { TableDetailPage } from "./pages/TableDetailPage";
+import { ObjectListPage, SchemaListPage } from "./pages/ObjectListPage";
+import { ObjectDetailPage } from "./pages/ObjectDetailPage";
 import "./styles.css";
 
 // The URL is the location: every level is a real page, and every page can be bookmarked.
@@ -23,6 +25,9 @@ createRoot(document.getElementById("root")!).render(
                     <Route path=":alias/:db/tables" element={<TableListPage />} />
                     <Route path=":alias/:db/tables/:schema" element={<TableListPage />} />
                     <Route path=":alias/:db/tables/:schema/:name" element={<TableDetailPage />} />
+                    <Route path=":alias/:db/schemas" element={<SchemaListPage />} />
+                    <Route path=":alias/:db/:section" element={<ObjectListPage />} />
+                    <Route path=":alias/:db/:section/:schema/:name" element={<ObjectDetailPage />} />
                 </Route>
             </Routes>
         </BrowserRouter>

@@ -103,11 +103,11 @@ export function DatabasePage() {
             {overview.data && (
                 <div className="badges">
                     {KINDS.filter(([key]) => overview.data!.counts[key]).map(([key, singular, icon]) => (
-                        <span key={key} className="badge">
+                        <Link key={key} className="badge" to={`${base}/${key}`}>
                             <Icon name={icon} size={14} />
                             <b>{overview.data!.counts[key]}</b>{" "}
                             {plural(overview.data!.counts[key], singular)}
-                        </span>
+                        </Link>
                     ))}
                 </div>
             )}

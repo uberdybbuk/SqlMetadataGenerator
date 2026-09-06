@@ -15,6 +15,7 @@ const SECTION_LABELS: Record<string, string> = {
     synonyms: "Synonyms",
     sequences: "Sequences",
     types: "Types",
+    schemas: "Schemas",
 };
 
 interface Crumb {

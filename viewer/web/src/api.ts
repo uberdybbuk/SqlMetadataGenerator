@@ -43,6 +43,29 @@ export interface SchemaInfo {
     owner: string;
 }
 
+// One row of an object list. The dashboard counters and this list share a catalog query, so a
+// badge and the page it opens always agree.
+export interface ObjectSummary {
+    schema: string;
+    name: string;
+    typeDesc: string;
+    parent: string | null;
+    createDate: string;
+    modifyDate: string;
+}
+
+// One object's DDL. generated=false means the text is what the server stores; true means the
+// Scripting layer composed it, because the catalog holds the parts rather than a statement.
+export interface ObjectDetail {
+    schema: string;
+    name: string;
+    typeDesc: string;
+    definition: string;
+    generated: boolean;
+    createDate: string;
+    modifyDate: string;
+}
+
 export interface DatabaseOverview {
     database: string;
     counts: Record<string, number>;
@@ -145,6 +168,16 @@ export const api = {
 
     database: (alias: string, db: string) =>
         get<DatabaseOverview>(`/api/servers/${seg(alias)}/databases/${seg(db)}`),
+
+    objects: (alias: string, db: string, kind: string) =>
+        get<ObjectSummary[]>(
+            `/api/servers/${seg(alias)}/databases/${seg(db)}/objects/${seg(kind)}`,
+        ),
+
+    objectDetail: (alias: string, db: string, kind: string, schema: string, name: string) =>
+        get<ObjectDetail>(
+            `/api/servers/${seg(alias)}/databases/${seg(db)}/objects/${seg(kind)}/${seg(schema)}/${seg(name)}`,
+        ),
 
     tables: (alias: string, db: string) =>
         get<TableStats[]>(`/api/servers/${seg(alias)}/databases/${seg(db)}/tables`),

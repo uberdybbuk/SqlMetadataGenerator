@@ -120,6 +120,99 @@ public sealed class DataExplorer(string connectionString)
         return counts;
     }
 
+    // The sys.objects type codes behind each counter on the dashboard. The list endpoint reads
+    // this same map, so a badge and the list it opens can never disagree.
+    private static readonly Dictionary<string, string[]> KindTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["tables"] = ["U"],
+        ["views"] = ["V"],
+        ["procedures"] = ["P"],
+        ["functions"] = ["FN", "IF", "TF", "AF"],
+        ["triggers"] = ["TR"],
+        ["synonyms"] = ["SN"],
+        ["sequences"] = ["SO"],
+        ["types"] = ["TT"],
+    };
+
+    public static bool IsKnownKind(string kind)
+    {
+        return KindTypes.ContainsKey(kind);
+    }
+
+    // Lists the objects of one kind. The caller has already checked the kind with IsKnownKind;
+    // the type codes come from the map above and never from the request, so nothing the user
+    // types reaches the SQL text.
+    public async Task<List<ObjectSummary>> ReadObjectsAsync(string kind, CancellationToken ct = default)
+    {
+        string[] types = KindTypes[kind];
+        string list = string.Join(", ", types.Select(t => $"'{t}'"));
+        string sql = $"""
+            SELECT SCHEMA_NAME(o.schema_id), o.name, o.type_desc,
+                   CASE WHEN o.parent_object_id <> 0 THEN OBJECT_NAME(o.parent_object_id) END,
+                   o.create_date, o.modify_date
+            FROM sys.objects o
+            WHERE o.is_ms_shipped = 0 AND o.type IN ({list})
+            ORDER BY SCHEMA_NAME(o.schema_id), o.name;
+            """;
+
+        var rows = new List<ObjectSummary>();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new ObjectSummary
+            {
+                Schema = reader.IsDBNull(0) ? string.Empty : reader.GetString(0),
+                Name = reader.GetString(1),
+                TypeDesc = reader.GetString(2),
+                Parent = reader.IsDBNull(3) ? null : reader.GetString(3),
+                CreateDate = reader.GetDateTime(4),
+                ModifyDate = reader.GetDateTime(5),
+            });
+        }
+
+        return rows;
+    }
+
+    // The CREATE text of a view, procedure, function or trigger, exactly as the server stores it.
+    // Returns null when the object does not exist or carries no module definition — an encrypted
+    // module, for instance, has a row in sys.objects but none in sys.sql_modules.
+    public async Task<ObjectDetail?> ReadModuleDefinitionAsync(
+        string schema,
+        string name,
+        CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT SCHEMA_NAME(o.schema_id), o.name, o.type_desc, m.definition,
+                   o.create_date, o.modify_date
+            FROM sys.objects o
+            JOIN sys.sql_modules m ON m.object_id = o.object_id
+            WHERE o.schema_id = SCHEMA_ID(@schema) AND o.name = @name AND o.is_ms_shipped = 0;
+            """;
+
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
+        cmd.Parameters.AddWithValue("@schema", schema);
+        cmd.Parameters.AddWithValue("@name", name);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            return null;
+        }
+
+        return new ObjectDetail
+        {
+            Schema = reader.GetString(0),
+            Name = reader.GetString(1),
+            TypeDesc = reader.GetString(2),
+            Definition = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+            Generated = false,
+            CreateDate = reader.GetDateTime(4),
+            ModifyDate = reader.GetDateTime(5),
+        };
+    }
+
     // Validates the table and reads ALL of its column metadata in ONE round trip.
     // There used to be three separate queries (existence check, preview columns, detail
     // columns) and two endpoints ran them independently; against a server in Germany
