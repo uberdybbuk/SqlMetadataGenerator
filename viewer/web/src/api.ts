@@ -86,10 +86,31 @@ export interface ColumnSummary {
     primaryKeyOrdinal: number | null;
 }
 
+export interface IndexColumn {
+    name: string;
+    descending: boolean;
+}
+
+export interface IndexSummary {
+    name: string;
+    typeDesc: string;
+    isUnique: boolean;
+    isPrimaryKey: boolean;
+    isUniqueConstraint: boolean;
+    filter: string | null;
+    keyColumns: IndexColumn[];
+    includedColumns: string[];
+}
+
 export interface TableDetail {
     schema: string;
     name: string;
     columns: ColumnSummary[];
+    indexes: IndexSummary[];
+    // SQL Server records no "created by" anywhere; owner is the closest the catalog gets.
+    owner: string | null;
+    createDate: string | null;
+    modifyDate: string | null;
 }
 
 export interface PreviewColumn {

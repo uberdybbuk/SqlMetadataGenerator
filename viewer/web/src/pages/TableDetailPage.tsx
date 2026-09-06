@@ -1,7 +1,7 @@
 import { Suspense, lazy, useState } from "react";
 import { useParams } from "react-router-dom";
 
-import { api, type ColumnSummary, type PreviewResult } from "../api";
+import { api, type ColumnSummary, type IndexSummary, type PreviewResult, type TableDetail } from "../api";
 import { useApi, type AsyncState } from "../useApi";
 import { formatType } from "../format";
 import { DataTable, type Column } from "../DataTable";
@@ -13,7 +13,7 @@ const SqlEditor = lazy(() => import("../SqlEditor"));
 export function TableDetailPage() {
     const { alias = "", db = "", schema = "", name = "" } = useParams();
     // Whoever clicks a table wants to see the DATA first; the column list is the second question.
-    const [tab, setTab] = useState<"columns" | "data">("data");
+    const [tab, setTab] = useState<"detail" | "data">("data");
 
     // The two requests start in PARALLEL. The preview does not depend on the table metadata — only
     // on the names in the URL. Previously the preview component mounted after the metadata had
@@ -21,11 +21,11 @@ export function TableDetailPage() {
     // The column list is requested ONLY when its tab is opened. The data tab does not wait on it
     // — the preview carries its own column metadata — and a second concurrent query was slowing
     // the main query down.
-    const [columnsWanted, setColumnsWanted] = useState(false);
+    const [detailWanted, setDetailWanted] = useState(false);
     const detail = useApi(
         () => api.table(alias, db, schema, name),
         [alias, db, schema, name],
-        columnsWanted,
+        detailWanted,
     );
     const preview = useApi(() => api.preview(alias, db, schema, name, 20), [alias, db, schema, name]);
     // Fired alongside the preview, not after it. It only reads the catalog, so the editor fills in
@@ -50,20 +50,20 @@ export function TableDetailPage() {
                 </button>
                 <button
                     className="chip"
-                    aria-pressed={tab === "columns"}
+                    aria-pressed={tab === "detail"}
                     onClick={() => {
-                        setColumnsWanted(true);
-                        setTab("columns");
+                        setDetailWanted(true);
+                        setTab("detail");
                     }}
                 >
-                    columns{preview.data && ` (${preview.data.columns.length})`}
+                    detail
                 </button>
             </div>
 
             {tab === "data" ? (
                 <DataTab preview={preview} sql={previewSql.data?.sql ?? preview.data?.sql ?? ""} />
             ) : (
-                <ColumnsTab detail={detail} />
+                <DetailTab detail={detail} />
             )}
         </>
     );
@@ -125,7 +125,9 @@ function DataTab({ preview, sql }: { preview: AsyncState<PreviewResult>; sql: st
     );
 }
 
-function ColumnsTab({ detail }: { detail: AsyncState<{ columns: ColumnSummary[] }> }) {
+// Columns, indexes and the table's own facts. Named "detail" rather than "columns" because the
+// same shape will serve views and routines, whose interesting parts are not columns at all.
+function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
     const columns: Column<ColumnSummary>[] = [
         { key: "id", header: "#", numeric: true, sortValue: (c) => c.columnId, render: (c) => c.columnId, className: "muted" },
         { key: "name", header: "Column", sortValue: (c) => c.name, render: (c) => c.name, className: "mono" },
@@ -176,12 +178,106 @@ function ColumnsTab({ detail }: { detail: AsyncState<{ columns: ColumnSummary[] 
         return <div className="state">Loading…</div>;
     }
     return (
-        <DataTable
-            columns={columns}
-            rows={detail.data.columns}
-            rowKey={(c) => String(c.columnId)}
-            initialSort={{ key: "id" }}
-            dense
-        />
+        <>
+            <div className="badges">
+                {detail.data.createDate && (
+                    <span className="badge">created {stamp(detail.data.createDate)}</span>
+                )}
+                {detail.data.modifyDate && (
+                    <span className="badge">modified {stamp(detail.data.modifyDate)}</span>
+                )}
+                {detail.data.owner && (
+                    <span
+                        className="badge"
+                        title="The catalog records an owner, never a creator — SQL Server does not keep who ran the CREATE."
+                    >
+                        owner {detail.data.owner}
+                    </span>
+                )}
+            </div>
+
+            <h2>Columns</h2>
+            <DataTable
+                columns={columns}
+                rows={detail.data.columns}
+                rowKey={(c) => String(c.columnId)}
+                initialSort={{ key: "id" }}
+                dense
+            />
+
+            <h2>
+                Indexes{detail.data.indexes.length > 0 && ` (${detail.data.indexes.length})`}
+            </h2>
+            {detail.data.indexes.length === 0 ? (
+                <div className="state">No rowstore index — this table is a heap.</div>
+            ) : (
+                <DataTable
+                    columns={indexColumns}
+                    rows={detail.data.indexes}
+                    rowKey={(i) => i.name}
+                    initialSort={{ key: "name" }}
+                    dense
+                />
+            )}
+        </>
     );
 }
+
+// Sub-second digits are noise on a badge; seconds answer "when was this last changed".
+function stamp(iso: string): string {
+    return iso.slice(0, 19).replace("T", " ");
+}
+
+const indexColumns: Column<IndexSummary>[] = [
+    {
+        key: "name",
+        header: "Index",
+        sortValue: (i) => i.name,
+        render: (i) => <span className="mono">{i.name}</span>,
+    },
+    {
+        key: "kind",
+        header: "Kind",
+        sortValue: (i) => `${i.isPrimaryKey ? "0" : "1"}${i.typeDesc}`,
+        render: (i) => (
+            <>
+                <span className="muted">{i.typeDesc.toLowerCase()}</span>
+                {i.isPrimaryKey && (
+                    <span className="pill with-icon">
+                        <Icon name="key" size={12} />
+                        pk
+                    </span>
+                )}
+                {i.isUniqueConstraint && <span className="pill"> unique constraint</span>}
+                {!i.isPrimaryKey && !i.isUniqueConstraint && i.isUnique && (
+                    <span className="pill"> unique</span>
+                )}
+            </>
+        ),
+    },
+    {
+        key: "keys",
+        header: "Key columns",
+        info: "In key order. This is the order a query has to match to use the index.",
+        sortValue: (i) => i.keyColumns.map((k) => k.name).join(", "),
+        render: (i) => (
+            <span className="mono">
+                {i.keyColumns.map((k) => k.name + (k.descending ? " desc" : "")).join(", ")}
+            </span>
+        ),
+    },
+    {
+        key: "included",
+        header: "Included",
+        info: "Carried in the leaf level so a query reading only these columns never touches the table.",
+        sortValue: (i) => i.includedColumns.length,
+        render: (i) => <span className="mono muted">{i.includedColumns.join(", ")}</span>,
+    },
+    {
+        key: "filter",
+        header: "Filter",
+        info: "A filtered index only covers rows matching this predicate.",
+        sortValue: (i) => i.filter ?? "",
+        render: (i) => <span className="mono muted">{i.filter ?? ""}</span>,
+    },
+];

@@ -68,7 +68,14 @@ a:hover {
 }
 
 /* ---- Breadcrumb: what each part IS is spelled out in words ---- */
+/* The trail stays put while a long table scrolls: where you are is exactly what you lose first
+   on a page of 11 million rows. It needs an opaque background of its own, and a z-index above the
+   sticky table headers, which also stick to the top and would otherwise cut through it. */
 .crumbs {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--bg);
     display: flex;
     align-items: baseline;
     gap: 8px;

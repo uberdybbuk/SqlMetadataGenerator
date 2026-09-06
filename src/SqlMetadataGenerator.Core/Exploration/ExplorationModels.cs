@@ -53,6 +53,41 @@ public sealed class ObjectSummary
     public required DateTime ModifyDate { get; init; }
 }
 
+// One key column of an index, in key order. Direction matters when the index is being matched
+// against an ORDER BY, which is why it travels with the name rather than being flattened away.
+public sealed class IndexColumn
+{
+    public required string Name { get; init; }
+    public required bool Descending { get; init; }
+}
+
+// A rowstore index on a table. Heaps have no row here; the primary key does, flagged as such,
+// because it is an index like any other once you are reasoning about which one a query can use.
+public sealed class IndexSummary
+{
+    public required string Name { get; init; }
+    // CLUSTERED or NONCLUSTERED.
+    public required string TypeDesc { get; init; }
+    public required bool IsUnique { get; init; }
+    public required bool IsPrimaryKey { get; init; }
+    public required bool IsUniqueConstraint { get; init; }
+    // The WHERE of a filtered index; null otherwise.
+    public string? Filter { get; init; }
+    public required List<IndexColumn> KeyColumns { get; init; }
+    public required List<string> IncludedColumns { get; init; }
+}
+
+// What the detail tab shows beyond the columns: when the table was made, who owns it, and how it
+// is indexed. SQL Server does not record who CREATED an object — the catalog only knows the
+// owner, which is the object's own principal when one is set and the schema's otherwise.
+public sealed class TableFacts
+{
+    public required DateTime CreateDate { get; init; }
+    public required DateTime ModifyDate { get; init; }
+    public required string Owner { get; init; }
+    public required List<IndexSummary> Indexes { get; init; }
+}
+
 // One object's DDL, for the detail page. Definition is the server's own CREATE text for anything
 // backed by sys.sql_modules; for synonyms, sequences and table types the catalog stores the parts
 // rather than a statement, so the Scripting layer composes one and Generated says so — the reader

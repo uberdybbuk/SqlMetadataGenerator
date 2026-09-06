@@ -175,6 +175,97 @@ public sealed class DataExplorer(string connectionString)
         return rows;
     }
 
+    // The facts behind the detail tab: creation, owner and indexes. Two result sets over one
+    // command, so the tab costs a single round trip rather than one per question.
+    // Note on ownership: sys.objects.principal_id is null unless the object was explicitly given
+    // its own owner, in which case the schema's owner applies — hence the COALESCE. There is no
+    // "created by" anywhere in the catalog; SQL Server simply does not keep it.
+    public async Task<TableFacts?> ReadTableFactsAsync(
+        string schema,
+        string name,
+        CancellationToken ct = default)
+    {
+        const string sql = """
+            DECLARE @id int = (
+                SELECT t.object_id FROM sys.tables t
+                JOIN sys.schemas s ON s.schema_id = t.schema_id
+                WHERE s.name = @schema AND t.name = @name AND t.is_ms_shipped = 0);
+
+            SELECT t.create_date, t.modify_date, COALESCE(po.name, ps.name)
+            FROM sys.tables t
+            JOIN sys.schemas s ON s.schema_id = t.schema_id
+            LEFT JOIN sys.database_principals po ON po.principal_id = t.principal_id
+            LEFT JOIN sys.database_principals ps ON ps.principal_id = s.principal_id
+            WHERE t.object_id = @id;
+
+            SELECT i.index_id, i.name, i.type_desc, i.is_unique, i.is_primary_key,
+                   i.is_unique_constraint, i.filter_definition,
+                   ic.is_included_column, ic.is_descending_key, c.name
+            FROM sys.indexes i
+            JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+            JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+            WHERE i.object_id = @id AND i.type IN (1, 2)
+            ORDER BY i.index_id, ic.is_included_column, ic.key_ordinal, ic.index_column_id;
+            """;
+
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
+        cmd.Parameters.AddWithValue("@schema", schema);
+        cmd.Parameters.AddWithValue("@name", name);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        if (!await reader.ReadAsync(ct))
+        {
+            return null;
+        }
+
+        DateTime created = reader.GetDateTime(0);
+        DateTime modified = reader.GetDateTime(1);
+        string owner = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+
+        var byIndexId = new Dictionary<int, IndexSummary>();
+        var order = new List<int>();
+        await reader.NextResultAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            int indexId = reader.GetInt32(0);
+            if (!byIndexId.TryGetValue(indexId, out var index))
+            {
+                index = new IndexSummary
+                {
+                    Name = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                    TypeDesc = reader.GetString(2),
+                    IsUnique = reader.GetBoolean(3),
+                    IsPrimaryKey = reader.GetBoolean(4),
+                    IsUniqueConstraint = reader.GetBoolean(5),
+                    Filter = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    KeyColumns = [],
+                    IncludedColumns = [],
+                };
+                byIndexId[indexId] = index;
+                order.Add(indexId);
+            }
+
+            string column = reader.GetString(9);
+            if (reader.GetBoolean(7))
+            {
+                index.IncludedColumns.Add(column);
+            }
+            else
+            {
+                index.KeyColumns.Add(new IndexColumn { Name = column, Descending = reader.GetBoolean(8) });
+            }
+        }
+
+        return new TableFacts
+        {
+            CreateDate = created,
+            ModifyDate = modified,
+            Owner = owner,
+            Indexes = [.. order.Select(id => byIndexId[id])],
+        };
+    }
+
     // The CREATE text of a view, procedure, function or trigger, exactly as the server stores it.
     // Returns null when the object does not exist or carries no module definition — an encrypted
     // module, for instance, has a row in sys.objects but none in sys.sql_modules.

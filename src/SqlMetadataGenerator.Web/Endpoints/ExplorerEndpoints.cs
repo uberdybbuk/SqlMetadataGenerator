@@ -100,19 +100,35 @@ internal static class ExplorerEndpoints
         api.MapGet("/servers/{alias}/databases/{db}/tables", (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
             WithDatabase(alias, db, registry, async (explorer, _) => Results.Ok(await explorer.ReadTableStatsAsync(ct))));
 
-        // The column list. The data tab does NOT WAIT on this — the preview carries its own
-        // metadata; this endpoint is called only when the "columns" tab is opened.
+        // Everything the detail tab shows: columns, indexes, creation and owner. The data tab does
+        // NOT WAIT on this — the preview carries its own column metadata; this endpoint is called
+        // only when the detail tab is opened. The two queries run at the same time, so the tab
+        // costs one round trip's worth of latency rather than two.
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}",
             (string alias, string db, string schema, string name, ConnectionRegistry registry, CancellationToken ct) =>
             WithDatabase(alias, db, registry, async (explorer, _) =>
             {
-                var shape = await explorer.ReadTableShapeAsync(schema, name, ct);
+                var shapeTask = explorer.ReadTableShapeAsync(schema, name, ct);
+                var factsTask = explorer.ReadTableFactsAsync(schema, name, ct);
+                await Task.WhenAll(shapeTask, factsTask);
+
+                var shape = await shapeTask;
                 if (shape is null)
                 {
                     return NotFound($"Table not found: {schema}.{name}");
                 }
 
-                return Results.Ok(new { shape.Schema, shape.Name, shape.Columns });
+                var facts = await factsTask;
+                return Results.Ok(new
+                {
+                    shape.Schema,
+                    shape.Name,
+                    shape.Columns,
+                    Indexes = facts?.Indexes ?? [],
+                    CreateDate = facts?.CreateDate,
+                    ModifyDate = facts?.ModifyDate,
+                    Owner = facts?.Owner,
+                });
             }));
 
         // The query text on its own, without the rows. The preview endpoint knows the text as soon

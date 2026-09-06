@@ -37,7 +37,7 @@ function buildCrumbs(pathname: string): Crumb[] {
     }
 
     const [, alias, db, section, schema, name] = parts;
-    const crumbs: Crumb[] = [{ label: HOME, href: "/app", aria: "Home" }];
+    const crumbs: Crumb[] = [{ label: `${HOME} ${APP_NAME}`, href: "/app" }];
     if (!alias) {
         return crumbs;
     }
@@ -94,7 +94,9 @@ function Breadcrumbs() {
 
     // The tab title carries the same trail as the breadcrumb, so a window picker or a bookmark
     // says where in the tree you are, not just which application this is.
-    const trail = crumbs.map((crumb) => crumb.label).join(" / ");
+    // The tab has less room than the bar, so the trail keeps the house alone where the
+    // breadcrumb spells the application out.
+    const trail = crumbs.map((crumb, i) => (i === 0 ? HOME : crumb.label)).join(" / ");
     useEffect(() => {
         document.title = crumbs.length > 1 ? trail : `${HOME} ${APP_NAME}`;
     }, [trail, crumbs.length]);
