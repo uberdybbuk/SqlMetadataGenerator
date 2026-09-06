@@ -103,9 +103,13 @@ export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPa
 
     // The shortcuts are the ones a SQL Server user already has in their fingers. F5 has to be
     // taken off the browser, which would otherwise reload the page and lose the result entirely.
+    //
+    // Alt+X is matched on e.code, not e.key. On a Mac, Option+X does not produce "x" — it produces
+    // "≈", because Option is the layout's alt-graph key. Reading e.key looked right in a synthetic
+    // test and did nothing at all under a real keyboard.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            const execute = e.key === "F5" || (e.altKey && (e.key === "x" || e.key === "X"));
+            const execute = e.key === "F5" || (e.altKey && e.code === "KeyX");
             if (execute) {
                 e.preventDefault();
                 onExecute(textRef.current);
@@ -142,12 +146,21 @@ export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPa
                     <Icon name="stop" size={13} />
                     Cancel
                 </button>
-                <span className="tool-sep" />
-                <span className="tool-hint">{running ? "running…" : "Alt+X · F5"}</span>
+                {running && (
+                    <>
+                        <span className="tool-sep" />
+                        <span className="tool-hint">running…</span>
+                    </>
+                )}
             </div>
             <div className="pane" style={{ height: `${share}%` }}>
                 <Suspense fallback={<div className="editor-placeholder" />}>
-                    <SqlEditor value={text} readOnly={false} onChange={onEdit} />
+                    <SqlEditor
+                        value={text}
+                        readOnly={false}
+                        onChange={onEdit}
+                        onExecute={() => onExecute(textRef.current)}
+                    />
                 </Suspense>
             </div>
             <div

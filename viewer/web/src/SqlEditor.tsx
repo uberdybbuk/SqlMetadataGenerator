@@ -97,15 +97,22 @@ interface SqlEditorProps {
     // Read-only is the default: most places here show SQL rather than invite it.
     readOnly?: boolean;
     onChange?: (value: string) => void;
+    // Bound INSIDE the editor, not on the window. While Monaco has focus it handles the key first:
+    // a window listener runs too late to stop it, and on a Mac Option+X is a character key, so the
+    // editor inserted "≈" and the shortcut never fired. Monaco resolves a keybinding by key code,
+    // which is the same whatever character the layout produces, and it consumes the key.
+    onExecute?: () => void;
 }
 
-export default function SqlEditor({ value, readOnly = true, onChange }: SqlEditorProps) {
+export default function SqlEditor({ value, readOnly = true, onChange, onExecute }: SqlEditorProps) {
     const slot = useRef<HTMLDivElement>(null);
     const instance = useRef<Instance | null>(null);
     const dark = useDarkMode();
     // Held in a ref so the change listener is attached once and still calls the current handler.
     const changed = useRef(onChange);
     changed.current = onChange;
+    const execute = useRef(onExecute);
+    execute.current = onExecute;
     // setValue fires the same event a keystroke does; without this the editor would report our
     // own writes back as if the user had typed them.
     const writing = useRef(false);
@@ -121,7 +128,16 @@ export default function SqlEditor({ value, readOnly = true, onChange }: SqlEdito
                 changed.current?.(acquired.editor.getValue());
             }
         });
+        const action = acquired.editor.addAction({
+            id: "sqlbrowser.execute",
+            label: "Execute",
+            keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyX, monaco.KeyCode.F5],
+            run: () => {
+                execute.current?.();
+            },
+        });
         return () => {
+            action.dispose();
             subscription.dispose();
             instance.current = null;
             release(acquired);
