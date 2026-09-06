@@ -181,7 +181,7 @@ export function DataTable<T>({
                                         column.header
                                     ) : selection ? (
                                         // The name selects and the arrow sorts: two separate buttons.
-                                        <span className="sort">
+                                        <span className={column.sortValue ? "sort sortable" : "sort"}>
                                             <button
                                                 type="button"
                                                 className="hname pick"

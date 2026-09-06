@@ -64,7 +64,9 @@ a:hover {
 .shell {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 0 24px 64px;
+    /* 24px at the foot, not 64: the workbench measures the space it has left and every pixel
+       reserved down here is a pixel the result grid does not get. */
+    padding: 0 24px 24px;
 }
 
 /* ---- Breadcrumb: what each part IS is spelled out in words ---- */
@@ -83,7 +85,7 @@ a:hover {
     padding: 18px 0;
     font-size: 13px;
     border-bottom: 1px solid var(--border);
-    margin-bottom: 24px;
+    margin-bottom: 12px;
 }
 
 .crumbs .crumb {
@@ -685,6 +687,153 @@ th .colinfo .warn-line {
     height: 100%;
 }
 
+/* ---- Query toolbar ---- */
+.qtoolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 0 8px;
+    flex: 0 0 auto;
+}
+
+.qtoolbar .tool {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    cursor: pointer;
+}
+
+.qtoolbar .tool:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+/* Execute is the one action on this bar you reach for; it carries the accent, the rest do not. */
+.qtoolbar .tool.run .icon {
+    color: var(--ok, #1a7f37);
+}
+
+.qtoolbar .tool:disabled {
+    color: var(--muted);
+    cursor: default;
+    opacity: 0.6;
+}
+
+.qtoolbar .tool-sep {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+    margin: 0 2px;
+}
+
+.qtoolbar .tool-hint {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+}
+
+/* ---- Workbench: query above, result below, a handle between ---- */
+/* The pair fills the window instead of stacking on a scrolling page. Both panes carry
+   min-height:0 because a flex child defaults to min-content and would otherwise refuse to shrink
+   below its content, pushing the result off the bottom of the screen. */
+.workbench {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* The editor keeps exactly the share the handle gives it, and the result takes what is left.
+   Without flex-shrink:0 the editor is squeezed by the result's content and the split silently
+   drifts: dragging to 65% left it sitting at 47%. */
+.workbench > .pane:first-of-type {
+    flex: 0 0 auto;
+}
+
+.workbench > .result-pane {
+    flex: 1 1 0;
+}
+
+.workbench .pane {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--panel);
+}
+
+.workbench .pane > * {
+    flex: 1;
+    min-height: 0;
+}
+
+/* The handle is thin, because the space it occupies is space the data does not get; it grows a
+   visible grip on hover so it can still be found. */
+.workbench .splitter {
+    height: 9px;
+    flex: 0 0 9px;
+    cursor: row-resize;
+    position: relative;
+}
+
+.workbench .splitter::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 46px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--border);
+    transition: background 0.12s;
+}
+
+.workbench .splitter:hover::after {
+    background: var(--accent);
+}
+
+/* While dragging, the pointer must not select text or flicker between cursors. */
+body.row-resizing {
+    cursor: row-resize;
+    user-select: none;
+}
+
+/* Inside the workbench the result is a pane, not a card: the frame belongs to the pane. */
+.workbench .result-pane .result {
+    border: none;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* The rows scroll inside the pane, so the column headers stay put and the status bar stays on
+   screen. The 60vh cap is for the old stacked layout and must not apply here. */
+.workbench .result-pane .result .table-wrap {
+    flex: 1;
+    max-height: none;
+    min-height: 0;
+}
+
+/* Whatever the Results/Messages switch puts between the tabs and the status bar has to fill the
+   same space. Sized to its content, the one-line Messages panel pulled the status bar halfway up
+   the pane and the frame changed shape when the tab changed. */
+.workbench .result-pane .result .messages,
+.workbench .result-pane .result .empty-note {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
 /* ---- Result grid: fixed widths ---- */
 /* The columns must not spread across the full width; they size to their content and leave space
    on the right. min-width:100% is NOT SET — with it, the spare room in a result with few
@@ -725,7 +874,12 @@ th .corner:hover {
 }
 
 /* In the header the name selects and the arrow sorts. */
+/* The button fills the header rather than hugging its text: the gap between a short name and the
+   right edge was dead space that looked clickable and was not. Everything except the sort arrow
+   now selects the column. */
 th .hname.pick {
+    flex: 1;
+    min-width: 0;
     background: none;
     border: none;
     padding: 0;
@@ -733,29 +887,50 @@ th .hname.pick {
     font-weight: 600;
     color: inherit;
     cursor: pointer;
-    text-align: inherit;
+    text-align: left;
+}
+
+/* A numeric header stays right-aligned; the button grew, the text did not move. */
+th.num .hname.pick {
+    text-align: right;
 }
 
 th .hname.pick:hover {
     color: var(--accent);
 }
 
+/* The sort control is out of the flow and only appears under the pointer. In a grid with 29
+   columns a permanent arrow in every header costs a column's worth of width for an affordance
+   almost none of them are using at any moment. The column the grid IS sorted by keeps its arrow
+   on screen, because that is a fact about the data, not an affordance. */
 th .sortbtn {
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: none;
     background: none;
     border: none;
     padding: 0 2px;
     font: inherit;
     font-size: 11px;
-    color: var(--border);
+    color: var(--muted);
     cursor: pointer;
 }
 
-th:hover .sortbtn {
-    color: var(--muted);
+th:hover .sortbtn,
+th .sortbtn.active {
+    display: block;
 }
 
 th .sortbtn.active {
     color: var(--accent);
+}
+
+/* Room for the arrow inside the header, so it never lands on the name. Still narrower than the
+   arrow was in the flow: it used its own width plus the gap before it. */
+th .sort.sortable {
+    padding-right: 12px;
 }
 
 /* ---- Selection ---- */

@@ -152,7 +152,12 @@ export class ApiError extends Error {
 // cache and coming back to a page always asks the server again.
 const inFlight = new Map<string, Promise<unknown>>();
 
-function get<T>(path: string): Promise<T> {
+function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+    // A cancellable request is never shared: aborting one caller would abort the other, and the
+    // sharing exists to save a duplicate round trip, not to tie two lifetimes together.
+    if (signal) {
+        return fetchJson<T>(path, signal);
+    }
     const running = inFlight.get(path) as Promise<T> | undefined;
     if (running) {
         return running;
@@ -164,8 +169,8 @@ function get<T>(path: string): Promise<T> {
     return request;
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
-    const response = await fetch(path);
+async function fetchJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+    const response = await fetch(path, { signal });
     if (!response.ok) {
         let detail = `${response.status} ${response.statusText}`;
         try {
@@ -220,8 +225,9 @@ export const api = {
             `/api/servers/${seg(alias)}/databases/${seg(db)}/tables/${seg(schema)}/${seg(name)}/sql?top=${top}`,
         ),
 
-    preview: (alias: string, db: string, schema: string, name: string, top = 20) =>
+    preview: (alias: string, db: string, schema: string, name: string, top = 20, signal?: AbortSignal) =>
         get<PreviewResult>(
             `/api/servers/${seg(alias)}/databases/${seg(db)}/tables/${seg(schema)}/${seg(name)}/preview?top=${top}`,
+            signal,
         ),
 };

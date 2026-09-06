@@ -21,9 +21,13 @@ export type IconName =
     | "type"
     | "column"
     | "key"
-    | "search";
+    | "search"
+    | "play"
+    | "stop";
 
 const PATHS: Record<IconName, string> = {
+    "play": '<path d="M7 4v16l13 -8z" />',
+    "stop": '<path d="M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z" />',
     "server":
         '<path d="M3 7a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-2" /> <path d="M3 15a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3l0 -2" /> <path d="M7 8l0 .01" /> <path d="M7 16l0 .01" />',
     "database":
@@ -70,6 +74,8 @@ export const ICON_LABELS: Record<IconName, string> = {
     column: "column",
     key: "key",
     search: "search",
+    play: "run",
+    stop: "cancel",
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {

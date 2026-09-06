@@ -7,6 +7,7 @@ import { formatType, unwrapDefault } from "../format";
 import { DataTable, type Column } from "../DataTable";
 import { Icon } from "../Icon";
 import { ResultGrid, type ResultColumn } from "../ResultGrid";
+import { QueryPane } from "../QueryPane";
 
 const SqlEditor = lazy(() => import("../SqlEditor"));
 
@@ -35,7 +36,10 @@ export function TableDetailPage() {
         [alias, db, schema, name],
         scriptWanted,
     );
-    const preview = useApi(() => api.preview(alias, db, schema, name, 20), [alias, db, schema, name]);
+    const preview = useApi(
+        (signal) => api.preview(alias, db, schema, name, 20, signal),
+        [alias, db, schema, name],
+    );
     // Fired alongside the preview, not after it. It only reads the catalog, so the editor fills in
     // while the rows are still on their way — on a slow table that is the difference between
     // seeing the query and staring at an empty pane.
@@ -47,9 +51,6 @@ export function TableDetailPage() {
                 <Icon name="table" size={22} />
                 {schema}.{name}
             </h1>
-            <p className="subtitle">
-                <span className="mono">{db}</span> database · <span className="mono">{alias}</span> server
-            </p>
 
             {/* The tabs wait on no request: the skeleton shows at once and the content fills in. */}
             <div className="toolbar">
@@ -93,6 +94,9 @@ function DataTab({ preview, sql }: { preview: AsyncState<PreviewResult>; sql: st
         const meta = column.column;
         return {
             name: column.name,
+            // The RAW type name, not the formatted one: formatCell matches it against a set of
+            // exact names to decide how a value is rendered, and "datetime2(7)" misses "datetime2"
+            // — which quietly brought the ISO "T" back into every timestamp.
             typeName: column.typeName,
             truncated: column.truncated,
             details: (
@@ -107,39 +111,37 @@ function DataTab({ preview, sql }: { preview: AsyncState<PreviewResult>; sql: st
                     {meta.isIdentity && <span className="muted">identity</span>}
                     {meta.isComputed && <span className="muted">computed</span>}
                     {meta.defaultDefinition && (
-                        <span className="mono muted">default {meta.defaultDefinition}</span>
+                        <span className="mono muted">default {unwrapDefault(meta.defaultDefinition)}</span>
                     )}
                 </>
             ),
         };
     });
 
-    return (
-        <>
-            {/* The query text comes from its own endpoint, which only reads the catalog, so it is on
-                screen while the rows are still being fetched. The preview's copy is the fallback. */}
-            <div className="editor-wrap">
-                <Suspense fallback={<div className="editor-placeholder" />}>
-                    <SqlEditor value={sql} />
-                </Suspense>
-            </div>
+    const result = preview.error ? (
+        <div className="error">{preview.error}</div>
+    ) : preview.loading ? (
+        <div className="result">
+            <div className="state">Running query…</div>
+        </div>
+    ) : preview.data ? (
+        <ResultGrid
+            columns={columns}
+            rows={preview.data.rows}
+            elapsedMs={preview.data.elapsedMs}
+            messages={preview.data.messages}
+            limitNote="limited to 20"
+        />
+    ) : null;
 
-            {preview.error ? (
-                <div className="error">{preview.error}</div>
-            ) : preview.loading ? (
-                <div className="result">
-                    <div className="state">Running query…</div>
-                </div>
-            ) : preview.data ? (
-                <ResultGrid
-                    columns={columns}
-                    rows={preview.data.rows}
-                    elapsedMs={preview.data.elapsedMs}
-                    messages={preview.data.messages}
-                    limitNote="limited to 20"
-                />
-            ) : null}
-        </>
+    return (
+        <QueryPane
+            sql={sql}
+            result={result}
+            onExecute={preview.reload}
+            onCancel={preview.cancel}
+            running={preview.loading}
+        />
     );
 }
 
