@@ -195,6 +195,12 @@ export const api = {
             `/api/servers/${seg(alias)}/databases/${seg(db)}/objects/${seg(kind)}`,
         ),
 
+    // The CREATE script for a table, from the same Scripting layer the generator writes files with.
+    tableScript: (alias: string, db: string, schema: string, name: string) =>
+        get<{ sql: string }>(
+            `/api/servers/${seg(alias)}/databases/${seg(db)}/tables/${seg(schema)}/${seg(name)}/script`,
+        ),
+
     objectDetail: (alias: string, db: string, kind: string, schema: string, name: string) =>
         get<ObjectDetail>(
             `/api/servers/${seg(alias)}/databases/${seg(db)}/objects/${seg(kind)}/${seg(schema)}/${seg(name)}`,

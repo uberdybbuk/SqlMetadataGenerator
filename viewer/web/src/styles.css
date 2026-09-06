@@ -554,26 +554,23 @@ tbody tr:hover td.rownum {
 }
 
 /* ---- Header info card ---- */
+/* The card look lives on the popup itself, not on an inner element the caller has to remember to
+   add: a header that passes a plain string for its info used to get unstyled text painted straight
+   over the rows underneath, which was unreadable. */
 th .colinfo {
     display: none;
-    position: absolute;
-    top: calc(100% + 2px);
-    left: 0;
-    z-index: 5;
+    /* Fixed, not absolute: .table-wrap clips its overflow so it can scroll sideways, and an
+       absolutely positioned card was cut off at that edge. The coordinates are written onto the
+       header by placeInfoCard. */
+    position: fixed;
+    left: var(--tip-x, 0);
+    top: var(--tip-y, 0);
+    /* Above the sticky breadcrumb bar, which the card can reach on a scrolled page. */
+    z-index: 50;
     white-space: normal;
-}
-
-th:hover .colinfo {
-    display: block;
-}
-
-th .colinfo .card {
     /* The card must not inherit the alignment of a right-aligned header (the row number
        column); its content always starts from the left. */
     text-align: left;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
     min-width: 180px;
     max-width: 320px;
     padding: 8px 10px;
@@ -585,6 +582,22 @@ th .colinfo .card {
     font-size: 11px;
     line-height: 1.5;
     color: var(--text);
+}
+
+th:hover .colinfo {
+    display: block;
+}
+
+/* A structured info block inside the popup only lays its lines out; the frame is the popup's. */
+th .colinfo .card {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
 }
 
 th .colinfo .warn-line {

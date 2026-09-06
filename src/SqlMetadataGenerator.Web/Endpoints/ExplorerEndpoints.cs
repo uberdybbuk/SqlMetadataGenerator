@@ -156,6 +156,35 @@ internal static class ExplorerEndpoints
                 return Results.Ok(new { Sql = DataExplorer.BuildPreviewSql(shape, capped, where) });
             }));
 
+        // The CREATE script for one table, produced by the same Scripting layer the generator uses
+        // — what you read here is what would land in the .sql file, columns, indexes, check
+        // constraints and foreign keys included.
+        //
+        // The read is whole-database: MetadataReader assembles a TableInfo from seven catalog
+        // queries that span every table, and one table cannot be carved out of them without a
+        // second, near-duplicate read path that would then be free to drift from the generator's.
+        // The tab is only fetched when it is opened, so the cost lands on a deliberate click.
+        api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}/script",
+            (string alias, string db, string schema, string name, ConnectionRegistry registry, CancellationToken ct) =>
+            WithDatabase(alias, db, registry, async (_, connectionString) =>
+            {
+                var reader = new MetadataReader(connectionString);
+                var collationTask = reader.ReadDatabaseCollationAsync(ct);
+                var tablesTask = reader.ReadTablesAsync(null, ct);
+                await Task.WhenAll(collationTask, tablesTask);
+
+                var table = (await tablesTask).FirstOrDefault(t =>
+                    string.Equals(t.Name.Schema, schema, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(t.Name.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (table is null)
+                {
+                    return NotFound($"Table not found: {schema}.{name}");
+                }
+
+                var fmt = new ScriptFormat { DatabaseCollation = await collationTask };
+                return Results.Ok(new { Sql = TableScripter.Script(table, fmt) });
+            }));
+
         // The TOP N preview. It can be filtered with an optional where; because that lives in the
         // URL, a filtered preview can be bookmarked too.
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}/preview",

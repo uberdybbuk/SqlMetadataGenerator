@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type MouseEvent, type ReactNode, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 export type SortValue = string | number | boolean | null;
 
@@ -175,6 +175,7 @@ export function DataTable<T>({
                                         .filter(Boolean)
                                         .join(" ")}
                                     aria-sort={active ? (sort!.desc ? "descending" : "ascending") : undefined}
+                                    onMouseEnter={column.info ? placeInfoCard : undefined}
                                 >
                                     {column.plain ? (
                                         column.header
@@ -278,6 +279,22 @@ export function DataTable<T>({
             </table>
         </div>
     );
+}
+
+// The info card is positioned against the viewport, not the header, because the table sits in a
+// container that clips its overflow (it has to, for horizontal scrolling) and a card anchored
+// inside it was cut off at the container's edge. Fixed positioning escapes that clip; the
+// coordinates have to come from JS, and they are written as custom properties on the header so
+// the card inherits them without React re-rendering on hover.
+const CARD_WIDTH = 320;
+
+function placeInfoCard(event: MouseEvent<HTMLTableCellElement>): void {
+    const th = event.currentTarget;
+    const box = th.getBoundingClientRect();
+    // Keep the card on screen when the header is close to the right edge.
+    const left = Math.max(8, Math.min(box.left, window.innerWidth - CARD_WIDTH - 12));
+    th.style.setProperty("--tip-x", `${Math.round(left)}px`);
+    th.style.setProperty("--tip-y", `${Math.round(box.bottom + 2)}px`);
 }
 
 // null/undefined always sort last; empty values never come first, whichever direction is chosen.

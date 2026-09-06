@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 
 import { api, type ColumnSummary, type IndexSummary, type PreviewResult, type TableDetail } from "../api";
 import { useApi, type AsyncState } from "../useApi";
-import { formatType } from "../format";
+import { formatType, unwrapDefault } from "../format";
 import { DataTable, type Column } from "../DataTable";
 import { Icon } from "../Icon";
 import { ResultGrid, type ResultColumn } from "../ResultGrid";
@@ -13,7 +13,7 @@ const SqlEditor = lazy(() => import("../SqlEditor"));
 export function TableDetailPage() {
     const { alias = "", db = "", schema = "", name = "" } = useParams();
     // Whoever clicks a table wants to see the DATA first; the column list is the second question.
-    const [tab, setTab] = useState<"detail" | "data">("data");
+    const [tab, setTab] = useState<"data" | "detail" | "script">("data");
 
     // The two requests start in PARALLEL. The preview does not depend on the table metadata — only
     // on the names in the URL. Previously the preview component mounted after the metadata had
@@ -22,10 +22,18 @@ export function TableDetailPage() {
     // — the preview carries its own column metadata — and a second concurrent query was slowing
     // the main query down.
     const [detailWanted, setDetailWanted] = useState(false);
+    // The script costs a whole-database metadata read, so it waits for a deliberate click and,
+    // once fetched, is not asked for again while the page stays open.
+    const [scriptWanted, setScriptWanted] = useState(false);
     const detail = useApi(
         () => api.table(alias, db, schema, name),
         [alias, db, schema, name],
         detailWanted,
+    );
+    const script = useApi(
+        () => api.tableScript(alias, db, schema, name),
+        [alias, db, schema, name],
+        scriptWanted,
     );
     const preview = useApi(() => api.preview(alias, db, schema, name, 20), [alias, db, schema, name]);
     // Fired alongside the preview, not after it. It only reads the catalog, so the editor fills in
@@ -58,13 +66,23 @@ export function TableDetailPage() {
                 >
                     detail
                 </button>
+                <button
+                    className="chip"
+                    aria-pressed={tab === "script"}
+                    onClick={() => {
+                        setScriptWanted(true);
+                        setTab("script");
+                    }}
+                >
+                    script
+                </button>
             </div>
 
-            {tab === "data" ? (
+            {tab === "data" && (
                 <DataTab preview={preview} sql={previewSql.data?.sql ?? preview.data?.sql ?? ""} />
-            ) : (
-                <DetailTab detail={detail} />
             )}
+            {tab === "detail" && <DetailTab detail={detail} />}
+            {tab === "script" && <ScriptTab script={script} />}
         </>
     );
 }
@@ -125,6 +143,29 @@ function DataTab({ preview, sql }: { preview: AsyncState<PreviewResult>; sql: st
     );
 }
 
+// The CREATE script, in the same editor the preview uses. The frame is drawn before the request
+// answers so the tab does not arrive by shoving the page around.
+function ScriptTab({ script }: { script: AsyncState<{ sql: string }> }) {
+    return (
+        <>
+            {script.error && <div className="error">{script.error}</div>}
+            <div className="badges">
+                <span
+                    className="badge"
+                    title="Produced by the same Scripting layer that writes the .sql files, so this is exactly what the generator would output."
+                >
+                    {script.loading ? "reading metadata…" : "as the generator would write it"}
+                </span>
+            </div>
+            <div className="editor-wrap tall">
+                <Suspense fallback={<div className="editor-placeholder" />}>
+                    <SqlEditor value={script.data?.sql ?? ""} />
+                </Suspense>
+            </div>
+        </>
+    );
+}
+
 // Columns, indexes and the table's own facts. Named "detail" rather than "columns" because the
 // same shape will serve views and routines, whose interesting parts are not columns at all.
 function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
@@ -166,8 +207,13 @@ function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
         {
             key: "default",
             header: "Default",
+            info: "Shown without the parentheses SQL Server wraps a default in. The script tab keeps the server's exact text.",
             sortValue: (c) => c.defaultDefinition,
-            render: (c) => <span className="mono muted">{c.defaultDefinition ?? ""}</span>,
+            render: (c) => (
+                <span className="mono muted">
+                    {c.defaultDefinition ? unwrapDefault(c.defaultDefinition) : ""}
+                </span>
+            ),
         },
     ];
 
@@ -215,7 +261,7 @@ function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
                     columns={indexColumns}
                     rows={detail.data.indexes}
                     rowKey={(i) => i.name}
-                    initialSort={{ key: "name" }}
+                    initialSort={{ key: "kind" }}
                     dense
                 />
             )}
@@ -238,7 +284,9 @@ const indexColumns: Column<IndexSummary>[] = [
     {
         key: "kind",
         header: "Kind",
-        sortValue: (i) => `${i.isPrimaryKey ? "0" : "1"}${i.typeDesc}`,
+        // Clustered first — there is at most one and it decides how the rows are physically
+        // stored, so it is the one to read before the others.
+        sortValue: (i) => `${i.typeDesc === "CLUSTERED" ? "0" : "1"}${i.isPrimaryKey ? "0" : "1"}${i.name}`,
         render: (i) => (
             <>
                 <span className="muted">{i.typeDesc.toLowerCase()}</span>
