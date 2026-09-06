@@ -15,6 +15,10 @@ internal static class ExplorerEndpoints
     // The row limit of the sample preview query shown on the table detail page.
     private const int DefaultPreviewTop = 20;
 
+    // How many rows a free-form query returns before the reader stops. A browser grid is not a
+    // place to put a million rows, and the connection should not be held open while they arrive.
+    private const int DefaultMaxRows = 1000;
+
     public static void MapExplorerEndpoints(this WebApplication app)
     {
         var api = app.MapGroup("/api");
@@ -207,6 +211,26 @@ internal static class ExplorerEndpoints
                 return Results.Ok(await explorer.PreviewAsync(shape, capped, where, ct: ct));
             }));
 
+        // A statement the user typed. POST because a query does not belong in a URL, and because
+        // running one is not something a link should be able to do on its own.
+        //
+        // Two things stand between the text and the server: QueryGuard, which only lets a single
+        // SELECT through, and the login itself, which is the protection that actually matters.
+        // A syntax error comes back as 400 with the server's own message — the person writing the
+        // query needs to read it.
+        api.MapPost("/servers/{alias}/databases/{db}/query",
+            (string alias, string db, QueryRequest body, ConnectionRegistry registry, CancellationToken ct) =>
+            WithDatabase(alias, db, registry, async (explorer, _) =>
+            {
+                if (!QueryGuard.TryValidate(body.Sql, out string? guardError))
+                {
+                    return BadRequest(guardError!);
+                }
+
+                int rows = Math.Clamp(body.MaxRows ?? DefaultMaxRows, 1, 5000);
+                return Results.Ok(await explorer.RunQueryAsync(body.Sql!, rows, ct: ct));
+            }));
+
         // "Validate & Count": tests the WHERE syntactically and returns the number of matching rows.
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}/count",
             (string alias, string db, string schema, string name, ConnectionRegistry registry,
@@ -320,6 +344,10 @@ internal static class ExplorerEndpoints
         CreateDate = default,
         ModifyDate = default,
     };
+
+    // The body of a query request. A record rather than loose parameters so the JSON shape is
+    // stated once and read by the binder.
+    public sealed record QueryRequest(string? Sql, int? MaxRows);
 
     // Turns SQL errors into a 400: when the WHERE the user typed is wrong they need to see it
     // with the error message — a 500 page is no help.

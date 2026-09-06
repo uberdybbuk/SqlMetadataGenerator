@@ -66,6 +66,21 @@ export interface ObjectDetail {
     modifyDate: string;
 }
 
+export interface QueryColumn {
+    name: string;
+    typeName: string;
+}
+
+export interface QueryResult {
+    columns: QueryColumn[];
+    rows: unknown[][];
+    sql: string;
+    elapsedMs: number;
+    messages: string[];
+    // True when the reader stopped at the row cap; there were more rows to read.
+    capped: boolean;
+}
+
 export interface DatabaseOverview {
     database: string;
     counts: Record<string, number>;
@@ -169,8 +184,16 @@ function get<T>(path: string, signal?: AbortSignal): Promise<T> {
     return request;
 }
 
-async function fetchJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-    const response = await fetch(path, { signal });
+async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    return fetchJson<T>(path, signal, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+}
+
+async function fetchJson<T>(path: string, signal?: AbortSignal, init?: RequestInit): Promise<T> {
+    const response = await fetch(path, { ...init, signal });
     if (!response.ok) {
         let detail = `${response.status} ${response.statusText}`;
         try {
@@ -194,6 +217,11 @@ export const api = {
 
     database: (alias: string, db: string) =>
         get<DatabaseOverview>(`/api/servers/${seg(alias)}/databases/${seg(db)}`),
+
+    // A statement the user typed. POST: a query does not belong in a URL, and a link should not be
+    // able to run one on its own.
+    query: (alias: string, db: string, sql: string, signal?: AbortSignal) =>
+        post<QueryResult>(`/api/servers/${seg(alias)}/databases/${seg(db)}/query`, { sql }, signal),
 
     objects: (alias: string, db: string, kind: string) =>
         get<ObjectSummary[]>(

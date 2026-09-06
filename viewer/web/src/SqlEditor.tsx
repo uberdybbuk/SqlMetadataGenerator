@@ -94,34 +94,57 @@ function release(instance: Instance): void {
 
 interface SqlEditorProps {
     value: string;
+    // Read-only is the default: most places here show SQL rather than invite it.
+    readOnly?: boolean;
+    onChange?: (value: string) => void;
 }
 
-export default function SqlEditor({ value }: SqlEditorProps) {
+export default function SqlEditor({ value, readOnly = true, onChange }: SqlEditorProps) {
     const slot = useRef<HTMLDivElement>(null);
     const instance = useRef<Instance | null>(null);
     const dark = useDarkMode();
+    // Held in a ref so the change listener is attached once and still calls the current handler.
+    const changed = useRef(onChange);
+    changed.current = onChange;
+    // setValue fires the same event a keystroke does; without this the editor would report our
+    // own writes back as if the user had typed them.
+    const writing = useRef(false);
 
     useLayoutEffect(() => {
         const acquired = acquire();
         instance.current = acquired;
         slot.current?.appendChild(acquired.host);
+        acquired.editor.updateOptions({ readOnly, domReadOnly: readOnly });
         acquired.editor.layout();
+        const subscription = acquired.editor.onDidChangeModelContent(() => {
+            if (!writing.current) {
+                changed.current?.(acquired.editor.getValue());
+            }
+        });
         return () => {
+            subscription.dispose();
             instance.current = null;
             release(acquired);
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => {
         const editor = instance.current?.editor;
-        if (!editor) {
+        if (!editor || editor.getValue() === value) {
             return;
         }
         // setValue also resets the undo stack; the scroll position is sent back to the top so
         // the previous table's position does not carry into the new query.
+        writing.current = true;
         editor.setValue(value);
         editor.setScrollTop(0);
+        writing.current = false;
     }, [value]);
+
+    useEffect(() => {
+        instance.current?.editor.updateOptions({ readOnly, domReadOnly: readOnly });
+    }, [readOnly]);
 
     useEffect(() => {
         monaco.editor.setTheme(dark ? "vs-dark" : "vs");

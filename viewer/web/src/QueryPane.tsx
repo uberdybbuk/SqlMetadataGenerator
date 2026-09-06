@@ -14,16 +14,33 @@ const DEFAULT_SHARE = 45;
 const STORE_KEY = "sqlbrowser.querypane.split";
 
 interface QueryPaneProps {
+    // The query to start from. It fills the editor until the user types, and never overwrites what
+    // they have written afterwards.
     sql: string;
     result: ReactNode;
-    // Runs the query again. Bound to the button and to Alt+X / F5.
-    onExecute: () => void;
+    // Runs the text currently in the editor. Bound to the button and to Alt+X / F5.
+    onExecute: (sql: string) => void;
     // Aborts the request in flight; disabled while nothing is running.
     onCancel: () => void;
     running: boolean;
 }
 
 export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPaneProps) {
+    const [text, setText] = useState(sql);
+    // Once someone has typed, the incoming sql prop stops being an instruction and becomes just
+    // the query this pane happened to open with. The preview's text arrives a moment after the
+    // pane mounts, and it must not land on top of a query being written.
+    const edited = useRef(false);
+    useEffect(() => {
+        if (!edited.current) {
+            setText(sql);
+        }
+    }, [sql]);
+
+    const onEdit = useCallback((next: string) => {
+        edited.current = true;
+        setText(next);
+    }, []);
     const frame = useRef<HTMLDivElement>(null);
     const [share, setShare] = useState(readShare);
     const [height, setHeight] = useState<number | null>(null);
@@ -91,7 +108,7 @@ export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPa
             const execute = e.key === "F5" || (e.altKey && (e.key === "x" || e.key === "X"));
             if (execute) {
                 e.preventDefault();
-                onExecute();
+                onExecute(textRef.current);
                 return;
             }
             if (e.key === "Escape" && running) {
@@ -103,10 +120,15 @@ export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPa
         return () => window.removeEventListener("keydown", onKey);
     }, [onExecute, onCancel, running]);
 
+    // The shortcut handler is attached once; a ref keeps it reading the current text without
+    // re-binding the listener on every keystroke.
+    const textRef = useRef(text);
+    textRef.current = text;
+
     return (
         <div className="workbench" ref={frame} style={height ? { height } : undefined}>
             <div className="qtoolbar">
-                <button type="button" className="tool run" onClick={onExecute} title="Execute (Alt+X, F5)">
+                <button type="button" className="tool run" onClick={() => onExecute(text)} title="Execute (Alt+X, F5)">
                     <Icon name="play" size={14} />
                     Execute
                 </button>
@@ -125,7 +147,7 @@ export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPa
             </div>
             <div className="pane" style={{ height: `${share}%` }}>
                 <Suspense fallback={<div className="editor-placeholder" />}>
-                    <SqlEditor value={sql} />
+                    <SqlEditor value={text} readOnly={false} onChange={onEdit} />
                 </Suspense>
             </div>
             <div

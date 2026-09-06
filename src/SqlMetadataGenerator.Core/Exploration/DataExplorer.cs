@@ -266,6 +266,87 @@ public sealed class DataExplorer(string connectionString)
         };
     }
 
+    // Runs a statement the user typed. The caller has already put it through QueryGuard; this
+    // method adds the two limits that keep a careless query from taking the tool down with it:
+    // a command timeout, and a cap on the rows read into memory. Beyond the cap the reader simply
+    // stops — the result says so rather than pretending the query returned that many rows.
+    //
+    // Column metadata comes from the reader's own schema, not the catalog: an arbitrary SELECT can
+    // project expressions, joins and aliases that exist nowhere in sys.columns.
+    public async Task<QueryResult> RunQueryAsync(
+        string sql,
+        int maxRows = 1000,
+        int timeoutSeconds = 30,
+        CancellationToken ct = default)
+    {
+        var rows = new List<object?[]>();
+        var messages = new List<string>();
+        var columns = new List<QueryColumn>();
+        bool capped = false;
+
+        await using var conn = await OpenAsync(ct);
+
+        void OnInfo(object _, SqlInfoMessageEventArgs e)
+        {
+            foreach (SqlError error in e.Errors)
+            {
+                messages.Add(error.Message);
+            }
+        }
+
+        conn.InfoMessage += OnInfo;
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await using var cmd = ReadOnlyCommand.Create(conn, sql);
+            cmd.CommandTimeout = timeoutSeconds;
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                string name = reader.GetName(i);
+                columns.Add(new QueryColumn
+                {
+                    // An unnamed expression comes back with an empty name; the position is the
+                    // only handle the reader has on it, so that is what the header shows.
+                    Name = string.IsNullOrEmpty(name) ? $"(no name {i + 1})" : name,
+                    TypeName = reader.GetDataTypeName(i),
+                });
+            }
+
+            while (await reader.ReadAsync(ct))
+            {
+                if (rows.Count >= maxRows)
+                {
+                    capped = true;
+                    break;
+                }
+
+                var values = new object?[reader.FieldCount];
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    values[i] = FormatValue(reader.IsDBNull(i) ? null : reader.GetValue(i));
+                }
+                rows.Add(values);
+            }
+        }
+        finally
+        {
+            stopwatch.Stop();
+            conn.InfoMessage -= OnInfo;
+        }
+
+        return new QueryResult
+        {
+            Columns = columns,
+            Rows = rows,
+            Sql = sql,
+            ElapsedMs = stopwatch.ElapsedMilliseconds,
+            Messages = messages,
+            Capped = capped,
+        };
+    }
+
     // The CREATE text of a view, procedure, function or trigger, exactly as the server stores it.
     // Returns null when the object does not exist or carries no module definition — an encrypted
     // module, for instance, has a row in sys.objects but none in sys.sql_modules.

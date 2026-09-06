@@ -88,6 +88,25 @@ public sealed class TableFacts
     public required List<IndexSummary> Indexes { get; init; }
 }
 
+// A column of a free-form query result. There is no catalog row behind it: the name and type come
+// from the reader, because a projection can be an expression that exists in no table.
+public sealed class QueryColumn
+{
+    public required string Name { get; init; }
+    public required string TypeName { get; init; }
+}
+
+public sealed class QueryResult
+{
+    public required List<QueryColumn> Columns { get; init; }
+    public required List<object?[]> Rows { get; init; }
+    public required string Sql { get; init; }
+    public required long ElapsedMs { get; init; }
+    public required List<string> Messages { get; init; }
+    // True when the reader stopped at the row cap and the query had more to give.
+    public required bool Capped { get; init; }
+}
+
 // One object's DDL, for the detail page. Definition is the server's own CREATE text for anything
 // backed by sys.sql_modules; for synonyms, sequences and table types the catalog stores the parts
 // rather than a statement, so the Scripting layer composes one and Generated says so — the reader

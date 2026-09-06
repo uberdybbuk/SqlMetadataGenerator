@@ -8,6 +8,7 @@ import { DataTable, type Column } from "../DataTable";
 import { Icon } from "../Icon";
 import { ResultGrid, type ResultColumn } from "../ResultGrid";
 import { QueryPane } from "../QueryPane";
+import { useQueryRunner, type QueryRunner } from "../useQueryRunner";
 
 const SqlEditor = lazy(() => import("../SqlEditor"));
 
@@ -22,6 +23,7 @@ export function TableDetailPage() {
     // The column list is requested ONLY when its tab is opened. The data tab does not wait on it
     // — the preview carries its own column metadata — and a second concurrent query was slowing
     // the main query down.
+    const runner = useQueryRunner(alias, db);
     const [detailWanted, setDetailWanted] = useState(false);
     // The script costs a whole-database metadata read, so it waits for a deliberate click and,
     // once fetched, is not asked for again while the page stays open.
@@ -80,7 +82,11 @@ export function TableDetailPage() {
             </div>
 
             {tab === "data" && (
-                <DataTab preview={preview} sql={previewSql.data?.sql ?? preview.data?.sql ?? ""} />
+                <DataTab
+                    preview={preview}
+                    runner={runner}
+                    sql={previewSql.data?.sql ?? preview.data?.sql ?? ""}
+                />
             )}
             {tab === "detail" && <DetailTab detail={detail} />}
             {tab === "script" && <ScriptTab script={script} />}
@@ -88,9 +94,19 @@ export function TableDetailPage() {
     );
 }
 
-function DataTab({ preview, sql }: { preview: AsyncState<PreviewResult>; sql: string }) {
-    // The information on the header card arrives with the preview itself; no separate request.
-    const columns: ResultColumn[] = (preview.data?.columns ?? []).map((column) => {
+function DataTab({
+    preview,
+    runner,
+    sql,
+}: {
+    preview: AsyncState<PreviewResult>;
+    runner: QueryRunner;
+    sql: string;
+}) {
+    // Until something is run here the grid shows the preview the page opened with; afterwards it
+    // shows the answer to the query on screen. Two shapes, one grid: the preview knows its columns
+    // from the catalog, a free-form query only from the reader.
+    const previewColumns: ResultColumn[] = (preview.data?.columns ?? []).map((column) => {
         const meta = column.column;
         return {
             name: column.name,
@@ -118,29 +134,65 @@ function DataTab({ preview, sql }: { preview: AsyncState<PreviewResult>; sql: st
         };
     });
 
-    const result = preview.error ? (
-        <div className="error">{preview.error}</div>
-    ) : preview.loading ? (
+    const queryColumns: ResultColumn[] = (runner.data?.columns ?? []).map((column) => ({
+        name: column.name,
+        typeName: column.typeName,
+        truncated: false,
+        details: <span className="mono muted">{column.typeName}</span>,
+    }));
+
+    const active = runner.ran
+        ? {
+              loading: runner.loading,
+              error: runner.error,
+              columns: queryColumns,
+              rows: runner.data?.rows ?? [],
+              elapsedMs: runner.data?.elapsedMs ?? 0,
+              messages: runner.data?.messages ?? [],
+              note: runner.data?.capped ? "stopped at 1000 rows" : undefined,
+              has: runner.data !== null,
+          }
+        : {
+              loading: preview.loading,
+              error: preview.error,
+              columns: previewColumns,
+              rows: preview.data?.rows ?? [],
+              elapsedMs: preview.data?.elapsedMs ?? 0,
+              messages: preview.data?.messages ?? [],
+              note: "limited to 20",
+              has: preview.data !== null,
+          };
+
+    const result = active.error ? (
+        <div className="error">{active.error}</div>
+    ) : active.loading ? (
         <div className="result">
             <div className="state">Running query…</div>
         </div>
-    ) : preview.data ? (
+    ) : active.has ? (
         <ResultGrid
-            columns={columns}
-            rows={preview.data.rows}
-            elapsedMs={preview.data.elapsedMs}
-            messages={preview.data.messages}
-            limitNote="limited to 20"
+            columns={active.columns}
+            rows={active.rows}
+            elapsedMs={active.elapsedMs}
+            messages={active.messages}
+            limitNote={active.note}
         />
-    ) : null;
+    ) : (
+        <div className="result">
+            <div className="state">Cancelled.</div>
+        </div>
+    );
 
     return (
         <QueryPane
             sql={sql}
             result={result}
-            onExecute={preview.reload}
-            onCancel={preview.cancel}
-            running={preview.loading}
+            onExecute={(text) => runner.run(text)}
+            onCancel={() => {
+                preview.cancel();
+                runner.cancel();
+            }}
+            running={preview.loading || runner.loading}
         />
     );
 }
