@@ -377,9 +377,14 @@ th .htype {
 }
 
 /* Keeps an icon + text pair on one line, aligned on the baseline. */
+/* vertical-align is required: an inline-flex box sits on the text baseline, and the browser
+   reserves descender space under it, so the box floats up. In a table cell that showed as
+   2.5px of room above the content and 6.2px below — visibly off centre, and it also made
+   rows with an icon taller than rows without one. */
 .with-icon {
     display: inline-flex;
     align-items: center;
+    vertical-align: middle;
     gap: 6px;
 }
 
