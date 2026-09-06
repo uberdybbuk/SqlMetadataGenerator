@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useApi } from "../useApi";
 import { plural } from "../format";
 import { Icon } from "../Icon";
+import { APP_NAME } from "../Layout";
 
 export function ConnectionsPage() {
     const { data, error, loading } = useApi(() => api.connections(), []);
@@ -25,7 +26,7 @@ export function ConnectionsPage() {
 
     return (
         <>
-            <h1>Connections</h1>
+            <h1>{APP_NAME}</h1>
             <p className="subtitle">
                 {data.length} {plural(data.length, "server")} configured
             </p>

@@ -1,6 +1,9 @@
 import { useEffect } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 
+export const HOME = "🏠";
+export const APP_NAME = "SQL Browser";
+
 // Readable equivalents of the type segment in the URL (tables, views ...).
 // The keys match the ObjectFilter.ValidTypes vocabulary: the CLI, the manifest and the URL speak one language.
 const SECTION_LABELS: Record<string, string> = {
@@ -18,6 +21,8 @@ interface Crumb {
     label: string;
     href: string;
     mono?: boolean;
+    // Screen readers get a word where the eye gets a pictogram.
+    aria?: string;
 }
 
 // The breadcrumb path is built from the ROUTE STRUCTURE, not segment by segment:
@@ -31,7 +36,7 @@ function buildCrumbs(pathname: string): Crumb[] {
     }
 
     const [, alias, db, section, schema, name] = parts;
-    const crumbs: Crumb[] = [{ label: "Connections", href: "/app" }];
+    const crumbs: Crumb[] = [{ label: HOME, href: "/app", aria: "Home" }];
     if (!alias) {
         return crumbs;
     }
@@ -86,6 +91,19 @@ function Breadcrumbs() {
     const { pathname } = useLocation();
     const crumbs = buildCrumbs(pathname);
 
+    // The tab title carries the same trail as the breadcrumb, so a window picker or a bookmark
+    // says where in the tree you are, not just which application this is.
+    const trail = crumbs.map((crumb) => crumb.label).join(" / ");
+    useEffect(() => {
+        document.title = crumbs.length > 1 ? trail : `${HOME} ${APP_NAME}`;
+    }, [trail, crumbs.length]);
+
+    // On the home page the trail would be a single house sitting above a heading that already
+    // says the same thing. A breadcrumb with one crumb tells you nothing anyway.
+    if (crumbs.length < 2) {
+        return null;
+    }
+
     return (
         <nav className="crumbs" aria-label="Breadcrumb">
             {crumbs.map((crumb, index) => {
@@ -93,9 +111,15 @@ function Breadcrumbs() {
                 return (
                     <span key={crumb.href} className="crumb">
                         {last ? (
-                            <span className={crumb.mono ? "current mono" : "current"}>{crumb.label}</span>
+                            <span className={crumb.mono ? "current mono" : "current"} aria-label={crumb.aria}>
+                                {crumb.label}
+                            </span>
                         ) : (
-                            <Link className={crumb.mono ? "mono" : undefined} to={crumb.href}>
+                            <Link
+                                className={crumb.mono ? "mono" : undefined}
+                                to={crumb.href}
+                                aria-label={crumb.aria}
+                            >
                                 {crumb.label}
                             </Link>
                         )}
