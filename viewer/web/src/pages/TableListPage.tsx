@@ -126,8 +126,9 @@ export function TableListPage() {
                 rowKey={(t) => `${t.schema}.${t.name}`}
                 initialSort={{ key: "reserved", desc: true }}
                 dense
+                resizable
+                emptyNote="No matching tables."
             />
-            {shown.length === 0 && <div className="state">No matching tables.</div>}
         </>
     );
 }

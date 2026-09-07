@@ -161,3 +161,11 @@ public sealed class SequenceInfo
     // The size when caching is on and one is set; null otherwise (the default cache).
     public long? CacheSize { get; init; }
 }
+
+// One scriptable object, identified the way the scripting panel addresses it. This is a NAME, not
+// a definition: the inventory is read to draw the picker, and only what the user ticks is read in
+// full. Kind is the vocabulary shared with the picker and with ScriptBundle's ordering.
+//
+// Schemas carry their own name in Schema as well as in Name, so that grouping the tree by schema
+// puts a schema object under itself rather than under a blank.
+public sealed record ScriptableObject(string Kind, string Schema, string Name);

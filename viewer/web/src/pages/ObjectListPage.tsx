@@ -87,12 +87,14 @@ export function ObjectListPage() {
             key: "type",
             header: "Type",
             sortValue: (o) => o.typeDesc,
+            copyValue: (o) => readableType(o.typeDesc),
             render: (o) => <span className="muted">{readableType(o.typeDesc)}</span>,
         },
         {
             key: "modified",
             header: "Modified",
             sortValue: (o) => o.modifyDate,
+            copyType: "datetime2",
             render: (o) => formatCell(o.modifyDate, "datetime2"),
         },
     ];
@@ -125,10 +127,9 @@ export function ObjectListPage() {
                         rowKey={(o) => `${o.schema}.${o.name}`}
                         initialSort={{ key: "name" }}
                         dense
+                        resizable
+                        emptyNote={`No matching ${known.title.toLowerCase()}.`}
                     />
-                    {rows.length === 0 && (
-                        <div className="state">No matching {known.title.toLowerCase()}.</div>
-                    )}
                 </>
             )}
         </>
@@ -197,6 +198,7 @@ export function SchemaListPage() {
                     rowKey={(s) => s.name}
                     initialSort={{ key: "tables", desc: true }}
                     dense
+                    resizable
                 />
             )}
         </>

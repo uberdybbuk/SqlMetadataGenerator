@@ -441,6 +441,14 @@ h1.with-icon {
     font-size: 12px;
 }
 
+/* A grid fills the panel it sits in. The measured widths are capped per column, so on a wide
+   window they can add up to less than the container — and a blank strip inside the border reads
+   as a layout bug rather than as breathing room. Under table-layout:fixed the excess is shared
+   out proportionally, so no single column swallows it. */
+.table-wrap table {
+    min-width: 100%;
+}
+
 .table-wrap.dense th,
 .table-wrap.dense td {
     padding: 2px 7px;
@@ -538,9 +546,15 @@ body.resizing {
 
 
 /* ---- Row number column ---- */
+/* The gutter is the same width in every grid: it is a handle, not data, and a column of two-digit
+   numbers that changes width from page to page reads as a layout accident. */
 td.rownum,
-th:first-child:has(+ th) {
-    /* alignment only; the width follows the content */
+th.rownum-head {
+    width: 46px;
+    min-width: 46px;
+    max-width: 46px;
+    text-align: right;
+    padding-right: 8px;
 }
 
 td.rownum {
@@ -696,7 +710,10 @@ th .colinfo .warn-line {
     flex: 0 0 auto;
 }
 
-.qtoolbar .tool {
+/* A toolbar button. NOT scoped to .qtoolbar: the same control appears in the scripting
+   picker's bulk bars, and one that inherited nothing there rendered as a raw browser button
+   next to a styled one. Same class, same look, same behaviour, wherever it sits. */
+.tool {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -710,30 +727,30 @@ th .colinfo .warn-line {
     cursor: pointer;
 }
 
-.qtoolbar .tool:hover:not(:disabled) {
+.tool:hover:not(:disabled) {
     border-color: var(--accent);
     background: var(--accent-soft);
 }
 
 /* Execute is the one action on this bar you reach for; it carries the accent, the rest do not. */
-.qtoolbar .tool.run .icon {
+.tool.run .icon {
     color: var(--ok, #1a7f37);
 }
 
-.qtoolbar .tool:disabled {
+.tool:disabled {
     color: var(--muted);
     cursor: default;
     opacity: 0.6;
 }
 
-.qtoolbar .tool-sep {
+.tool-sep {
     width: 1px;
     height: 18px;
     background: var(--border);
     margin: 0 2px;
 }
 
-.qtoolbar .tool-hint {
+.tool-hint {
     font-family: var(--mono);
     font-size: 11px;
     color: var(--muted);
@@ -840,15 +857,8 @@ body.row-resizing {
    columns went to the last column and two columns spanned the whole screen. */
 .result table {
     width: max-content;
-}
-
-.result td.rownum,
-.result th:first-child {
-    width: 46px;
-    min-width: 46px;
-    max-width: 46px;
-    text-align: right;
-    padding-right: 8px;
+    /* The opposite of the rule below: here the spare room stays spare. */
+    min-width: 0;
 }
 
 /* The corner cell: it selects the entire grid. The button covers the WHOLE cell —
@@ -966,4 +976,241 @@ tr.norows td.empty-note {
     max-width: none;
     white-space: normal;
     background: var(--panel);
+}
+
+/* ---- Scripting panel ---- */
+/* Picker on the left, script on the right, the pair filling the window. The two are read
+   together: ticking an object and seeing what it produced is one activity, and scrolling one
+   out of view to see the other is what this layout exists to prevent. */
+.scripting {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+    min-height: 0;
+}
+
+.scripting .picker {
+    flex: 0 0 360px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+}
+
+.scripting .output {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+}
+
+.picker-head {
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.picker-head .toolbar.tight {
+    margin: 0 0 8px;
+    gap: 6px;
+    align-items: center;
+}
+
+.picker-head .search {
+    width: 100%;
+}
+
+/* The bulk bar belongs to the filter and appears with it. Its buttons carry the true match
+   count in their labels, so a click can never quietly act on more than was read. */
+.bulkbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+    font-size: 11px;
+}
+
+/* The bars around them set small text for their LABELS. The buttons must not inherit that: they
+   are the same control as Generate and Download and are drawn at the same size, down to the
+   padding. */
+.bulkbar .tool,
+.picker-foot .tool {
+    font-size: 12px;
+}
+
+.picker-rows {
+    flex: 1 1 0;
+    overflow: auto;
+    padding: 4px 0;
+    outline: none;
+}
+
+.prow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px 2px 0;
+    font-size: 12px;
+    line-height: 1.6;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.prow:hover {
+    background: var(--accent-soft);
+}
+
+.prow.focus {
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.prow.group .pname {
+    font-weight: 600;
+}
+
+.twisty {
+    width: 12px;
+    color: var(--muted);
+    font-size: 10px;
+    flex: 0 0 auto;
+}
+
+/* Not an <input type=checkbox>: HTML can express "mixed" only through a JS property, and cannot
+   style it at all. A span with aria-checked says the same thing to a screen reader and can be
+   drawn — tick for all, dash for partial. */
+.tri {
+    flex: 0 0 auto;
+    width: 13px;
+    height: 13px;
+    border: 1px solid var(--head-line);
+    border-radius: 3px;
+    background: var(--panel);
+    position: relative;
+}
+
+.tri[aria-checked="true"],
+.tri[aria-checked="mixed"] {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.tri[aria-checked="true"]::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 3px;
+    height: 7px;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.tri[aria-checked="mixed"]::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 5px;
+    width: 7px;
+    height: 2px;
+    background: #fff;
+}
+
+.pname {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pcount {
+    margin-left: auto;
+    padding-left: 8px;
+    color: var(--muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The unscoped bulk bar: these act on the whole database, and say so with its object count. */
+.picker-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-top: 1px solid var(--border);
+    background: var(--head);
+    font-size: 11px;
+}
+
+.scripting .output-editor {
+    flex: 1 1 0;
+    min-height: 0;
+}
+
+.opt {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--muted);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.opt input {
+    margin: 0;
+}
+
+.warn-note {
+    margin: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--warn);
+    border-radius: 6px;
+    color: var(--warn);
+    font-size: 12px;
+}
+
+/* The second checkbox on a picker row: the rows of the tables under it, as opposed to their
+   shape. Tinted differently so the two columns are never confused at a glance. */
+.tri.data {
+    margin-left: 4px;
+}
+
+.tri.data[aria-checked="true"],
+.tri.data[aria-checked="mixed"] {
+    background: var(--ok, #1a7f37);
+    border-color: var(--ok, #1a7f37);
+}
+
+.pcount.warn {
+    color: var(--warn);
+    font-weight: 600;
+}
+
+/* The WHERE for one table, on its own line under it. Only drawn when that table's rows are
+   actually wanted — a text box on all 67 rows would bury the tree. */
+.wrow {
+    padding-right: 8px;
+    padding-bottom: 3px;
+}
+
+.wclause {
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--text);
+}
+
+.wclause[aria-invalid="true"] {
+    border-color: var(--warn);
 }

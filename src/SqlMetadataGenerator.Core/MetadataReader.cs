@@ -76,6 +76,92 @@ public sealed class MetadataReader(string connectionString)
         return tables;
     }
 
+    // The names of everything the generator can script, and nothing else.
+    //
+    // The scripting picker needs an inventory before it needs a single definition, and reading
+    // definitions to draw a tree would cost the whole-database read for a user who then ticks two
+    // tables. So this is names only, in ONE round trip: seven result sets over one command.
+    //
+    // Every predicate here is copied from the full read that scripts that kind — sys.tables with
+    // is_ms_shipped = 0 and type 'U', sys.types with is_user_defined = 1 and is_table_type = 0,
+    // and so on. That is the point of the method: the picker must not be able to offer an object
+    // the scripter would then fail to find.
+    public async Task<List<ScriptableObject>> ReadInventoryAsync(CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT s.name, s.name
+            FROM sys.schemas s
+            WHERE s.schema_id BETWEEN 5 AND 16383
+            ORDER BY s.name;
+
+            SELECT s.name, t.name
+            FROM sys.types t
+            JOIN sys.schemas s ON t.schema_id = s.schema_id
+            WHERE t.is_user_defined = 1 AND t.is_table_type = 0
+            ORDER BY s.name, t.name;
+
+            SELECT s.name, tt.name
+            FROM sys.table_types tt
+            JOIN sys.schemas s ON tt.schema_id = s.schema_id
+            WHERE tt.is_user_defined = 1
+            ORDER BY s.name, tt.name;
+
+            SELECT s.name, seq.name
+            FROM sys.sequences seq
+            JOIN sys.schemas s ON seq.schema_id = s.schema_id
+            ORDER BY s.name, seq.name;
+
+            SELECT s.name, t.name
+            FROM sys.tables t
+            JOIN sys.schemas s ON t.schema_id = s.schema_id
+            WHERE t.is_ms_shipped = 0 AND t.type = 'U'
+            ORDER BY s.name, t.name;
+
+            SELECT s.name, o.name, o.type
+            FROM sys.objects o
+            JOIN sys.schemas s ON o.schema_id = s.schema_id
+            WHERE o.is_ms_shipped = 0 AND o.type IN ('V', 'P', 'FN', 'IF', 'TF', 'TR')
+            ORDER BY s.name, o.name;
+
+            SELECT s.name, syn.name
+            FROM sys.synonyms syn
+            JOIN sys.schemas s ON syn.schema_id = s.schema_id
+            ORDER BY s.name, syn.name;
+            """;
+
+        // The order the result sets are read in is the order they are written above.
+        string[] simpleKinds = ["schemas", "dataTypes", "tableTypes", "sequences", "tables"];
+
+        var inventory = new List<ScriptableObject>();
+        await using var conn = await OpenConnectionAsync(ct);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        foreach (string kind in simpleKinds)
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                inventory.Add(new ScriptableObject(kind, reader.GetString(0), reader.GetString(1)));
+            }
+            await reader.NextResultAsync(ct);
+        }
+
+        // Modules carry their type code, because one result set covers four kinds.
+        while (await reader.ReadAsync(ct))
+        {
+            inventory.Add(new ScriptableObject(
+                KindForType(reader.GetString(2).Trim()), reader.GetString(0), reader.GetString(1)));
+        }
+        await reader.NextResultAsync(ct);
+
+        while (await reader.ReadAsync(ct))
+        {
+            inventory.Add(new ScriptableObject("synonyms", reader.GetString(0), reader.GetString(1)));
+        }
+
+        return inventory;
+    }
+
     private async Task<List<(int ObjectId, ObjectName Name)>> ReadTableNamesAsync(CancellationToken ct)
     {
         const string sql = """

@@ -251,6 +251,161 @@ internal static class ExplorerEndpoints
                 long count = await explorer.CountAsync(shape.Schema, shape.Name, where, ct: ct);
                 return Results.Ok(new { rows = count, where });
             }));
+
+        // The scripting picker's inventory: the name of every object the generator can script.
+        // One round trip, names only — the tree is drawn before anything is read in full.
+        api.MapGet("/servers/{alias}/databases/{db}/scriptable",
+            (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
+            WithDatabase(alias, db, registry, async (_, connectionString) =>
+            {
+                var reader = new MetadataReader(connectionString);
+                return Results.Ok(new
+                {
+                    Kinds = ScriptBundle.Kinds.Select(k => new { Kind = k, Title = ScriptBundle.Title(k) }),
+                    Objects = await reader.ReadInventoryAsync(ct),
+                });
+            }));
+
+        // Scripts the chosen objects into ONE statement, sections in dependency order.
+        //
+        // POST because the selection is a list, not an address: seventeen schema-qualified names do
+        // not belong in a URL, and generating a script is not something a link should do on its own.
+        api.MapPost("/servers/{alias}/databases/{db}/script",
+            (string alias, string db, ScriptRequest body, ConnectionRegistry registry, CancellationToken ct) =>
+            WithDatabase(alias, db, registry, async (_, connectionString) =>
+            {
+                if (!TryReadSelection(body, out var wanted, out string? error)
+                    || !TryReadData(body, out var data, out error))
+                {
+                    return BadRequest(error!);
+                }
+
+                var reader = new MetadataReader(connectionString);
+                var format = body.ToScriptFormat(await reader.ReadDatabaseCollationAsync(ct));
+                var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, connectionString, format, ct);
+
+                return Results.Ok(new
+                {
+                    Sql = ScriptBundle.ToSingleScript(bundle, format),
+                    Scripted = bundle.Items.Count,
+                    // What was asked for and is no longer there. The panel's inventory can be
+                    // minutes old, and a dropped object has to be said out loud.
+                    bundle.Missing,
+                    // Non-empty when the chosen tables reference each other in a cycle: the script
+                    // brackets the load with NOCHECK/CHECK, and the panel says so.
+                    CycleTables = bundle.CycleTables,
+                });
+            }));
+
+        // The same bundle as files, in the layout the generator writes to disk, zipped.
+        api.MapPost("/servers/{alias}/databases/{db}/script/files",
+            (string alias, string db, ScriptRequest body, ConnectionRegistry registry, CancellationToken ct) =>
+            WithDatabase(alias, db, registry, async (_, connectionString) =>
+            {
+                if (!TryReadSelection(body, out var wanted, out string? error)
+                    || !TryReadData(body, out var data, out error))
+                {
+                    return BadRequest(error!);
+                }
+
+                var reader = new MetadataReader(connectionString);
+                var format = body.ToScriptFormat(await reader.ReadDatabaseCollationAsync(ct));
+                var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, connectionString, format, ct);
+
+                var files = bundle.Items
+                    .Select(item => (Path: ScriptBundle.FilePath(item), Content: item.Sql.TrimEnd() + "\n"))
+                    .ToList();
+
+                if (bundle.Missing.Count > 0)
+                {
+                    files.Add(("_missing.txt",
+                        "Asked for, but no longer in the catalog:\n\n" + string.Join("\n", bundle.Missing) + "\n"));
+                }
+
+                // 7-Zip at -mx=9 when the host has it, a zip when it does not. See ScriptArchive.
+                var package = await ScriptArchive.PackAsync(files, ct);
+                string stamp = DateTime.Now.ToString("yyyyMMdd-HHmm");
+                return Results.File(package.Bytes, package.ContentType, $"{db}-{stamp}{package.Extension}");
+            }));
+    }
+
+    // The selection as it arrives from the picker. Capped so a malformed or hostile body cannot
+    // ask for an unbounded read; the cap is far above any real database's object count.
+    private const int MaxSelectedObjects = 20000;
+
+    // The row selections, with their WHERE clauses checked by the same guard the preview uses.
+    // A WHERE is the one part of this request that becomes SQL text, so it never goes unchecked.
+    private static bool TryReadData(
+        ScriptRequest body, out List<DataScripter.Request> data, out string? error)
+    {
+        data = [];
+        error = null;
+
+        foreach (var d in body.Data ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(d.Schema) || string.IsNullOrWhiteSpace(d.Name))
+            {
+                error = "A data entry is missing its schema or table name.";
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(d.Where) && !WhereClauseGuard.TryValidate(d.Where, out string? guard))
+            {
+                error = $"{d.Schema}.{d.Name}: {guard}";
+                return false;
+            }
+
+            data.Add(new DataScripter.Request(d.Schema, d.Name, d.Where));
+        }
+
+        return true;
+    }
+
+    private static bool TryReadSelection(
+        ScriptRequest body, out List<ScriptableObject> wanted, out string? error)
+    {
+        wanted = [];
+        error = null;
+
+        if ((body.Objects is null || body.Objects.Count == 0)
+            && (body.Data is null || body.Data.Count == 0))
+        {
+            error = "Nothing was selected.";
+            return false;
+        }
+
+        if (body.Objects is null)
+        {
+            return true;
+        }
+
+        if (body.Objects.Count > MaxSelectedObjects)
+        {
+            error = $"At most {MaxSelectedObjects} objects can be scripted at once.";
+            return false;
+        }
+
+        var kinds = new HashSet<string>(ScriptBundle.Kinds, StringComparer.OrdinalIgnoreCase);
+        foreach (var o in body.Objects)
+        {
+            if (string.IsNullOrWhiteSpace(o.Kind) || string.IsNullOrWhiteSpace(o.Name))
+            {
+                error = "An entry is missing its kind or name.";
+                return false;
+            }
+
+            // The kind decides which reader runs, so it is checked against the closed list rather
+            // than trusted. Nothing from the request reaches any SQL text either way.
+            if (!kinds.Contains(o.Kind))
+            {
+                error = $"Unknown object kind: '{o.Kind}'.";
+                return false;
+            }
+
+            wanted.Add(new ScriptableObject(o.Kind, o.Schema ?? string.Empty, o.Name));
+        }
+
+        return true;
     }
 
     private static async Task<IResult> WithServer(
@@ -348,6 +503,30 @@ internal static class ExplorerEndpoints
     // The body of a query request. A record rather than loose parameters so the JSON shape is
     // stated once and read by the binder.
     public sealed record QueryRequest(string? Sql, int? MaxRows);
+
+    // The scripting request: what to script, and how to format it. The formatting fields are
+    // nullable so that omitting one means "the generator's default" rather than "false".
+    public sealed record ScriptRequest(
+        List<ScriptSelection>? Objects,
+        // The tables whose ROWS were asked for. Independent of Objects: a table can appear in one,
+        // the other, or both.
+        List<DataSelection>? Data,
+        bool? UpperCaseKeywords,
+        bool? EmitSetOptions,
+        bool? GroupColumns)
+    {
+        public ScriptFormat ToScriptFormat(string? collation) => new()
+        {
+            KeywordCase = UpperCaseKeywords == true ? KeywordCase.Upper : KeywordCase.Lower,
+            EmitSetOptions = EmitSetOptions ?? false,
+            GroupColumns = GroupColumns ?? true,
+            DatabaseCollation = collation,
+        };
+    }
+
+    public sealed record ScriptSelection(string Kind, string? Schema, string Name);
+
+    public sealed record DataSelection(string Schema, string Name, string? Where);
 
     // Turns SQL errors into a 400: when the WHERE the user typed is wrong they need to see it
     // with the error message — a 500 page is no help.

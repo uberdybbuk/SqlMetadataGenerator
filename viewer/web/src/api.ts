@@ -43,6 +43,35 @@ export interface SchemaInfo {
     owner: string;
 }
 
+// The scripting picker's inventory. Kinds arrive with the objects so the panel's section order
+// and its section titles come from the generator rather than from a second list kept in sync here.
+export interface ScriptableInventory {
+    kinds: { kind: string; title: string }[];
+    objects: { kind: string; schema: string; name: string }[];
+}
+
+// What to script, and how to format it. The formatting fields are optional: leaving one out means
+// the generator's default, which is what the per-table script tab already shows.
+export interface ScriptRequest {
+    objects: { kind: string; schema: string; name: string }[];
+    // The tables whose ROWS were asked for, each with its own optional WHERE. Independent of
+    // objects: a table can be in one, the other, or both.
+    data: { schema: string; name: string; where?: string }[];
+    upperCaseKeywords?: boolean;
+    emitSetOptions?: boolean;
+    groupColumns?: boolean;
+}
+
+export interface ScriptResult {
+    sql: string;
+    scripted: number;
+    // Asked for, but gone from the catalog since the inventory was read.
+    missing: string[];
+    // Non-empty when the chosen tables reference each other in a cycle: no insert order satisfies
+    // them, so the script brackets the load with NOCHECK/CHECK.
+    cycleTables: string[];
+}
+
 // One row of an object list. The dashboard counters and this list share a catalog query, so a
 // badge and the page it opens always agree.
 export interface ObjectSummary {
@@ -207,6 +236,16 @@ async function fetchJson<T>(path: string, signal?: AbortSignal, init?: RequestIn
     return (await response.json()) as T;
 }
 
+// The same error reading as fetchJson, for a response whose body is a file rather than JSON.
+async function problemText(response: Response): Promise<string> {
+    try {
+        const problem = await response.json();
+        return problem.detail ?? problem.title ?? `${response.status} ${response.statusText}`;
+    } catch {
+        return `${response.status} ${response.statusText}`;
+    }
+}
+
 const seg = (value: string) => encodeURIComponent(value);
 
 export const api = {
@@ -222,6 +261,34 @@ export const api = {
     // able to run one on its own.
     query: (alias: string, db: string, sql: string, signal?: AbortSignal) =>
         post<QueryResult>(`/api/servers/${seg(alias)}/databases/${seg(db)}/query`, { sql }, signal),
+
+    // The scripting picker's inventory: names only, one round trip. The kinds come back with it so
+    // the panel does not carry its own copy of the generator's vocabulary.
+    scriptable: (alias: string, db: string) =>
+        get<ScriptableInventory>(`/api/servers/${seg(alias)}/databases/${seg(db)}/scriptable`),
+
+    // Scripts the chosen objects into one statement, sections in dependency order.
+    script: (alias: string, db: string, body: ScriptRequest, signal?: AbortSignal) =>
+        post<ScriptResult>(`/api/servers/${seg(alias)}/databases/${seg(db)}/script`, body, signal),
+
+    // The same bundle as an archive, in the generator's folder layout. The FORMAT is the server's
+    // call (7-Zip where the host has it, zip otherwise), so the headers come back with the bytes —
+    // the caller needs Content-Disposition to name the download correctly.
+    scriptFiles: async (
+        alias: string,
+        db: string,
+        body: ScriptRequest,
+    ): Promise<{ blob: Blob; headers: Headers }> => {
+        const response = await fetch(`/api/servers/${seg(alias)}/databases/${seg(db)}/script/files`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+            throw new Error(await problemText(response));
+        }
+        return { blob: await response.blob(), headers: response.headers };
+    },
 
     objects: (alias: string, db: string, kind: string) =>
         get<ObjectSummary[]>(

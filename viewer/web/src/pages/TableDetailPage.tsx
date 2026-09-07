@@ -117,7 +117,7 @@ function DataTab({
             truncated: column.truncated,
             details: (
                 <>
-                    <span className="muted">
+                    <span className="mono muted">
                         {formatType(meta.typeName, meta.maxLength, meta.precision, meta.scale)} ·{" "}
                         {meta.isNullable ? "nullable" : "not null"}
                     </span>
@@ -134,11 +134,12 @@ function DataTab({
         };
     });
 
+    // No details: the info card already prints the name and the type, and a free-form query has
+    // nothing else to say about a column — there is no catalog row behind an expression.
     const queryColumns: ResultColumn[] = (runner.data?.columns ?? []).map((column) => ({
         name: column.name,
         typeName: column.typeName,
         truncated: false,
-        details: <span className="mono muted">{column.typeName}</span>,
     }));
 
     const active = runner.ran
@@ -238,6 +239,7 @@ function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
             key: "null",
             header: "Null",
             sortValue: (c) => c.isNullable,
+            copyValue: (c) => (c.isNullable ? "null" : "not null"),
             render: (c) => <span className="muted">{c.isNullable ? "null" : "not null"}</span>,
         },
         {
@@ -245,6 +247,15 @@ function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
             header: "Key",
             // Primary key columns first, in key order.
             sortValue: (c) => c.primaryKeyOrdinal,
+            // The cell is pills; the clipboard gets the words they stand for.
+            copyValue: (c) =>
+                [
+                    c.primaryKeyOrdinal !== null ? `pk ${c.primaryKeyOrdinal}` : "",
+                    c.isIdentity ? "identity" : "",
+                    c.isComputed ? "computed" : "",
+                ]
+                    .filter(Boolean)
+                    .join(" "),
             render: (c) => (
                 <>
                     {c.primaryKeyOrdinal !== null && (
@@ -263,6 +274,7 @@ function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
             header: "Default",
             info: "Shown without the parentheses SQL Server wraps a default in. The script tab keeps the server's exact text.",
             sortValue: (c) => c.defaultDefinition,
+            copyValue: (c) => (c.defaultDefinition ? unwrapDefault(c.defaultDefinition) : ""),
             render: (c) => (
                 <span className="mono muted">
                     {c.defaultDefinition ? unwrapDefault(c.defaultDefinition) : ""}
@@ -303,6 +315,7 @@ function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
                 rowKey={(c) => String(c.columnId)}
                 initialSort={{ key: "id" }}
                 dense
+                resizable
             />
 
             <h2>
@@ -317,6 +330,7 @@ function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
                     rowKey={(i) => i.name}
                     initialSort={{ key: "kind" }}
                     dense
+                    resizable
                 />
             )}
         </>
@@ -341,6 +355,15 @@ const indexColumns: Column<IndexSummary>[] = [
         // Clustered first — there is at most one and it decides how the rows are physically
         // stored, so it is the one to read before the others.
         sortValue: (i) => `${i.typeDesc === "CLUSTERED" ? "0" : "1"}${i.isPrimaryKey ? "0" : "1"}${i.name}`,
+        // sortValue is a synthetic ordering key; nobody wants "00PK_Foo" pasted into a sheet.
+        copyValue: (i) =>
+            [
+                i.typeDesc.toLowerCase(),
+                i.isPrimaryKey ? "pk" : "",
+                i.isUniqueConstraint ? "unique constraint" : i.isUnique && !i.isPrimaryKey ? "unique" : "",
+            ]
+                .filter(Boolean)
+                .join(" "),
         render: (i) => (
             <>
                 <span className="muted">{i.typeDesc.toLowerCase()}</span>
@@ -362,6 +385,7 @@ const indexColumns: Column<IndexSummary>[] = [
         header: "Key columns",
         info: "In key order. This is the order a query has to match to use the index.",
         sortValue: (i) => i.keyColumns.map((k) => k.name).join(", "),
+        copyValue: (i) => i.keyColumns.map((k) => k.name + (k.descending ? " desc" : "")).join(", "),
         render: (i) => (
             <span className="mono">
                 {i.keyColumns.map((k) => k.name + (k.descending ? " desc" : "")).join(", ")}
@@ -373,6 +397,7 @@ const indexColumns: Column<IndexSummary>[] = [
         header: "Included",
         info: "Carried in the leaf level so a query reading only these columns never touches the table.",
         sortValue: (i) => i.includedColumns.length,
+        copyValue: (i) => i.includedColumns.join(", "),
         render: (i) => <span className="mono muted">{i.includedColumns.join(", ")}</span>,
     },
     {

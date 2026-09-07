@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Chart } from "../echarts";
 
@@ -8,6 +8,8 @@ import { formatKb, formatRows, plural } from "../format";
 import { labelColorFor, rampFor, sampleRamp, useDarkMode } from "../theme";
 import { DataTable, type Column } from "../DataTable";
 import { Icon, type IconName } from "../Icon";
+import { ScriptingPanel } from "../scripting/ScriptingPanel";
+import { EMPTY, type Selection } from "../scripting/selection";
 
 // Object type counters: display order, singular label and icon.
 // The plural form is derived from the number — so nothing reads "1 procedures".
@@ -32,6 +34,18 @@ export function DatabasePage() {
     // makes the tail unreadable. Drilling into a schema makes the scale meaningful again —
     // without distorting area (the area = magnitude contract holds).
     const [drill, setDrill] = useState<string | null>(null);
+
+    // Browsing and choosing are separate activities. Sprinkling checkboxes over the dashboard would
+    // mean that exploring a database could quietly change what is about to be scripted; a mode says
+    // which one you are in, and the treemap never answers to a selection.
+    const [mode, setMode] = useState<"overview" | "scripting">("overview");
+    // Held here rather than inside the panel, so leaving for the overview and coming back does not
+    // throw the selection away. It is dropped when the database changes, where the object
+    // identities it names stop meaning anything.
+    const [selection, setSelection] = useState<Selection>(EMPTY);
+    // Moving to another database is where the rules stop meaning anything: they name schemas and
+    // objects, and the same name in another database is a different object.
+    useEffect(() => setSelection(EMPTY), [alias, db]);
 
     const overview = useApi(() => api.database(alias, db), [alias, db]);
     const tables = useApi(() => api.tables(alias, db), [alias, db]);
@@ -99,109 +113,132 @@ export function DatabasePage() {
                 Database on <span className="mono">{alias}</span>
             </p>
 
-            {overview.error && <div className="error">{overview.error}</div>}
-            {overview.data && (
-                <div className="badges">
-                    {KINDS.filter(([key]) => overview.data!.counts[key]).map(([key, singular, icon]) => (
-                        <Link key={key} className="badge" to={`${base}/${key}`}>
-                            <Icon name={icon} size={14} />
-                            <b>{overview.data!.counts[key]}</b>{" "}
-                            {plural(overview.data!.counts[key], singular)}
-                        </Link>
-                    ))}
-                </div>
+            <div className="toolbar">
+                <button className="chip" aria-pressed={mode === "overview"} onClick={() => setMode("overview")}>
+                    overview
+                </button>
+                <button className="chip" aria-pressed={mode === "scripting"} onClick={() => setMode("scripting")}>
+                    scripting
+                </button>
+            </div>
+
+            {mode === "scripting" && (
+                <ScriptingPanel
+                    alias={alias}
+                    db={db}
+                    selection={selection}
+                    onSelection={setSelection}
+                />
             )}
 
-            {tables.error && <div className="error">{tables.error}</div>}
-            {tables.loading && <div className="state">Reading table statistics…</div>}
-
-            {!tables.loading && rows.length > 0 && (
+            {mode === "overview" && (
                 <>
-                    {dominance >= 50 && (
-                        <p
-                            style={{
-                                background: "var(--accent-soft)",
-                                border: "1px solid var(--border)",
-                                borderRadius: 8,
-                                padding: "12px 16px",
-                                margin: "8px 0 0",
-                            }}
-                        >
-                            <b>{dominance.toLocaleString("en-US", { maximumFractionDigits: 1 })}%</b>{" "}
-                            of allocated space sits in a single table:{" "}
-                            <Link
-                                className="mono"
-                                to={`${base}/tables/${encodeURIComponent(top.schema)}/${encodeURIComponent(top.name)}`}
+                {overview.error && <div className="error">{overview.error}</div>}
+                {overview.data && (
+                    <div className="badges">
+                        {KINDS.filter(([key]) => overview.data!.counts[key]).map(([key, singular, icon]) => (
+                            <Link key={key} className="badge" to={`${base}/${key}`}>
+                                <Icon name={icon} size={14} />
+                                <b>{overview.data!.counts[key]}</b>{" "}
+                                {plural(overview.data!.counts[key], singular)}
+                            </Link>
+                        ))}
+                    </div>
+                )}
+
+                {tables.error && <div className="error">{tables.error}</div>}
+                {tables.loading && <div className="state">Reading table statistics…</div>}
+
+                {!tables.loading && rows.length > 0 && (
+                    <>
+                        {dominance >= 50 && (
+                            <p
+                                style={{
+                                    background: "var(--accent-soft)",
+                                    border: "1px solid var(--border)",
+                                    borderRadius: 8,
+                                    padding: "12px 16px",
+                                    margin: "8px 0 0",
+                                }}
                             >
-                                {top.schema}.{top.name}
-                            </Link>{" "}
-                            ({formatKb(top.reservedKb)} / {formatKb(totalKb)}).
-                        </p>
-                    )}
-
-                    <h2>
-                        Disk footprint{" "}
-                        <span className="muted" style={{ fontWeight: 400 }}>
-                            — box size is allocated space, color is row count
-                        </span>
-                    </h2>
-                    <div className="toolbar">
-                        <button className="chip" aria-pressed={drill === null} onClick={() => setDrill(null)}>
-                            all schemas
-                        </button>
-                        {drill && (
-                            <span className="muted">
-                                {inScope.length} {plural(inScope.length, "table")} in{" "}
-                                <span className="mono">{drill}</span>
-                            </span>
+                                <b>{dominance.toLocaleString("en-US", { maximumFractionDigits: 1 })}%</b>{" "}
+                                of allocated space sits in a single table:{" "}
+                                <Link
+                                    className="mono"
+                                    to={`${base}/tables/${encodeURIComponent(top.schema)}/${encodeURIComponent(top.name)}`}
+                                >
+                                    {top.schema}.{top.name}
+                                </Link>{" "}
+                                ({formatKb(top.reservedKb)} / {formatKb(totalKb)}).
+                            </p>
                         )}
-                        {!drill && <span className="muted">click a schema to drill in</span>}
-                    </div>
 
-                    <div style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel)" }}>
-                        <Chart
-                            option={option}
-                            style={{ height: 460 }}
-                            opts={{ renderer: "canvas" }}
-                            onEvents={{
-                                click: ((params: { name?: string; data?: { schema?: string; table?: string } }) => {
-                                    const { schema, table } = params.data ?? {};
-                                    if (schema && table) {
-                                        navigate(`${base}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`);
-                                    } else if (params.name) {
-                                        setDrill(params.name);
-                                    }
-                                }) as never,
-                            }}
+                        <h2>
+                            Disk footprint{" "}
+                            <span className="muted" style={{ fontWeight: 400 }}>
+                                — box size is allocated space, color is row count
+                            </span>
+                        </h2>
+                        <div className="toolbar">
+                            <button className="chip" aria-pressed={drill === null} onClick={() => setDrill(null)}>
+                                all schemas
+                            </button>
+                            {drill && (
+                                <span className="muted">
+                                    {inScope.length} {plural(inScope.length, "table")} in{" "}
+                                    <span className="mono">{drill}</span>
+                                </span>
+                            )}
+                            {!drill && <span className="muted">click a schema to drill in</span>}
+                        </div>
+
+                        <div style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel)" }}>
+                            <Chart
+                                option={option}
+                                style={{ height: 460 }}
+                                opts={{ renderer: "canvas" }}
+                                onEvents={{
+                                    click: ((params: { name?: string; data?: { schema?: string; table?: string } }) => {
+                                        const { schema, table } = params.data ?? {};
+                                        if (schema && table) {
+                                            navigate(`${base}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`);
+                                        } else if (params.name) {
+                                            setDrill(params.name);
+                                        }
+                                    }) as never,
+                                }}
+                            />
+                            <ColorScale dark={dark} />
+                        </div>
+
+                        <p className="subtitle" style={{ marginTop: 12 }}>
+                            ~{formatRows(totalRows)} rows, {formatKb(totalKb)} allocated in total.
+                            {rows.length - sized.length > 0 && (
+                                <>
+                                    {" "}
+                                    {rows.length - sized.length}{" "}
+                                    {plural(rows.length - sized.length, "empty table", "empty tables")} not on the
+                                    map.
+                                </>
+                            )}{" "}
+                            Counts come from catalog views without scanning — they are approximate.
+                        </p>
+
+                        <h2>Largest tables</h2>
+                        <DataTable
+                            columns={columns}
+                            rows={rows}
+                            rowKey={(t) => `${t.schema}.${t.name}`}
+                            initialSort={{ key: "reserved", desc: true }}
+                            dense
+                            resizable
+                            limit={15}
                         />
-                        <ColorScale dark={dark} />
-                    </div>
-
-                    <p className="subtitle" style={{ marginTop: 12 }}>
-                        ~{formatRows(totalRows)} rows, {formatKb(totalKb)} allocated in total.
-                        {rows.length - sized.length > 0 && (
-                            <>
-                                {" "}
-                                {rows.length - sized.length}{" "}
-                                {plural(rows.length - sized.length, "empty table", "empty tables")} not on the
-                                map.
-                            </>
-                        )}{" "}
-                        Counts come from catalog views without scanning — they are approximate.
-                    </p>
-
-                    <h2>Largest tables</h2>
-                    <DataTable
-                        columns={columns}
-                        rows={rows}
-                        rowKey={(t) => `${t.schema}.${t.name}`}
-                        initialSort={{ key: "reserved", desc: true }}
-                        dense
-                        limit={15}
-                    />
-                    <p style={{ marginTop: 12 }}>
-                        <Link to={`${base}/tables`}>List all {rows.length} tables →</Link>
-                    </p>
+                        <p style={{ marginTop: 12 }}>
+                            <Link to={`${base}/tables`}>List all {rows.length} tables →</Link>
+                        </p>
+                    </>
+                )}
                 </>
             )}
         </>

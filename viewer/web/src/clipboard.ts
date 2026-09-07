@@ -1,5 +1,4 @@
 import { formatCellText } from "./cell";
-import type { ResultColumn } from "./ResultGrid";
 
 // Pasting into Excel.
 //
@@ -44,8 +43,16 @@ function escapeHtml(text: string): string {
         .replace(/>/g, "&gt;");
 }
 
+// Only the two things a paste needs to know about a column: what to call it, and what it holds.
+// Any grid column can describe itself this way, which is why the region is not tied to a query
+// result — the metadata tables copy through the same path.
+export interface CopyColumn {
+    name: string;
+    typeName: string;
+}
+
 export interface CopyRegion {
-    columns: ResultColumn[];
+    columns: CopyColumn[];
     // The values per row, in the same order as columns.
     rows: (string | number | boolean | null)[][];
     includeHeader: boolean;

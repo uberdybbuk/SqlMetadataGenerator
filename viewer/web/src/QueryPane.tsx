@@ -1,6 +1,7 @@
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Icon } from "./Icon";
+import { useFillHeight } from "./useFillHeight";
 
 const SqlEditor = lazy(() => import("./SqlEditor"));
 
@@ -41,34 +42,10 @@ export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPa
         edited.current = true;
         setText(next);
     }, []);
-    const frame = useRef<HTMLDivElement>(null);
     const [share, setShare] = useState(readShare);
-    const [height, setHeight] = useState<number | null>(null);
-
-    // The pane reaches the bottom of the window whatever sits above it, so its height is measured
-    // rather than assumed: the header above it differs per page and wraps on a narrow window.
-    useLayoutEffect(() => {
-        const measure = () => {
-            const el = frame.current;
-            if (!el) {
-                return;
-            }
-            const top = el.getBoundingClientRect().top + window.scrollY;
-            // 24 is the shell's bottom padding: leaving it out would make the page scroll by exactly
-            // that much, which is the empty strip this layout exists to remove.
-            setHeight(Math.max(320, window.innerHeight - top - 24));
-        };
-        measure();
-        window.addEventListener("resize", measure);
-        const observer = new ResizeObserver(measure);
-        if (document.body) {
-            observer.observe(document.body);
-        }
-        return () => {
-            window.removeEventListener("resize", measure);
-            observer.disconnect();
-        };
-    }, []);
+    // The pane reaches the bottom of the window whatever sits above it. Shared with the scripting
+    // panel, which needs exactly the same measurement.
+    const { frame, height } = useFillHeight();
 
     const startDrag = useCallback((event: React.MouseEvent) => {
         event.preventDefault();

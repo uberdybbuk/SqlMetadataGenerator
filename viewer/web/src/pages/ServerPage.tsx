@@ -54,6 +54,7 @@ export function ServerPage() {
             key: "state",
             header: "State",
             sortValue: (db) => db.state,
+            copyValue: (db) => db.state.toLowerCase(),
             render: (db) =>
                 db.state === "ONLINE" ? <span className="muted">online</span> : <span className="pill">{db.state.toLowerCase()}</span>,
         },
@@ -61,6 +62,7 @@ export function ServerPage() {
             key: "recovery",
             header: "Recovery",
             sortValue: (db) => db.recoveryModel,
+            copyValue: (db) => db.recoveryModel.toLowerCase(),
             render: (db) => <span className="muted">{db.recoveryModel.toLowerCase()}</span>,
             className: "muted",
         },
@@ -74,6 +76,7 @@ export function ServerPage() {
             key: "created",
             header: "Created",
             sortValue: (db) => db.createDate,
+            copyType: "datetime2",
             render: (db) => <span className="muted mono" style={{ fontSize: 12 }}>{formatDate(db.createDate)}</span>,
         },
     ];
@@ -105,6 +108,7 @@ export function ServerPage() {
                 rowKey={(db) => db.name}
                 initialSort={{ key: "data", desc: true }}
                 dense
+                resizable
             />
             <p className="subtitle" style={{ marginTop: 12 }}>
                 Sizes come from <code>sys.master_files</code>: allocated file size, not space in use.
