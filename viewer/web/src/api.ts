@@ -174,6 +174,9 @@ export interface TableDetail {
     owner: string | null;
     createDate: string | null;
     modifyDate: string | null;
+    // The columns an INSERT for this table can name, quoted as the scripter quotes them. Computed
+    // and rowversion columns are absent: the server assigns those, so naming them fails.
+    insertableColumns: string[];
 }
 
 export interface PreviewColumn {
@@ -331,6 +334,15 @@ export const api = {
         }
         return { blob: await response.blob(), headers: response.headers };
     },
+
+    // "Validate & count": checks the WHERE syntactically and returns how many rows match. The
+    // scripting inspector uses it to turn an estimate into a fact before anyone scripts the table.
+    countRows: (alias: string, db: string, schema: string, name: string, where: string, signal?: AbortSignal) =>
+        get<{ rows: number; where: string | null }>(
+            `/api/servers/${seg(alias)}/databases/${seg(db)}/tables/${seg(schema)}/${seg(name)}/count`
+                + (where ? `?where=${encodeURIComponent(where)}` : ""),
+            signal,
+        ),
 
     objects: (alias: string, db: string, kind: string) =>
         get<ObjectSummary[]>(

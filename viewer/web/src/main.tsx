@@ -24,7 +24,13 @@ createRoot(document.getElementById("root")!).render(
                     <Route path="_connections/new" element={<ConnectionFormPage />} />
                     <Route path="_connections/:alias/edit" element={<ConnectionFormPage />} />
                     <Route path=":alias" element={<ServerPage />} />
-                    <Route path=":alias/:db" element={<DatabasePage />} />
+                    {/* Scripting is nested rather than a sibling: a nested route keeps the
+                        parent mounted, so moving between the two modes does not throw away the
+                        script set you have built. The element is null because DatabasePage draws
+                        both modes itself; the route exists to claim the URL. */}
+                    <Route path=":alias/:db" element={<DatabasePage />}>
+                        <Route path="scripting" element={null} />
+                    </Route>
                     <Route path=":alias/:db/tables" element={<TableListPage />} />
                     <Route path=":alias/:db/tables/:schema" element={<TableListPage />} />
                     <Route path=":alias/:db/tables/:schema/:name" element={<TableDetailPage />} />

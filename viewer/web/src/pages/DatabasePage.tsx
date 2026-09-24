@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useMatch, useNavigate, useParams } from "react-router-dom";
 import { Chart } from "../echarts";
 
 import { api, type TableStats } from "../api";
@@ -38,7 +38,11 @@ export function DatabasePage() {
     // Browsing and choosing are separate activities. Sprinkling checkboxes over the dashboard would
     // mean that exploring a database could quietly change what is about to be scripted; a mode says
     // which one you are in, and the treemap never answers to a selection.
-    const [mode, setMode] = useState<"overview" | "scripting">("overview");
+    //
+    // The mode is in the URL, not in state: everything else in this app is addressable, and a
+    // half-built script set you cannot link to or reload onto is the odd one out.
+    const scripting = useMatch("/app/:alias/:db/scripting") !== null;
+    const mode = scripting ? "scripting" : "overview";
     // Held here rather than inside the panel, so leaving for the overview and coming back does not
     // throw the selection away. It is dropped when the database changes, where the object
     // identities it names stop meaning anything.
@@ -114,10 +118,14 @@ export function DatabasePage() {
             </p>
 
             <div className="toolbar">
-                <button className="chip" aria-pressed={mode === "overview"} onClick={() => setMode("overview")}>
+                <button className="chip" aria-pressed={mode === "overview"} onClick={() => navigate(base)}>
                     overview
                 </button>
-                <button className="chip" aria-pressed={mode === "scripting"} onClick={() => setMode("scripting")}>
+                <button
+                    className="chip"
+                    aria-pressed={mode === "scripting"}
+                    onClick={() => navigate(`${base}/scripting`)}
+                >
                     scripting
                 </button>
             </div>

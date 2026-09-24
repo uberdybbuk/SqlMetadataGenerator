@@ -55,64 +55,99 @@ export type CheckState = typeof NONE | typeof PARTIAL | typeof ALL;
 // SQL Server identifiers are case-insensitive in every collation this tool is pointed at, and the
 // inventory and the click come from two different reads. NUL separates the parts because it is the
 // one character an identifier cannot contain.
+const SEP = "\u0000";
+
 export function idOf(o: ScriptableObject): string {
-    return `${o.kind}\u0000${o.schema.toLowerCase()}\u0000${o.name.toLowerCase()}`;
+    return o.kind.toLowerCase() + SEP + o.schema.toLowerCase() + SEP + o.name.toLowerCase();
 }
 
-function specificity(scope: Scope): number {
-    switch (scope) {
-        case "all":
-            return 0;
-        // A kind and a schema cut the inventory two different ways and neither contains the other.
-        // Equal rank, and the seq tiebreak decides — see the note at the top.
-        case "kind":
-        case "schema":
-            return 1;
-        case "kindSchema":
-            return 2;
-        case "object":
-            return 3;
-    }
-}
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-function covers(target: Target, o: ScriptableObject): boolean {
-    switch (target.scope) {
-        case "all":
-            return true;
-        case "kind":
-            return same(target.kind, o.kind);
-        case "schema":
-            return same(target.schema, o.schema);
-        case "kindSchema":
-            return same(target.kind, o.kind) && same(target.schema, o.schema);
-        case "object":
-            return same(target.kind, o.kind) && same(target.schema, o.schema) && same(target.name, o.name);
-    }
-}
 
 // Resolves every object against the rules. Nothing is selected by default: a picker that starts
 // with the whole database ticked is one misclick away from scripting it.
+//
+// The rules are INDEXED by what they address first, so each object consults at most four of them
+// instead of scanning the list. The naive version was objects × rules, and ticking objects one at
+// a time produces one rule each — which made a large selection in a large database quadratic:
+// 500 individually ticked objects in a 10,000-object database cost 63ms per resolve, twice per
+// render. Indexed, the same case is a handful of map lookups per object.
 export function resolve(objects: ScriptableObject[], selection: Selection): Set<string> {
     const selected = new Set<string>();
+    if (selection.rules.length === 0) {
+        return selected;
+    }
 
-    for (const o of objects) {
-        let best: Rule | null = null;
-        for (const rule of selection.rules) {
-            if (!covers(rule.target, o)) {
-                continue;
+    let all: Rule | null = null;
+    const byKind = new Map<string, Rule>();
+    const bySchema = new Map<string, Rule>();
+    const byKindSchema = new Map<string, Rule>();
+    const byObject = new Map<string, Rule>();
+
+    // apply() keeps at most one rule per exact target, but rebuild() writes rules directly, so the
+    // later one still wins here rather than being assumed impossible.
+    const later = (held: Rule | undefined, rule: Rule) => (held === undefined || rule.seq > held.seq ? rule : held);
+
+    for (const rule of selection.rules) {
+        const t = rule.target;
+        switch (t.scope) {
+            case "all":
+                all = later(all ?? undefined, rule);
+                break;
+            case "kind": {
+                const key = t.kind.toLowerCase();
+                byKind.set(key, later(byKind.get(key), rule));
+                break;
             }
-            if (
-                best === null ||
-                specificity(rule.target.scope) > specificity(best.target.scope) ||
-                (specificity(rule.target.scope) === specificity(best.target.scope) && rule.seq > best.seq)
-            ) {
-                best = rule;
+            case "schema": {
+                const key = t.schema.toLowerCase();
+                bySchema.set(key, later(bySchema.get(key), rule));
+                break;
+            }
+            case "kindSchema": {
+                const key = t.kind.toLowerCase() + SEP + t.schema.toLowerCase();
+                byKindSchema.set(key, later(byKindSchema.get(key), rule));
+                break;
+            }
+            case "object": {
+                const key = idOf(t);
+                byObject.set(key, later(byObject.get(key), rule));
+                break;
             }
         }
+    }
+
+    for (const o of objects) {
+        const kind = o.kind.toLowerCase();
+        const schema = o.schema.toLowerCase();
+        const id = kind + SEP + schema + SEP + o.name.toLowerCase();
+
+        // Least specific first, each tier overwriting the one below it — which is the same
+        // most-specific-wins the scan did, without the scan.
+        let best: Rule | null = all;
+
+        // kind and schema are the one tier with two members and no containment between them, so
+        // this is where the recency tiebreak lives.
+        const k = byKind.get(kind);
+        const s = bySchema.get(schema);
+        const tier = k !== undefined && s !== undefined ? (k.seq > s.seq ? k : s) : (k ?? s);
+        if (tier !== undefined) {
+            best = tier;
+        }
+
+        const ks = byKindSchema.get(kind + SEP + schema);
+        if (ks !== undefined) {
+            best = ks;
+        }
+
+        const exact = byObject.get(id);
+        if (exact !== undefined) {
+            best = exact;
+        }
+
         if (best?.include) {
-            selected.add(idOf(o));
+            selected.add(id);
         }
     }
 

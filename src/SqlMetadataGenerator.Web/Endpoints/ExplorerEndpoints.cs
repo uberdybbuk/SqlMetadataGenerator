@@ -121,6 +121,15 @@ internal static class ExplorerEndpoints
                     CreateDate = facts?.CreateDate,
                     ModifyDate = facts?.ModifyDate,
                     Owner = facts?.Owner,
+                    // The columns an INSERT for this table can name, already quoted the way the
+                    // scripter quotes them. The scripting panel shows this list as the statement
+                    // it is about to run, so it comes from the SAME rule the scripter applies
+                    // rather than being re-derived in the browser.
+                    InsertableColumns = shape.Columns
+                        .Where(c => DataScripter.IsInsertable(c.TypeName, c.IsComputed))
+                        .OrderBy(c => c.ColumnId)
+                        .Select(c => SqlIdentifier.Quote(c.Name))
+                        .ToList(),
                 });
             }));
 
@@ -344,7 +353,13 @@ internal static class ExplorerEndpoints
                 return false;
             }
 
-            data.Add(new DataScripter.Request(d.Schema, d.Name, d.Where));
+            if (d.Top is <= 0)
+            {
+                error = $"{d.Schema}.{d.Name}: the row limit must be a positive number.";
+                return false;
+            }
+
+            data.Add(new DataScripter.Request(d.Schema, d.Name, d.Where, d.Top));
         }
 
         return true;
@@ -515,7 +530,9 @@ internal static class ExplorerEndpoints
 
     public sealed record ScriptSelection(string Kind, string? Schema, string Name);
 
-    public sealed record DataSelection(string Schema, string Name, string? Where);
+    // Top mirrors the picker's "rows to include": absent for every row, a number for a capped
+    // slice. "none" never reaches here — a table with no rows wanted is simply not in this list.
+    public sealed record DataSelection(string Schema, string Name, string? Where, int? Top);
 
     // Turns SQL errors into a 400: when the WHERE the user typed is wrong they need to see it
     // with the error message — a 500 page is no help.

@@ -88,12 +88,10 @@ public sealed class MetadataReader(string connectionString)
     // the scripter would then fail to find.
     public async Task<List<ScriptableObject>> ReadInventoryAsync(CancellationToken ct = default)
     {
+        // Schemas are deliberately absent. A schema is a DEPENDENCY of the objects inside it,
+        // not something anyone picks: ScriptBundle works out which ones the chosen objects need
+        // and creates them at the top of the script.
         const string sql = """
-            SELECT s.name, s.name
-            FROM sys.schemas s
-            WHERE s.schema_id BETWEEN 5 AND 16383
-            ORDER BY s.name;
-
             SELECT s.name, t.name
             FROM sys.types t
             JOIN sys.schemas s ON t.schema_id = s.schema_id
@@ -130,7 +128,7 @@ public sealed class MetadataReader(string connectionString)
             """;
 
         // The order the result sets are read in is the order they are written above.
-        string[] simpleKinds = ["schemas", "dataTypes", "tableTypes", "sequences", "tables"];
+        string[] simpleKinds = ["dataTypes", "tableTypes", "sequences", "tables"];
 
         var inventory = new List<ScriptableObject>();
         await using var conn = await OpenConnectionAsync(ct);

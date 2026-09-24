@@ -102,9 +102,13 @@ interface SqlEditorProps {
     // editor inserted "≈" and the shortcut never fired. Monaco resolves a keybinding by key code,
     // which is the same whatever character the layout produces, and it consumes the key.
     onExecute?: () => void;
+    // Identifies WHICH text `value` is, not what it says. When this changes the editor is showing
+    // a different thing (another table's WHERE, another object's script) and the incoming value is
+    // applied unconditionally. Without it, an editor that has focus can never be reloaded.
+    valueKey?: string;
 }
 
-export default function SqlEditor({ value, readOnly = true, onChange, onExecute }: SqlEditorProps) {
+export default function SqlEditor({ value, readOnly = true, onChange, onExecute, valueKey }: SqlEditorProps) {
     const slot = useRef<HTMLDivElement>(null);
     const instance = useRef<Instance | null>(null);
     const dark = useDarkMode();
@@ -116,6 +120,7 @@ export default function SqlEditor({ value, readOnly = true, onChange, onExecute 
     // setValue fires the same event a keystroke does; without this the editor would report our
     // own writes back as if the user had typed them.
     const writing = useRef(false);
+    const appliedKey = useRef<string | undefined>(undefined);
 
     useLayoutEffect(() => {
         const acquired = acquire();
@@ -147,16 +152,28 @@ export default function SqlEditor({ value, readOnly = true, onChange, onExecute 
 
     useEffect(() => {
         const editor = instance.current?.editor;
+        const switched = valueKey !== appliedKey.current;
+        appliedKey.current = valueKey;
         if (!editor || editor.getValue() === value) {
             return;
         }
+
+        // A controlled editor gets its own text back one render later. While someone is TYPING
+        // that echo is stale by a keystroke or two, and writing it back resets the cursor to the
+        // start — the characters after it land at the front, and the line comes out scrambled
+        // ("Id > 11000000" typed, "00000Id > 110" left behind). So a focused editor keeps what
+        // it has, unless valueKey says it is now showing something else entirely.
+        if (!switched && editor.hasTextFocus()) {
+            return;
+        }
+
         // setValue also resets the undo stack; the scroll position is sent back to the top so
         // the previous table's position does not carry into the new query.
         writing.current = true;
         editor.setValue(value);
         editor.setScrollTop(0);
         writing.current = false;
-    }, [value]);
+    }, [value, valueKey]);
 
     useEffect(() => {
         instance.current?.editor.updateOptions({ readOnly, domReadOnly: readOnly });

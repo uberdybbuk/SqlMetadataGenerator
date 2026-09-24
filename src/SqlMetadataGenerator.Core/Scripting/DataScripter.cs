@@ -36,19 +36,28 @@ public static class DataScripter
     // T-SQL allows at most 1000 rows in one VALUES clause.
     private const int RowsPerStatement = 1000;
 
-    public sealed record Request(string Schema, string Name, string? Where);
+    // Top: how many rows, when the caller asked for a capped slice rather than everything or a
+    // filtered set. Null means no cap. Where and Top can be combined — "the first 100 that match".
+    public sealed record Request(string Schema, string Name, string? Where, int? Top = null);
 
     public static async Task<string> ScriptAsync(
         string connectionString,
         TableInfo table,
         string? where,
         ScriptFormat fmt,
+        CancellationToken ct = default) =>
+        await ScriptAsync(connectionString, table, where, null, fmt, ct);
+
+    public static async Task<string> ScriptAsync(
+        string connectionString,
+        TableInfo table,
+        string? where,
+        int? top,
+        ScriptFormat fmt,
         CancellationToken ct = default)
     {
-        // Computed columns cannot be inserted, and neither can a rowversion — the server assigns
-        // both. Listing them would make every INSERT fail.
         var columns = table.Columns
-            .Where(c => !c.IsComputed && !IsRowVersion(c.TypeName))
+            .Where(c => IsInsertable(c.TypeName, c.IsComputed))
             .OrderBy(c => c.ColumnId)
             .ToList();
 
@@ -63,8 +72,18 @@ public static class DataScripter
         // The WHERE is the user's text and is checked by the same guard the preview uses before it
         // ever reaches the server. The column list and table name come from the catalog, not from
         // the request.
-        string sql = $"SELECT {columnList} FROM {qualified}"
-            + (string.IsNullOrWhiteSpace(where) ? string.Empty : $" WHERE {where}");
+        // TOP is a number this code produces, never text from the request. It is also ORDERED
+        // where the table has a primary key: an unordered TOP returns whatever the engine reaches
+        // first, so the same "top 100" would script different rows on the next run.
+        string cap = top is > 0 ? $"{fmt.Kw("TOP")} ({top.Value}) " : string.Empty;
+        string order = top is > 0 && table.PrimaryKey is { Columns.Count: > 0 }
+            ? $" {fmt.Kw("ORDER BY")} " + string.Join(
+                ", ", table.PrimaryKey.Columns.Select(c => SqlIdentifier.Quote(c.Column)))
+            : string.Empty;
+
+        string sql = $"SELECT {cap}{columnList} FROM {qualified}"
+            + (string.IsNullOrWhiteSpace(where) ? string.Empty : $" WHERE {where}")
+            + order;
 
         var rows = new List<string>();
         await using (var conn = new SqlConnection(connectionString))
@@ -95,6 +114,10 @@ public static class DataScripter
         text.Append("-- ").Append(table.Name.Schema).Append('.').Append(table.Name.Name)
             .Append(" — ").Append(rows.Count.ToString("N0", CultureInfo.InvariantCulture))
             .Append(rows.Count == 1 ? " row" : " rows");
+        if (top is > 0)
+        {
+            text.Append(" (top ").Append(top.Value.ToString("N0", CultureInfo.InvariantCulture)).Append(')');
+        }
         if (!string.IsNullOrWhiteSpace(where))
         {
             text.Append(" matching ").Append(where.Trim());
@@ -215,6 +238,15 @@ public static class DataScripter
 
         return (ordered, cycle);
     }
+
+    // Can this column appear in an INSERT's column list?
+    //
+    // Computed columns cannot, and neither can a rowversion — the server assigns both, and listing
+    // them makes every INSERT fail. Stated once and called from everywhere that needs to know,
+    // including the endpoint that shows the user which columns their export will carry: a preview
+    // that disagreed with the script would be worse than no preview.
+    public static bool IsInsertable(string typeName, bool isComputed) =>
+        !isComputed && !IsRowVersion(typeName);
 
     private static bool IsRowVersion(string typeName) =>
         typeName.Equals("timestamp", StringComparison.OrdinalIgnoreCase)
