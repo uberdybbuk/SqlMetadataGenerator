@@ -42,6 +42,17 @@ function buildCrumbs(pathname: string): Crumb[] {
         return crumbs;
     }
 
+    // The connection screens: /app/_connections/new and /app/_connections/<alias>/edit. The
+    // segment after the prefix is not a database, so the trail is spelled out separately.
+    if (alias === "_connections") {
+        const editing = db && db !== "new";
+        crumbs.push({
+            label: editing ? `Edit ${decodeURIComponent(db)}` : "New connection",
+            href: pathname,
+        });
+        return crumbs;
+    }
+
     const a = encodeURIComponent(alias);
     crumbs.push({
         label: decodeURIComponent(alias),

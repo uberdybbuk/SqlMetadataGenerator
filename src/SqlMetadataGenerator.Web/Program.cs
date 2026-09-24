@@ -11,7 +11,10 @@ internal static class Program
 
         string configured = builder.Configuration["ConnectionsFile"] ?? "connections.json";
         string? resolved = ResolveConnectionsPath(configured, builder.Environment.ContentRootPath);
-        builder.Services.AddSingleton(resolved is null ? ConnectionRegistry.Empty : ConnectionRegistry.Load(resolved));
+        // With no file found, the registry starts empty and the first connection saved from the UI
+        // creates the file in the working directory (the repository root under 'dotnet run').
+        string target = resolved ?? Path.GetFullPath(configured);
+        builder.Services.AddSingleton(ConnectionRegistry.Load(target));
 
         var app = builder.Build();
 
@@ -20,13 +23,15 @@ internal static class Program
         var log = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Connections");
         if (resolved is null)
         {
-            log.LogWarning("'{File}' not found; the connection list is empty. Copy connections.example.json.", configured);
+            log.LogWarning("'{File}' not found; the connection list is empty. Connections added in the UI will be saved to {Path}.",
+                configured, target);
         }
         else
         {
             log.LogInformation("Connections file: {Path}", resolved);
         }
 
+        app.MapConnectionEndpoints();
         app.MapExplorerEndpoints();
 
         // In production the SPA is served from wwwroot. The fallback is required: on a client-side

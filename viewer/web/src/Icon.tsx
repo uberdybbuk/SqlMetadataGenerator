@@ -1,7 +1,7 @@
 import type { SVGProps } from "react";
 
 // Icon bodies taken from Tabler Icons (MIT, https://tabler.io/icons).
-// The 14 icons in use are embedded instead of depending on the package: nothing is added to
+// The icons in use are embedded instead of depending on the package: nothing is added to
 // the bundle, and when the set changes is up to us.
 //
 // They all draw with currentColor, so an icon takes the colour of the text around it and
@@ -23,9 +23,16 @@ export type IconName =
     | "key"
     | "search"
     | "play"
-    | "stop";
+    | "stop"
+    | "plus"
+    | "edit"
+    | "trash";
 
 const PATHS: Record<IconName, string> = {
+    "plus": '<path d="M12 5l0 14" /> <path d="M5 12l14 0" />',
+    "edit": '<path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" /> <path d="M13.5 6.5l4 4" />',
+    "trash":
+        '<path d="M4 7l16 0" /> <path d="M10 11l0 6" /> <path d="M14 11l0 6" /> <path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /> <path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" />',
     "play": '<path d="M7 4v16l13 -8z" />',
     "stop": '<path d="M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z" />',
     "server":
@@ -76,6 +83,9 @@ export const ICON_LABELS: Record<IconName, string> = {
     search: "search",
     play: "run",
     stop: "cancel",
+    plus: "add",
+    edit: "edit",
+    trash: "delete",
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {

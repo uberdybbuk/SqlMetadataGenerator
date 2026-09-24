@@ -6,18 +6,36 @@ namespace SqlMetadataGenerator.Connections;
 // Reads connections.json and resolves an alias to a connection string.
 // The alias is forced to the slug rules because it is a URL segment; that avoids both the
 // encoding hassle and the fragility that ',' and '\' in real server names would cause.
+//
+// The registry is also the one writer of the file: the connection screen adds, edits and removes
+// entries through it, and every change is written to disk before it becomes visible, so what the
+// UI shows and what the next start will load never disagree.
 public sealed class ConnectionRegistry
 {
-    private readonly Dictionary<string, ConnectionEntry> _byAlias;
+    private readonly object _gate = new();
+    // Kept as a list, not only a dictionary: the file order is the order the cards are shown in,
+    // and a save must not shuffle a hand-edited file.
+    private List<ConnectionEntry> _entries;
 
-    private ConnectionRegistry(Dictionary<string, ConnectionEntry> byAlias)
+    private ConnectionRegistry(string filePath, List<ConnectionEntry> entries)
     {
-        _byAlias = byAlias;
+        FilePath = filePath;
+        _entries = entries;
     }
 
-    public IReadOnlyCollection<ConnectionEntry> All => _byAlias.Values;
+    // Where changes are written. Also where a missing file will be created on the first save.
+    public string FilePath { get; }
 
-    public static ConnectionRegistry Empty { get; } = new(new Dictionary<string, ConnectionEntry>(StringComparer.OrdinalIgnoreCase));
+    public IReadOnlyList<ConnectionEntry> All
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _entries.ToArray();
+            }
+        }
+    }
 
     // Returns an empty registry when the file is missing (the app still starts, only the connection list is empty).
     // Broken JSON or an invalid alias is never swallowed: it throws an explicit error.
@@ -25,7 +43,7 @@ public sealed class ConnectionRegistry
     {
         if (!File.Exists(path))
         {
-            return Empty;
+            return new ConnectionRegistry(path, []);
         }
 
         ConnectionFile? file;
@@ -38,7 +56,8 @@ public sealed class ConnectionRegistry
             throw new InvalidOperationException($"Could not read '{path}': {ex.Message}", ex);
         }
 
-        var byAlias = new Dictionary<string, ConnectionEntry>(StringComparer.OrdinalIgnoreCase);
+        var entries = new List<ConnectionEntry>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in file?.Connections ?? [])
         {
             if (!IsValidAlias(entry.Alias))
@@ -47,19 +66,110 @@ public sealed class ConnectionRegistry
                     $"Invalid alias '{entry.Alias}'. Use only letters, digits, '-' and '_', starting with a letter or digit.");
             }
 
-            if (!byAlias.TryAdd(entry.Alias, entry))
+            if (!seen.Add(entry.Alias))
             {
                 throw new InvalidOperationException($"Alias defined more than once: '{entry.Alias}'.");
             }
+
+            entries.Add(entry);
         }
 
-        return new ConnectionRegistry(byAlias);
+        return new ConnectionRegistry(path, entries);
     }
 
-    public ConnectionEntry? Find(string alias) => _byAlias.GetValueOrDefault(alias);
+    public ConnectionEntry? Find(string alias)
+    {
+        lock (_gate)
+        {
+            return _entries.Find(e => e.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    // Validation errors come back as InvalidOperationException, the same type Load uses, so the
+    // endpoints can turn both into a 400 with the message as it is.
+    public void Add(ConnectionEntry entry)
+    {
+        Validate(entry);
+        lock (_gate)
+        {
+            if (IndexOf(entry.Alias) >= 0)
+            {
+                throw new InvalidOperationException($"A connection named '{entry.Alias}' already exists.");
+            }
+
+            Commit([.. _entries, entry]);
+        }
+    }
+
+    // The alias is the key and cannot change here: it is a URL segment, and renaming it would
+    // break every bookmark into that server. Returns false when there is no such connection.
+    public bool Update(string alias, ConnectionEntry entry)
+    {
+        if (!entry.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The alias of an existing connection cannot be changed.");
+        }
+
+        Validate(entry);
+        lock (_gate)
+        {
+            int index = IndexOf(alias);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            var next = new List<ConnectionEntry>(_entries);
+            next[index] = entry;
+            Commit(next);
+            return true;
+        }
+    }
+
+    public bool Remove(string alias)
+    {
+        lock (_gate)
+        {
+            int index = IndexOf(alias);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            var next = new List<ConnectionEntry>(_entries);
+            next.RemoveAt(index);
+            Commit(next);
+            return true;
+        }
+    }
+
+    public static void Validate(ConnectionEntry entry)
+    {
+        if (!IsValidAlias(entry.Alias))
+        {
+            throw new InvalidOperationException(
+                "The alias may contain only letters, digits, '-' and '_', and must start with a letter or digit.");
+        }
+
+        if (string.IsNullOrWhiteSpace(entry.Server))
+        {
+            throw new InvalidOperationException("The server is required.");
+        }
+
+        if (!entry.IsIntegrated && !entry.Auth.Equals("sql", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Unknown authentication '{entry.Auth}'. Use 'sql' or 'integrated'.");
+        }
+
+        if (!entry.IsIntegrated && string.IsNullOrWhiteSpace(entry.User))
+        {
+            throw new InvalidOperationException("SQL Server authentication needs a user name.");
+        }
+    }
 
     // Builds the connection string. When database is null, server-level queries use 'master'.
-    // Under SQL auth the password comes from the environment; without it the error names the variable that was expected.
+    // Under SQL auth a stored password wins; otherwise it comes from the environment, and without
+    // it the error names the variable that was expected.
     public static string BuildConnectionString(ConnectionEntry entry, string? database)
     {
         var builder = new SqlConnectionStringBuilder
@@ -71,18 +181,19 @@ public sealed class ConnectionRegistry
             ApplicationName = "SqlMetadataGenerator.Web",
         };
 
-        if (entry.Auth.Equals("integrated", StringComparison.OrdinalIgnoreCase))
+        if (entry.IsIntegrated)
         {
             builder.IntegratedSecurity = true;
             return builder.ConnectionString;
         }
 
-        string envName = entry.ResolvedPasswordEnv;
-        string? password = Environment.GetEnvironmentVariable(envName);
+        string? password = entry.HasStoredPassword
+            ? entry.Password
+            : Environment.GetEnvironmentVariable(entry.ResolvedPasswordEnv);
         if (string.IsNullOrEmpty(password))
         {
             throw new InvalidOperationException(
-                $"No password for '{entry.Alias}'. Set the '{envName}' environment variable.");
+                $"No password for '{entry.Alias}'. Enter one on the connection screen or set the '{entry.ResolvedPasswordEnv}' environment variable.");
         }
 
         builder.UserID = entry.User ?? string.Empty;
@@ -110,4 +221,26 @@ public sealed class ConnectionRegistry
     }
 
     private static bool IsAsciiLetterOrDigit(char c) => char.IsAsciiLetterOrDigit(c);
+
+    private int IndexOf(string alias) =>
+        _entries.FindIndex(e => e.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase));
+
+    // Disk first, memory second: when the write fails the registry keeps the old list, so the UI
+    // never shows a connection that the next start would not load.
+    // The file is written beside the target and moved over it, so a crash mid-write leaves the
+    // old file intact rather than half a JSON document.
+    private void Commit(List<ConnectionEntry> next)
+    {
+        string json = JsonSerializer.Serialize(new ConnectionFile { Connections = next }, ConnectionJsonContext.Default.ConnectionFile);
+        string? dir = Path.GetDirectoryName(Path.GetFullPath(FilePath));
+        if (dir is not null)
+        {
+            Directory.CreateDirectory(dir);
+        }
+
+        string temp = FilePath + ".tmp";
+        File.WriteAllText(temp, json + Environment.NewLine);
+        File.Move(temp, FilePath, overwrite: true);
+        _entries = next;
+    }
 }

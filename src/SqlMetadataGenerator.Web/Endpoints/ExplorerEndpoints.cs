@@ -25,18 +25,7 @@ internal static class ExplorerEndpoints
 
         api.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
-        // The connection list. A password or a connection string is NEVER returned.
-        api.MapGet("/servers", (ConnectionRegistry registry) =>
-            Results.Ok(registry.All.Select(c => new
-            {
-                c.Alias,
-                c.Server,
-                c.Auth,
-                c.User,
-                c.Description,
-                passwordEnv = c.ResolvedPasswordEnv,
-                passwordSet = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(c.ResolvedPasswordEnv)),
-            })));
+        // The connection list itself lives in ConnectionEndpoints, with the screen that edits it.
 
         // Server dashboard: version plus every database, over a single connection.
         api.MapGet("/servers/{alias}", (string alias, ConnectionRegistry registry, CancellationToken ct) =>

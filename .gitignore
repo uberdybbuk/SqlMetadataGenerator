@@ -485,9 +485,10 @@ $RECYCLE.BIN/
 
 output/
 
-# Real connection definitions — they carry the server address and the user name, so they never
-# reach the repository. See connections.example.json for the template. Passwords are kept in no
-# file at all; they are read from the environment variable passwordEnv names in connections.json.
+# Real connection definitions — they carry the server address, the user name and, when saved from
+# the connection screen, the password in clear text, so they never reach the repository. See
+# connections.example.json for the template. An entry without a password reads it from the
+# environment variable passwordEnv names.
 #
 # The pattern is deliberately broad: it catches variants like connections.local.json and typos
 # like connections..json. A rule spelling out the exact name let a file whose name was one

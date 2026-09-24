@@ -6,8 +6,27 @@ export interface ConnectionSummary {
     auth: string;
     user: string | null;
     description: string | null;
+    encrypt: boolean;
+    trustServerCertificate: boolean;
     passwordEnv: string;
+    // A password is written in connections.json. The password itself never comes back.
+    passwordStored: boolean;
+    // Stored, or found in the environment variable: the connection has something to log in with.
     passwordSet: boolean;
+}
+
+// The connection form as it is sent. password: undefined keeps what is stored, "" removes it
+// (the environment variable takes over again), anything else replaces it.
+export interface ConnectionRequest {
+    alias: string;
+    server: string;
+    auth: "sql" | "integrated";
+    user?: string;
+    password?: string;
+    passwordEnv?: string;
+    encrypt: boolean;
+    trustServerCertificate: boolean;
+    description?: string;
 }
 
 export interface ServerInfo {
@@ -221,6 +240,15 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
     });
 }
 
+// PUT and DELETE answer 204 with no body; there is nothing to parse.
+async function send(method: "PUT" | "DELETE", path: string, body?: unknown): Promise<void> {
+    await fetchJson<void>(path, undefined, {
+        method,
+        headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+    });
+}
+
 async function fetchJson<T>(path: string, signal?: AbortSignal, init?: RequestInit): Promise<T> {
     const response = await fetch(path, { ...init, signal });
     if (!response.ok) {
@@ -232,6 +260,9 @@ async function fetchJson<T>(path: string, signal?: AbortSignal, init?: RequestIn
             // When the body is not JSON, settle for the status line.
         }
         throw new ApiError(detail, response.status);
+    }
+    if (response.status === 204) {
+        return undefined as T;
     }
     return (await response.json()) as T;
 }
@@ -250,6 +281,17 @@ const seg = (value: string) => encodeURIComponent(value);
 
 export const api = {
     connections: () => get<ConnectionSummary[]>("/api/servers"),
+
+    addConnection: (body: ConnectionRequest) => post<{ alias: string }>("/api/servers", body),
+
+    updateConnection: (alias: string, body: ConnectionRequest) =>
+        send("PUT", `/api/servers/${seg(alias)}`, body),
+
+    deleteConnection: (alias: string) => send("DELETE", `/api/servers/${seg(alias)}`),
+
+    // Tries the form as it stands, saved or not; answers with the server's version.
+    testConnection: (body: ConnectionRequest, signal?: AbortSignal) =>
+        post<ServerInfo>("/api/servers/test", body, signal),
 
     server: (alias: string) =>
         get<{ server: ServerInfo; databases: DatabaseInfo[] }>(`/api/servers/${seg(alias)}`),

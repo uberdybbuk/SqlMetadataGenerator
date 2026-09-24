@@ -1214,3 +1214,171 @@ tr.norows td.empty-note {
 .wclause[aria-invalid="true"] {
     border-color: var(--warn);
 }
+
+/* ---- Connection cards: edit and add ---- */
+/* The edit button is a sibling of the card link, laid over its corner. It stays faint until the
+   card is under the pointer, so a row of cards does not read as a row of pencils. */
+.card-wrap {
+    position: relative;
+}
+
+.card-wrap > .card {
+    height: 100%;
+}
+
+.card-edit {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    padding: 4px;
+    border-radius: 6px;
+    color: var(--muted);
+    opacity: 0.45;
+    transition: opacity 0.12s, background 0.12s;
+}
+
+.card-wrap:hover .card-edit,
+.card-edit:focus-visible {
+    opacity: 1;
+}
+
+.card-edit:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+a.card.card-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 88px;
+    border-style: dashed;
+    color: var(--muted);
+}
+
+a.card.card-add:hover {
+    color: var(--accent);
+}
+
+/* ---- Connection form ---- */
+.conn-form {
+    max-width: 560px;
+}
+
+.conn-form .field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin: 0 0 16px;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+}
+
+.conn-form label[for],
+.conn-form legend {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0;
+    margin-bottom: 5px;
+}
+
+.conn-form input:not([type="radio"]):not([type="checkbox"]) {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 11px;
+    color: inherit;
+    font: inherit;
+}
+
+.conn-form input.mono {
+    font-family: var(--mono);
+    font-size: 13px;
+}
+
+.conn-form input:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.conn-form input:disabled {
+    color: var(--muted);
+    background: var(--head);
+}
+
+/* The form's radios and checkboxes are read as choices, not as fine print: body size. */
+.conn-form .opt {
+    font-size: 13px;
+    color: var(--text);
+}
+
+.conn-form .radios {
+    display: flex;
+    gap: 18px;
+    margin-bottom: 4px;
+}
+
+.conn-form .hint {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.test-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 4px 0 16px;
+    font-size: 12px;
+}
+
+.test-ok {
+    color: var(--ok, #1a7f37);
+    font-family: var(--mono);
+}
+
+.test-fail {
+    color: var(--danger);
+    font-family: var(--mono);
+}
+
+.form-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.form-actions .grow {
+    flex: 1;
+    font-size: 12px;
+}
+
+/* A link drawn as a button (Cancel) must not pick up the link underline. */
+a.tool:hover {
+    text-decoration: none;
+}
+
+.tool.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.tool.primary:hover:not(:disabled) {
+    background: var(--accent);
+    filter: brightness(1.08);
+}
+
+.tool.danger {
+    color: var(--danger);
+}
+
+.tool.danger:hover:not(:disabled) {
+    border-color: var(--danger);
+    background: var(--danger-soft);
+}

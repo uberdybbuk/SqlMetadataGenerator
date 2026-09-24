@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { Layout } from "./Layout";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
+import { ConnectionFormPage } from "./pages/ConnectionFormPage";
 import { ServerPage } from "./pages/ServerPage";
 import { DatabasePage } from "./pages/DatabasePage";
 import { TableListPage } from "./pages/TableListPage";
@@ -20,6 +21,8 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/" element={<Navigate to="/app" replace />} />
                 <Route path="/app" element={<Layout />}>
                     <Route index element={<ConnectionsPage />} />
+                    <Route path="_connections/new" element={<ConnectionFormPage />} />
+                    <Route path="_connections/:alias/edit" element={<ConnectionFormPage />} />
                     <Route path=":alias" element={<ServerPage />} />
                     <Route path=":alias/:db" element={<DatabasePage />} />
                     <Route path=":alias/:db/tables" element={<TableListPage />} />
