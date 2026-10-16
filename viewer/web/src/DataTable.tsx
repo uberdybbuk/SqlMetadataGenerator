@@ -46,6 +46,14 @@ export interface Column<T> {
     // width is not measured. For columns that carry their own control, like the row
     // number — otherwise a button ends up nested inside a button.
     plain?: boolean;
+    // This column takes whatever width is left over.
+    //
+    // Frozen widths plus a full-width panel leave a surplus, and table-layout:fixed spreads a
+    // surplus PROPORTIONALLY — so on a wide monitor a column holding "Trs" grew by the same
+    // factor as one holding "CentralBankHourlyRateLogs". Marking the column that actually
+    // benefits from width gives it the whole surplus and leaves the others at the size their
+    // content asked for. At most one per table; a second would simply share with the first.
+    grow?: boolean;
 }
 
 interface DataTableProps<T> {
@@ -97,6 +105,11 @@ export function DataTable<T>({
         initialSort ? { key: initialSort.key, desc: initialSort.desc ?? false } : null,
     );
     const [widths, setWidths] = useState<Record<string, number> | null>(null);
+    const [dragged, setDragged] = useState<Set<string>>(() => new Set());
+    // The width the table has to fill. Measured, because the grow column's width is computed from
+    // it — see laidOut below.
+    const [avail, setAvail] = useState(0);
+    const wrapRef = useRef<HTMLDivElement>(null);
     const [selection, setSelection] = useState<Selection>(NO_SELECTION);
     const tableRef = useRef<HTMLTableElement>(null);
 
@@ -203,10 +216,21 @@ export function DataTable<T>({
     // The widths are measured from the browser's automatic layout and then frozen. Otherwise
     // table-layout:fixed would kick in from the start and give every column the same width.
     useLayoutEffect(() => {
-        if (!resizable || widths || !tableRef.current) {
+        const table = tableRef.current;
+        if (!resizable || widths || !table) {
             return;
         }
-        const cells = tableRef.current.querySelectorAll("thead th");
+
+        // Measured at max-content, NOT at the table's on-screen width.
+        //
+        // The base rule is `table { width: 100% }`, so an auto layout has already stretched every
+        // column to fill the panel by the time this runs — on a 2560px monitor a column holding
+        // "Trs" measured 320px, and freezing that is what made the surplus disappear before the
+        // grow column could be given it. Shrink-to-fit first, read the widths the CONTENT wants,
+        // then restore. This happens inside a layout effect, so nothing is painted in between.
+        const before = table.style.width;
+        table.style.width = "max-content";
+        const cells = table.querySelectorAll("thead th");
         const measured: Record<string, number> = {};
         cells.forEach((cell, i) => {
             const column = allColumns[i];
@@ -219,6 +243,8 @@ export function DataTable<T>({
                 );
             }
         });
+        table.style.width = before;
+
         if (Object.keys(measured).length > 0) {
             setWidths(measured);
         }
@@ -238,6 +264,9 @@ export function DataTable<T>({
     const startResize = useCallback((key: string, event: React.MouseEvent) => {
         event.preventDefault();
         event.stopPropagation();
+        // Dragging a grow column has to win over growing it, otherwise its resizer is a handle
+        // that visibly does nothing.
+        setDragged((current) => (current.has(key) ? current : new Set(current).add(key)));
         const startX = event.clientX;
         const th = (event.currentTarget as HTMLElement).closest("th");
         const startWidth = th?.getBoundingClientRect().width ?? MIN_WIDTH;
@@ -268,22 +297,58 @@ export function DataTable<T>({
         );
     }
 
+    useLayoutEffect(() => {
+        const el = wrapRef.current;
+        if (!el) {
+            return;
+        }
+        const measure = () => setAvail(el.clientWidth);
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, []);
+
     const fixed = resizable && widths !== null;
     // Under a fixed layout the table width is given EXPLICITLY. Left as "max-content" the
     // browser grows to fit the cell content and overrides the colgroup widths; left as
     // "auto" it stretches to the container. Both inflated the columns.
     const totalWidth = fixed ? Object.values(widths!).reduce((sum, w) => sum + w, 0) : undefined;
 
+    // Every column gets an explicit width that together add up to exactly the space available, so
+    // there is NO surplus for the browser to distribute.
+    //
+    // The obvious approach — leave the grow column's width unset and let a fixed layout hand it
+    // the remainder — does not work: Chrome spreads a surplus across every column, so a 189px
+    // Schema column still inflated to 320px on a wide monitor. The surplus has to be given away
+    // here rather than left for the layout to share out.
+    const growKey = allColumns.find((c) => c.grow && !dragged.has(c.key))?.key;
+    const laidOut = useMemo(() => {
+        if (!fixed || !widths) {
+            return null;
+        }
+        const surplus = avail - (totalWidth ?? 0);
+        if (!growKey || surplus <= 0) {
+            return widths;
+        }
+        return { ...widths, [growKey]: widths[growKey] + surplus };
+    }, [fixed, widths, avail, totalWidth, growKey]);
+
+    // Only a table with a grow column is stretched to fill its panel. Without one — the result
+    // grid — the table stays at its content width, because there a short result spreading itself
+    // across the window is worse than honest empty space beside it.
+    const tableWidth = fixed ? (growKey ? Math.max(totalWidth ?? 0, avail) : totalWidth) : undefined;
+
     return (
-        <div className={dense ? "table-wrap dense" : "table-wrap"}>
+        <div className={dense ? "table-wrap dense" : "table-wrap"} ref={wrapRef}>
             <table
                 ref={tableRef}
-                style={fixed ? { tableLayout: "fixed", width: totalWidth } : undefined}
+                style={fixed ? { tableLayout: "fixed", width: tableWidth } : undefined}
             >
                 {fixed && (
                     <colgroup>
                         {allColumns.map((c) => (
-                            <col key={c.key} style={c.plain ? undefined : { width: widths![c.key] }} />
+                            <col key={c.key} style={c.plain ? undefined : { width: laidOut![c.key] }} />
                         ))}
                     </colgroup>
                 )}

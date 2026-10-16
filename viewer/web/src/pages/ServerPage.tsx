@@ -31,6 +31,7 @@ export function ServerPage() {
         {
             key: "name",
             header: "Database",
+            grow: true,
             sortValue: (db) => db.name,
             render: (db) =>
                 db.isBrowsable ? (

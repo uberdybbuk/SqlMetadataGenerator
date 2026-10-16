@@ -47,6 +47,7 @@ export function TableListPage() {
         {
             key: "name",
             header: "Table",
+            grow: true,
             sortValue: (t) => t.name,
             render: (t) => (
                 <Link

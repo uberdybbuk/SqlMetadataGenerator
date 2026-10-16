@@ -62,6 +62,7 @@ export function ObjectListPage() {
         {
             key: "name",
             header: known.title.replace(/s$/, ""),
+            grow: true,
             sortValue: (o) => o.name,
             render: (o) => (
                 <Link
@@ -159,6 +160,7 @@ export function SchemaListPage() {
         {
             key: "name",
             header: "Schema",
+            grow: true,
             sortValue: (s) => s.name,
             render: (s) => (
                 <Link className="mono" to={`${base}/tables/${encodeURIComponent(s.name)}`}>

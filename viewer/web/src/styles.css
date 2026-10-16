@@ -443,12 +443,12 @@ h1.with-icon {
     font-size: 12px;
 }
 
-/* A grid fills the panel it sits in. The measured widths are capped per column, so on a wide
-   window they can add up to less than the container — and a blank strip inside the border reads
-   as a layout bug rather than as breathing room. Under table-layout:fixed the excess is shared
-   out proportionally, so no single column swallows it. */
+/* Filling the panel is DataTable's job now, not the layout engine's: it gives the surplus to the
+   one column marked `grow` and writes every width explicitly. Leaving min-width here as well let
+   the engine find a surplus of its own and spread it over every column, which is the thing the
+   grow column exists to prevent. */
 .table-wrap table {
-    min-width: 100%;
+    min-width: 0;
 }
 
 .table-wrap.dense th,

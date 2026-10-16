@@ -93,6 +93,7 @@ export function DatabasePage() {
         {
             key: "name",
             header: "Table",
+            grow: true,
             sortValue: (t) => t.name,
             render: (t) => (
                 <Link
