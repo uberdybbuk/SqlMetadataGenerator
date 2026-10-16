@@ -61,9 +61,11 @@ a:hover {
     text-decoration: underline;
 }
 
+/* Full width. This is a database tool, not an article: a result grid with thirty columns and a
+   scripting shuttle both want every pixel the window has, and a centred 1400px column left two
+   empty margins on a wide monitor while the grid scrolled sideways inside them.
+   Individual things that READ badly when stretched cap themselves — see .conn-form. */
 .shell {
-    max-width: 1400px;
-    margin: 0 auto;
     /* 24px at the foot, not 64: the workbench measures the space it has left and every pixel
        reserved down here is a pixel the result grid does not get. */
     padding: 0 24px 24px;

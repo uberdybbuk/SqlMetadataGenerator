@@ -11,6 +11,11 @@ import { Icon, type IconName } from "../Icon";
 import { ScriptingPanel } from "../scripting/ScriptingPanel";
 import { EMPTY, type Selection } from "../scripting/selection";
 
+// How many rows the "Largest tables" block shows before the link to the full list. Enough that a
+// mid-sized database is covered here and the link is for the long tail, rather than the block
+// being a teaser you always have to click past.
+const LARGEST_TABLES = 50;
+
 // Object type counters: display order, singular label and icon.
 // The plural form is derived from the number — so nothing reads "1 procedures".
 const KINDS: [key: string, singular: string, icon: IconName][] = [
@@ -232,7 +237,9 @@ export function DatabasePage() {
                             Counts come from catalog views without scanning — they are approximate.
                         </p>
 
-                        <h2>Largest tables</h2>
+                        <h2>
+                            {rows.length > LARGEST_TABLES ? `Largest ${LARGEST_TABLES} tables` : "Tables"}
+                        </h2>
                         <DataTable
                             columns={columns}
                             rows={rows}
@@ -240,11 +247,17 @@ export function DatabasePage() {
                             initialSort={{ key: "reserved", desc: true }}
                             dense
                             resizable
-                            limit={15}
+                            limit={LARGEST_TABLES}
                         />
-                        <p style={{ marginTop: 12 }}>
-                            <Link to={`${base}/tables`}>List all {rows.length} tables →</Link>
-                        </p>
+                        {/* Only when the block is actually cut short. Offering to "list all 46"
+                            under a table already showing all 46 is an invitation to go nowhere. */}
+                        {rows.length > LARGEST_TABLES && (
+                            <p style={{ marginTop: 12 }}>
+                                <Link to={`${base}/tables`}>
+                                    List all {rows.length} tables →
+                                </Link>
+                            </p>
+                        )}
                     </>
                 )}
                 </>
