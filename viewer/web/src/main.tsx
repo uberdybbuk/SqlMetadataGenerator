@@ -30,6 +30,7 @@ createRoot(document.getElementById("root")!).render(
                         both modes itself; the route exists to claim the URL. */}
                     <Route path=":alias/:db" element={<DatabasePage />}>
                         <Route path="scripting" element={null} />
+                        <Route path="diagram" element={null} />
                     </Route>
                     <Route path=":alias/:db/tables" element={<TableListPage />} />
                     <Route path=":alias/:db/tables/:schema" element={<TableListPage />} />

@@ -62,6 +62,52 @@ export interface SchemaInfo {
     owner: string;
 }
 
+// The relationship graph. Links are INFERRED from column names, never from foreign keys, and
+// every one carries how good a guess it is — see RelationshipInference. The whole graph arrives
+// in one call so seeding, expanding and the confidence toggles never wait on the server.
+export interface GraphColumn {
+    name: string;
+    typeName: string;
+    isNullable: boolean;
+    isPrimaryKey: boolean;
+}
+
+export interface GraphTable {
+    schema: string;
+    name: string;
+    columns: GraphColumn[];
+}
+
+export type LinkConfidence = "high" | "medium" | "low";
+
+export interface GraphLink {
+    fromSchema: string;
+    fromName: string;
+    fromColumn: string;
+    toSchema: string;
+    toName: string;
+    toColumn: string;
+    confidence: LinkConfidence;
+    // Which rule produced it, so an edge can explain itself rather than just appearing.
+    rule: string;
+    self: boolean;
+}
+
+// A column that looks like a reference and resolves to nothing. "why" separates a missing table
+// from a type that cannot be joined — different problems with different fixes.
+export interface GraphDangling {
+    schema: string;
+    name: string;
+    column: string;
+    why: "nosuchtable" | "ambiguous" | "typemismatch";
+}
+
+export interface DatabaseGraph {
+    tables: GraphTable[];
+    links: GraphLink[];
+    dangling: GraphDangling[];
+}
+
 // The scripting picker's inventory. Kinds arrive with the objects so the panel's section order
 // and its section titles come from the generator rather than from a second list kept in sync here.
 export interface ScriptableInventory {
@@ -309,6 +355,9 @@ export const api = {
 
     // The scripting picker's inventory: names only, one round trip. The kinds come back with it so
     // the panel does not carry its own copy of the generator's vocabulary.
+    graph: (alias: string, db: string) =>
+        get<DatabaseGraph>(`/api/servers/${seg(alias)}/databases/${seg(db)}/graph`),
+
     scriptable: (alias: string, db: string) =>
         get<ScriptableInventory>(`/api/servers/${seg(alias)}/databases/${seg(db)}/scriptable`),
 

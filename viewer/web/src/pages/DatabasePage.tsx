@@ -9,6 +9,7 @@ import { labelColorFor, rampFor, sampleRamp, useDarkMode } from "../theme";
 import { DataTable, type Column } from "../DataTable";
 import { Icon, type IconName } from "../Icon";
 import { ScriptingPanel } from "../scripting/ScriptingPanel";
+import { DiagramPanel } from "../diagram/DiagramPanel";
 import { EMPTY, type Selection } from "../scripting/selection";
 
 // How many rows the "Largest tables" block shows before the link to the full list. Enough that a
@@ -47,7 +48,8 @@ export function DatabasePage() {
     // The mode is in the URL, not in state: everything else in this app is addressable, and a
     // half-built script set you cannot link to or reload onto is the odd one out.
     const scripting = useMatch("/app/:alias/:db/scripting") !== null;
-    const mode = scripting ? "scripting" : "overview";
+    const diagram = useMatch("/app/:alias/:db/diagram") !== null;
+    const mode = scripting ? "scripting" : diagram ? "diagram" : "overview";
     // Held here rather than inside the panel, so leaving for the overview and coming back does not
     // throw the selection away. It is dropped when the database changes, where the object
     // identities it names stop meaning anything.
@@ -134,7 +136,16 @@ export function DatabasePage() {
                 >
                     scripting
                 </button>
+                <button
+                    className="chip"
+                    aria-pressed={mode === "diagram"}
+                    onClick={() => navigate(`${base}/diagram`)}
+                >
+                    diagram
+                </button>
             </div>
+
+            {mode === "diagram" && <DiagramPanel alias={alias} db={db} />}
 
             {mode === "scripting" && (
                 <ScriptingPanel

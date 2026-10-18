@@ -1635,3 +1635,238 @@ a.tool:hover {
     border-color: var(--danger);
     background: var(--danger-soft);
 }
+
+/* ---- Relationship diagram ---- */
+.diagram {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+    min-height: 0;
+}
+
+.dgsplit {
+    display: flex;
+    gap: 10px;
+    flex: 1 1 0;
+    min-height: 0;
+}
+
+/* The seed list is a sidebar, not half the screen: once you have started from a table the
+   canvas is where the work happens. Its width is dragged, because schema-qualified names run
+   long enough that any fixed figure truncates somebody's. */
+.dgsplit .spane.source {
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+.dgresizer {
+    flex: 0 0 7px;
+    margin: 0 -3px;
+    cursor: col-resize;
+    user-select: none;
+    position: relative;
+    z-index: 1;
+}
+
+.dgresizer::after {
+    content: "";
+    position: absolute;
+    inset: 0 3px;
+    border-radius: 1px;
+}
+
+.dgresizer:hover::after,
+body.resizing .dgresizer::after {
+    background: var(--accent);
+    opacity: 0.35;
+}
+
+.dgcanvas {
+    flex: 1 1 0;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+    cursor: grab;
+    position: relative;
+}
+
+.dgcanvas:active {
+    cursor: grabbing;
+}
+
+/* ---- a table box ---- */
+.dgfill {
+    fill: var(--panel);
+}
+
+/* Stroke only, and painted after the header so nothing covers it. */
+.dgframe {
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 1;
+}
+
+.dghead {
+    fill: var(--head);
+}
+
+.dgbox.hot .dgframe {
+    stroke: var(--accent);
+    stroke-width: 1.5;
+}
+
+.dgtitle {
+    font: 600 11.5px var(--mono);
+    fill: var(--text);
+}
+
+.dgcol {
+    font: 11px var(--mono);
+    fill: var(--text);
+}
+
+/* The key is marked, not coloured: colour is already carrying confidence on the edges. */
+.dgcol.pk {
+    font-weight: 600;
+}
+
+.dgtype {
+    font: 10.5px var(--mono);
+    fill: var(--muted);
+}
+
+/* Quiet: it is a fold, not a call to action, and it sits at the bottom of every open box. */
+.dgmore {
+    /* Longhand, not the `font` shorthand: there is no --sans token, and `font: 10px inherit` is
+       invalid as a shorthand, so the whole declaration was dropped and this rendered at 14px.
+       SVG text inherits its family from the document anyway. */
+    font-size: 10px;
+    fill: var(--muted);
+    cursor: pointer;
+}
+
+.dgmore:hover {
+    fill: var(--accent);
+}
+
+/* The one control on a box: how many related tables are not on the canvas yet. Expanding from
+   here is the whole point — the alternative is knowing in advance which tables you want. */
+.dgexpand rect {
+    fill: var(--accent);
+}
+
+.dgexpand text {
+    font: 600 10px var(--mono);
+    fill: #fff;
+    text-anchor: middle;
+}
+
+.dgexpand {
+    cursor: pointer;
+}
+
+/* ---- edges ---- */
+/* Confidence is drawn, not written: every one of these is a guess from a column name, and a
+   diagram that renders a guess exactly like a fact is lying. */
+.dgedge {
+    fill: none;
+    stroke: var(--muted);
+    stroke-width: 1.4;
+}
+
+.dgedge.high {
+    stroke: var(--accent);
+}
+
+.dgedge.medium {
+    stroke: var(--muted);
+    stroke-dasharray: 5 3;
+}
+
+.dgedge.low {
+    stroke: var(--border);
+    stroke-dasharray: 2 4;
+}
+
+.dgarrowhead {
+    fill: var(--muted);
+}
+
+.dgfoot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    font-size: 12px;
+    flex: 0 0 auto;
+}
+
+/* A column's part in the picture: one that points at another table, and one that is pointed at.
+   The arrow and the colour say which, so a box answers "related through what" on its own. */
+.dgcol.out {
+    fill: var(--accent);
+}
+
+.dgcol.into {
+    fill: var(--ok, #1a7f37);
+}
+
+/* Both at once — a key that is also a reference out — keeps the outgoing colour, because that
+   is the one the arrow leaving the box belongs to. */
+.dgcol.out.into {
+    fill: var(--accent);
+}
+
+.dgbox.picked .dgframe {
+    stroke: var(--accent);
+    stroke-width: 2;
+}
+
+/* Open and remove float just above the box, under the pointer. Sized to be read: inside the
+   26px header they overlapped the table's own name and sat at 10px on a grey chip. */
+.dgtoolsbg {
+    fill: var(--panel);
+    stroke: var(--border);
+}
+
+/* Scoped to the BUTTONS. As `.dgtools rect` it also matched the bridge below, whose
+   fill="transparent" attribute a stylesheet rule outranks — so the bridge was painted opaque
+   and wiped out the box's top border wherever the bar sat. */
+.dgtools > g rect {
+    fill: var(--panel);
+}
+
+/* Catches the pointer, paints nothing. fill:none alone would not be hit-tested. */
+.dgbridge {
+    fill: none;
+    pointer-events: all;
+}
+
+.dgtools text {
+    font-size: 11px;
+    font-weight: 500;
+    fill: var(--text);
+    text-anchor: middle;
+}
+
+.dgtools > g {
+    cursor: pointer;
+}
+
+.dgtools > g:hover rect {
+    fill: var(--accent);
+}
+
+.dgtools > g:hover text {
+    fill: #fff;
+}
+
+.dgtools > g.drop:hover rect {
+    fill: var(--warn);
+}

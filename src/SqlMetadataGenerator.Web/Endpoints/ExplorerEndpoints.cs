@@ -1,5 +1,6 @@
 using Microsoft.Data.SqlClient;
 using SqlMetadataGenerator.Connections;
+using SqlMetadataGenerator.Diagram;
 using SqlMetadataGenerator.Exploration;
 using SqlMetadataGenerator.Model;
 using SqlMetadataGenerator.Scripting;
@@ -248,6 +249,61 @@ internal static class ExplorerEndpoints
 
                 long count = await explorer.CountAsync(shape.Schema, shape.Name, where, ct: ct);
                 return Results.Ok(new { rows = count, where });
+            }));
+
+        // The relationship graph: every table, and the links inferred between them from COLUMN
+        // NAMES. Foreign keys are not used — see RelationshipInference for why (the schema this
+        // was built against declares 51 primary keys across 233 tables and almost no foreign
+        // keys, so a constraint-driven diagram would be empty).
+        //
+        // The WHOLE graph is returned in one call, every candidate tagged with its confidence.
+        // The picker's "loose matching" and "dangling" toggles are then filtering on the client,
+        // which costs nothing — and seeding from one table and expanding outward never waits on
+        // the server at all.
+        api.MapGet("/servers/{alias}/databases/{db}/graph",
+            (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
+            WithDatabase(alias, db, registry, async (_, connectionString) =>
+            {
+                var reader = new MetadataReader(connectionString);
+                var tables = await reader.ReadTablesAsync(null, ct);
+                var graph = RelationshipInference.Infer(tables);
+
+                return Results.Ok(new
+                {
+                    Tables = tables.Select(t => new
+                    {
+                        t.Name.Schema,
+                        t.Name.Name,
+                        Columns = t.Columns.OrderBy(c => c.ColumnId).Select(c => new
+                        {
+                            c.Name,
+                            c.TypeName,
+                            c.IsNullable,
+                            IsPrimaryKey = t.PrimaryKey is not null
+                                && t.PrimaryKey.Columns.Any(k =>
+                                    k.Column.Equals(c.Name, StringComparison.OrdinalIgnoreCase)),
+                        }),
+                    }),
+                    Links = graph.Links.Select(l => new
+                    {
+                        FromSchema = l.From.Schema,
+                        FromName = l.From.Name,
+                        l.FromColumn,
+                        ToSchema = l.To.Schema,
+                        ToName = l.To.Name,
+                        l.ToColumn,
+                        Confidence = l.Confidence.ToString().ToLowerInvariant(),
+                        l.Rule,
+                        Self = l.SelfReference,
+                    }),
+                    Dangling = graph.Dangling.Select(d => new
+                    {
+                        d.Table.Schema,
+                        d.Table.Name,
+                        d.Column,
+                        Why = d.Why.ToString().ToLowerInvariant(),
+                    }),
+                });
             }));
 
         // The scripting picker's inventory: the name of every object the generator can script.
