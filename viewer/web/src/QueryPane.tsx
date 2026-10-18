@@ -47,15 +47,25 @@ export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPa
     // panel, which needs exactly the same measurement.
     const { frame, height } = useFillHeight();
 
-    const startDrag = useCallback((event: React.MouseEvent) => {
+    // The editor pane, measured during a drag. The share sizes THIS element, and it does not
+    // start at the top of the frame — the toolbar is above it. Measuring from the frame instead
+    // put the handle a toolbar's height below the cursor (40px here) the moment the drag began.
+    const editorPane = useRef<HTMLDivElement>(null);
+
+    const startDrag = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
         event.preventDefault();
         const el = frame.current;
-        if (!el) {
+        const pane = editorPane.current;
+        if (!el || !pane) {
             return;
         }
         const box = el.getBoundingClientRect();
+        const paneTop = pane.getBoundingClientRect().top;
+        // Where within the handle it was grabbed, so the handle stays under the cursor instead of
+        // jumping to centre itself on it.
+        const grip = event.clientY - event.currentTarget.getBoundingClientRect().top;
         const onMove = (e: MouseEvent) => {
-            const pct = ((e.clientY - box.top) / box.height) * 100;
+            const pct = ((e.clientY - grip - paneTop) / box.height) * 100;
             setShare(Math.min(MAX_SHARE, Math.max(MIN_SHARE, pct)));
         };
         const onUp = () => {
@@ -130,7 +140,7 @@ export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPa
                     </>
                 )}
             </div>
-            <div className="pane" style={{ height: `${share}%` }}>
+            <div className="pane" ref={editorPane} style={{ height: `${share}%` }}>
                 <Suspense fallback={<div className="editor-placeholder" />}>
                     <SqlEditor
                         value={text}
