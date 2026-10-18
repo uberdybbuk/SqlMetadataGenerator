@@ -654,6 +654,15 @@ th .colinfo .warn-line {
     border-bottom: 1px solid var(--head-line);
 }
 
+/* The transpose toggle rides in the tab bar, so it is sized to sit on that line rather than
+   at the height of a toolbar button. */
+.result-tabs .tool {
+    align-self: center;
+    margin-right: 4px;
+    padding: 2px 10px;
+    font-size: 11px;
+}
+
 .tab {
     background: none;
     border: none;

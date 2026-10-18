@@ -32,13 +32,69 @@ interface GridRow {
     values: (string | number | boolean | null)[];
 }
 
+// One field of the result, read down the page instead of across it.
+interface FieldRow {
+    column: ResultColumn;
+    index: number;
+    values: (string | number | boolean | null)[];
+}
+
+// How many result rows become columns before transposing stops being useful. Past this you are
+// scrolling sideways through a wall, which is the problem transposing was meant to solve; the
+// status bar says how many are shown so the cut is never silent.
+const MAX_TRANSPOSED = 50;
+
 export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: ResultGridProps) {
     const [tab, setTab] = useState<"results" | "messages">("results");
+    // Transposed: the column names run down the first column and each result row becomes a
+    // column of its own. For a wide row — a log table with twenty fields — that is the
+    // difference between reading a record and scrolling sideways hunting for it.
+    const [transposed, setTransposed] = useState(false);
 
     const gridRows: GridRow[] = useMemo(
         () => rows.map((values, index) => ({ index, values })),
         [rows],
     );
+
+    const shownRows = Math.min(rows.length, MAX_TRANSPOSED);
+
+    const fieldRows: FieldRow[] = useMemo(
+        () => columns.map((column, i) => ({ column, index: i, values: rows.map((row) => row[i]) })),
+        [columns, rows],
+    );
+
+    // Transposed, a single column holds an int, a date and a string at once, so everything the
+    // grid normally decides per column — alignment, how a value is formatted, whether it reads
+    // as mono — is decided per ROW here instead, from that row's own type.
+    const transposedColumns: Column<FieldRow>[] = useMemo(() => {
+        const head: Column<FieldRow> = {
+            key: "__field",
+            header: "Column",
+            className: "mono",
+            sortValue: (row) => row.column.name,
+            render: (row) => (
+                <>
+                    {row.column.name}
+                    <span className="muted"> {row.column.typeName}</span>
+                </>
+            ),
+        };
+
+        const perRow: Column<FieldRow>[] = Array.from({ length: shownRows }, (_, r) => ({
+            key: `row-${r}`,
+            header: String(r + 1),
+            render: (field) => formatCell(field.values[r], field.column.typeName),
+            cellClassName: (field) =>
+                [
+                    field.values[r] === null ? "isnull" : null,
+                    isNumericType(field.column.typeName) ? "num" : "mono",
+                ]
+                    .filter(Boolean)
+                    .join(" ") || undefined,
+        }));
+
+        return [head, ...perRow];
+    }, [shownRows]);
 
     const dataColumns: Column<GridRow>[] = columns.map((column, i) => ({
         key: `${i}-${column.name}`,
@@ -76,19 +132,40 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
                 <button className="tab" aria-selected={tab === "messages"} onClick={() => setTab("messages")}>
                     Messages{messages.length > 0 && <span className="count">{messages.length}</span>}
                 </button>
+                <span className="grow" />
+                <button
+                    className="tool"
+                    aria-pressed={transposed}
+                    onClick={() => setTransposed((on) => !on)}
+                    disabled={tab !== "results" || rows.length === 0}
+                    title="Show the column names down the page and each row as a column"
+                >
+                    Transpose
+                </button>
             </div>
 
             {tab === "results" ? (
-                // The headers show even when no rows came back: which columns were queried is
-                // information independent of the result being empty.
-                <DataTable
-                    columns={dataColumns}
-                    rows={gridRows}
-                    rowKey={(row) => String(row.index)}
-                    dense
-                    resizable
-                    emptyNote="The query returned no rows."
-                />
+                transposed ? (
+                    <DataTable
+                        columns={transposedColumns}
+                        rows={fieldRows}
+                        rowKey={(row) => String(row.index)}
+                        dense
+                        resizable
+                        emptyNote="The query returned no rows."
+                    />
+                ) : (
+                    // The headers show even when no rows came back: which columns were queried is
+                    // information independent of the result being empty.
+                    <DataTable
+                        columns={dataColumns}
+                        rows={gridRows}
+                        rowKey={(row) => String(row.index)}
+                        dense
+                        resizable
+                        emptyNote="The query returned no rows."
+                    />
+                )
             ) : (
                 messages.length === 0 ? (
                     <div className="empty-note">The server returned no messages.</div>
@@ -109,6 +186,9 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
                 <span>
                     {columns.length} {columns.length === 1 ? "column" : "columns"}
                 </span>
+                {transposed && shownRows < rows.length && (
+                    <span className="muted">transposed: first {shownRows} rows</span>
+                )}
                 <span className="grow" />
                 <span title="Time from sending the command to reading the last row">{elapsedMs} ms</span>
             </div>
