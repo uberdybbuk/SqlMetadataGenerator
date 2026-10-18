@@ -586,19 +586,19 @@ export function DiagramPanel({ alias, db }: DiagramPanelProps) {
                                 }
 
                                 // dagre routes between BOXES; the ends are then moved onto the
-                                // rows that carry the reference, keeping its middle so the line
-                                // still goes around whatever is in the way. One path per column
-                                // pair, so two tables joined on two columns draw two lines.
-                                const middle = points.slice(1, -1);
+                                // rows that carry the reference. Its middle is kept only when the
+                                // edge skips a rank — then there is a box in the way to go
+                                // around. Between neighbouring ranks dagre's lone midpoint sits at
+                                // the boxes' centre height, and keeping it pulled every line down
+                                // into a V. One path per column pair, so two tables joined on two
+                                // columns draw two lines.
+                                const middle = points.length > 3 ? points.slice(1, -1) : [];
                                 return members.map((m) => {
                                     const sx = from.x + from.width;
                                     const sy = anchorY(keyOf(m.fromSchema, m.fromName), m.fromColumn);
                                     const tx = to.x;
                                     const ty = anchorY(keyOf(m.toSchema, m.toName), m.toColumn);
-                                    const d =
-                                        `M${sx},${sy} ` +
-                                        middle.map((pt) => `L${pt.x},${pt.y}`).join(" ") +
-                                        ` L${tx},${ty}`;
+                                    const d = curveThrough([{ x: sx, y: sy }, ...middle, { x: tx, y: ty }]);
                                     return (
                                         <path
                                             key={`${id}|${m.fromColumn}|${m.toColumn}`}
@@ -804,4 +804,18 @@ export function DiagramPanel({ alias, db }: DiagramPanelProps) {
 function clip(text: string, available: number): string {
     const max = Math.floor(available / TITLE_CHAR);
     return text.length <= max ? text : text.slice(0, Math.max(1, max - 1)) + "…";
+}
+
+// A path through the points that leaves and enters each one horizontally — the diagram runs left
+// to right, so a line meets a box's side square on and bends smoothly instead of kinking. Two
+// points at the same height come out as a straight line.
+function curveThrough(points: { x: number; y: number }[]): string {
+    let d = `M${points[0].x},${points[0].y}`;
+    for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1];
+        const b = points[i];
+        const mx = (a.x + b.x) / 2;
+        d += ` C${mx},${a.y} ${mx},${b.y} ${b.x},${b.y}`;
+    }
+    return d;
 }
