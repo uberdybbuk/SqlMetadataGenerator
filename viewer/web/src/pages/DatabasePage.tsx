@@ -59,6 +59,10 @@ export function DatabasePage() {
     useEffect(() => setSelection(EMPTY), [alias, db]);
 
     const overview = useApi(() => api.database(alias, db), [alias, db]);
+    // Which engine this alias is. Script generation is SQL Server only, so the tab says so
+    // rather than opening a picker whose Generate button would come back 501.
+    const connections = useApi(() => api.connections(), []);
+    const scriptable = connections.data?.find((c) => c.alias === alias)?.provider !== "postgres";
     const tables = useApi(() => api.tables(alias, db), [alias, db]);
 
     const base = `/app/${encodeURIComponent(alias)}/${encodeURIComponent(db)}`;
@@ -71,7 +75,11 @@ export function DatabasePage() {
     const option = useMemo(() => buildTreemap(inScope, dark, drill !== null), [inScope, dark, drill]);
 
     const totalKb = rows.reduce((sum, t) => sum + t.reservedKb, 0);
-    const totalRows = rows.reduce((sum, t) => sum + t.rowCount, 0);
+    const totalRows = rows.reduce((sum, t) => sum + (t.rowCount ?? 0), 0);
+    // PostgreSQL keeps no estimate for a table that has never been analysed, and a brand new or
+    // freshly restored database has none for any of them. Everything the colour and the totals
+    // say about rows is then a statement about nothing, so it is left unsaid.
+    const anyRows = rows.some((t) => t.rowCount !== null);
     const ranked = [...rows].sort((a, b) => b.reservedKb - a.reservedKb);
 
     // When one table covers more than half the area, that is the real finding, and a sentence
@@ -107,7 +115,7 @@ export function DatabasePage() {
                 </Link>
             ),
         },
-        { key: "rows", header: "Rows", numeric: true, sortValue: (t) => t.rowCount, render: (t) => formatRows(t.rowCount) },
+        { key: "rows", header: "Rows", numeric: true, sortValue: (t) => t.rowCount ?? -1, render: (t) => formatRows(t.rowCount) },
         { key: "reserved", header: "Allocated", numeric: true, sortValue: (t) => t.reservedKb, render: (t) => formatKb(t.reservedKb) },
         {
             key: "used",
@@ -132,6 +140,8 @@ export function DatabasePage() {
                 <button
                     className="chip"
                     aria-pressed={mode === "scripting"}
+                    disabled={!scriptable}
+                    title={scriptable ? undefined : "Script generation is SQL Server only."}
                     onClick={() => navigate(`${base}/scripting`)}
                 >
                     scripting
@@ -147,7 +157,14 @@ export function DatabasePage() {
 
             {mode === "diagram" && <DiagramPanel alias={alias} db={db} />}
 
-            {mode === "scripting" && (
+            {mode === "scripting" && !scriptable && (
+                <div className="state">
+                    Script generation reads the SQL Server catalog and writes T-SQL, so it is not
+                    available for this connection. Browsing, queries and the diagram are.
+                </div>
+            )}
+
+            {mode === "scripting" && scriptable && (
                 <ScriptingPanel
                     alias={alias}
                     db={db}
@@ -201,7 +218,8 @@ export function DatabasePage() {
                         <h2>
                             Disk footprint{" "}
                             <span className="muted" style={{ fontWeight: 400 }}>
-                                — box size is allocated space, color is row count
+                                — box size is allocated space
+                                {anyRows && <>, color is row count</>}
                             </span>
                         </h2>
                         <div className="toolbar">
@@ -233,11 +251,12 @@ export function DatabasePage() {
                                     }) as never,
                                 }}
                             />
-                            <ColorScale dark={dark} />
+                            {anyRows && <ColorScale dark={dark} />}
                         </div>
 
                         <p className="subtitle" style={{ marginTop: 12 }}>
-                            ~{formatRows(totalRows)} rows, {formatKb(totalKb)} allocated in total.
+                            {anyRows && <>~{formatRows(totalRows)} rows, </>}
+                            {formatKb(totalKb)} allocated in total.
                             {rows.length - sized.length > 0 && (
                                 <>
                                     {" "}
@@ -246,7 +265,9 @@ export function DatabasePage() {
                                     map.
                                 </>
                             )}{" "}
-                            Counts come from catalog views without scanning — they are approximate.
+                            {anyRows
+                                ? "Counts come from catalog views without scanning — they are approximate."
+                                : "Row counts are unavailable: this server keeps none until a table has been analysed."}
                         </p>
 
                         <h2>
@@ -315,7 +336,9 @@ function buildTreemap(rows: TableStats[], dark: boolean, flat: boolean) {
 
     // Row counts are spread across orders of magnitude, so the normalisation is logarithmic:
     // otherwise one huge table crushes everything else into the same colour.
-    const logs = rows.map((t) => Math.log10(t.rowCount + 1));
+    // An unknown count sits at the bottom of the ramp. Where NONE are known the scale and the
+    // caption are hidden, so the uniform colour claims nothing.
+    const logs = rows.map((t) => Math.log10((t.rowCount ?? 0) + 1));
     const maxLog = Math.max(...logs, 1);
 
     const bySchema = new Map<string, TableStats[]>();
@@ -334,7 +357,9 @@ function buildTreemap(rows: TableStats[], dark: boolean, flat: boolean) {
         schema: t.schema,
         table: t.name,
         rowCount: t.rowCount,
-        itemStyle: { color: sampleRamp(ramp, Math.log10(t.rowCount + 1) / maxLog) },
+        // An unknown count gets the bottom of the ramp. The tile is still sized by its bytes,
+        // which is the measurement the treemap is actually about.
+        itemStyle: { color: sampleRamp(ramp, Math.log10((t.rowCount ?? 0) + 1) / maxLog) },
     });
 
     // Inside a schema there is a single level: the grouping layer no longer carries information,
@@ -351,10 +376,11 @@ function buildTreemap(rows: TableStats[], dark: boolean, flat: boolean) {
 
     return {
         tooltip: {
-            formatter: (info: { name: string; value: number; data: { schema?: string; rowCount?: number } }) => {
+            formatter: (info: { name: string; value: number; data: { schema?: string; rowCount?: number | null } }) => {
                 const { schema, rowCount } = info.data ?? {};
                 const title = schema ? `${schema}.${info.name}` : info.name;
-                const rowsLine = rowCount === undefined ? "" : `<br/>~${formatRows(rowCount)} rows`;
+                const rowsLine =
+                    rowCount === undefined ? "" : rowCount === null ? "<br/>row count unknown" : `<br/>~${formatRows(rowCount)} rows`;
                 return `<b>${title}</b><br/>${formatKb(info.value)} allocated${rowsLine}`;
             },
         },

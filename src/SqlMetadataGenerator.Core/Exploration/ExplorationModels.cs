@@ -2,6 +2,9 @@ namespace SqlMetadataGenerator.Exploration;
 
 public sealed class ServerInfo
 {
+    // Which engine this is. The page used to say "SQL Server" in fixed copy, which stops being
+    // true the moment a second provider exists.
+    public required string Product { get; init; }
     public required string ProductVersion { get; init; }
     public required string ProductLevel { get; init; }
     public required string Edition { get; init; }
@@ -15,13 +18,18 @@ public sealed class DatabaseInfo
 {
     public required string Name { get; init; }
     public required string State { get; init; }
-    public required string RecoveryModel { get; init; }
-    public required byte CompatibilityLevel { get; init; }
+    // Null where the engine has no such notion. PostgreSQL has no recovery model, no
+    // compatibility level and records no creation date for a database; inventing a value for
+    // those would be worse than a dash on the screen.
+    public string? RecoveryModel { get; init; }
+    public byte? CompatibilityLevel { get; init; }
     // Can be null for offline databases.
     public string? Collation { get; init; }
-    public required DateTime CreateDate { get; init; }
+    public DateTime? CreateDate { get; init; }
     public required long DataMb { get; init; }
-    public required long LogMb { get; init; }
+    // Null on PostgreSQL: the write-ahead log is one cluster-wide thing, not a per-database file,
+    // so a number here would be an invented one.
+    public long? LogMb { get; init; }
     // Only ONLINE databases can be entered.
     public bool IsBrowsable => State.Equals("ONLINE", StringComparison.OrdinalIgnoreCase);
 }
@@ -32,7 +40,10 @@ public sealed class TableStats
 {
     public required string Schema { get; init; }
     public required string Name { get; init; }
-    public required long RowCount { get; init; }
+    // Null means UNKNOWN, not empty. sys.partitions always has an exact count; pg_class.reltuples
+    // is -1 until the table is first analysed, and a freshly restored database has no estimate for
+    // anything. Reporting that as 0 would tell the scripting panel a large table is safe to dump.
+    public required long? RowCount { get; init; }
     public required long ReservedKb { get; init; }
     public required long UsedKb { get; init; }
 }
@@ -82,8 +93,10 @@ public sealed class IndexSummary
 // owner, which is the object's own principal when one is set and the schema's otherwise.
 public sealed class TableFacts
 {
-    public required DateTime CreateDate { get; init; }
-    public required DateTime ModifyDate { get; init; }
+    // Null on PostgreSQL, which records no creation or modification time for a table. The detail
+    // tab already renders these only when present.
+    public DateTime? CreateDate { get; init; }
+    public DateTime? ModifyDate { get; init; }
     public required string Owner { get; init; }
     public required List<IndexSummary> Indexes { get; init; }
 }

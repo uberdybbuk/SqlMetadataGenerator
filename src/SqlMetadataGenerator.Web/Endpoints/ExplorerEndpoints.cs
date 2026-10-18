@@ -1,8 +1,10 @@
+using System.Data.Common;
 using Microsoft.Data.SqlClient;
 using SqlMetadataGenerator.Connections;
 using SqlMetadataGenerator.Diagram;
 using SqlMetadataGenerator.Exploration;
 using SqlMetadataGenerator.Model;
+using SqlMetadataGenerator.Providers;
 using SqlMetadataGenerator.Scripting;
 
 namespace SqlMetadataGenerator.Web.Endpoints;
@@ -43,10 +45,10 @@ internal static class ExplorerEndpoints
 
         // Database dashboard: object counters plus schemas.
         api.MapGet("/servers/{alias}/databases/{db}", (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async (explorer, connectionString) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
-                var countsTask = explorer.ReadObjectCountsAsync(ct);
-                var schemasTask = new MetadataReader(connectionString).ReadSchemasAsync(ct);
+                var countsTask = scope.Explorer.ReadObjectCountsAsync(ct);
+                var schemasTask = scope.Catalog.ReadSchemasAsync(ct);
                 await Task.WhenAll(countsTask, schemasTask);
                 return Results.Ok(new { database = db, counts = await countsTask, schemas = await schemasTask });
             }));
@@ -55,14 +57,14 @@ internal static class ExplorerEndpoints
         // read the same catalog query — a badge saying "9 synonyms" opens exactly nine rows.
         api.MapGet("/servers/{alias}/databases/{db}/objects/{kind}",
             (string alias, string db, string kind, ConnectionRegistry registry, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async (explorer, _) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
                 if (!DataExplorer.IsKnownKind(kind))
                 {
                     return BadRequest($"Unknown object kind: {kind}");
                 }
 
-                return Results.Ok(await explorer.ReadObjectsAsync(kind, ct));
+                return Results.Ok(await scope.Explorer.ReadObjectsAsync(kind, ct));
             }));
 
         // One object's DDL. Modules (view, procedure, function, trigger) come back as the server's
@@ -72,7 +74,7 @@ internal static class ExplorerEndpoints
         api.MapGet("/servers/{alias}/databases/{db}/objects/{kind}/{schema}/{name}",
             (string alias, string db, string kind, string schema, string name,
              ConnectionRegistry registry, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async (explorer, connectionString) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
                 if (!DataExplorer.IsKnownKind(kind))
                 {
@@ -84,7 +86,7 @@ internal static class ExplorerEndpoints
                     return BadRequest("Tables have their own page; use the table endpoints.");
                 }
 
-                var detail = await ReadObjectDetailAsync(explorer, connectionString, kind, schema, name, ct);
+                var detail = await ReadObjectDetailAsync(scope, kind, schema, name, ct);
                 return detail is null
                     ? NotFound($"Not found: {schema}.{name}")
                     : Results.Ok(detail);
@@ -92,7 +94,7 @@ internal static class ExplorerEndpoints
 
         // The statistics behind the treemap and the table grid.
         api.MapGet("/servers/{alias}/databases/{db}/tables", (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async (explorer, _) => Results.Ok(await explorer.ReadTableStatsAsync(ct))));
+            WithDatabase(alias, db, registry, async scope => Results.Ok(await scope.Explorer.ReadTableStatsAsync(ct))));
 
         // Everything the detail tab shows: columns, indexes, creation and owner. The data tab does
         // NOT WAIT on this — the preview carries its own column metadata; this endpoint is called
@@ -100,10 +102,10 @@ internal static class ExplorerEndpoints
         // costs one round trip's worth of latency rather than two.
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}",
             (string alias, string db, string schema, string name, ConnectionRegistry registry, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async (explorer, _) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
-                var shapeTask = explorer.ReadTableShapeAsync(schema, name, ct);
-                var factsTask = explorer.ReadTableFactsAsync(schema, name, ct);
+                var shapeTask = scope.Explorer.ReadTableShapeAsync(schema, name, ct);
+                var factsTask = scope.Explorer.ReadTableFactsAsync(schema, name, ct);
                 await Task.WhenAll(shapeTask, factsTask);
 
                 var shape = await shapeTask;
@@ -142,21 +144,21 @@ internal static class ExplorerEndpoints
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}/sql",
             (string alias, string db, string schema, string name, ConnectionRegistry registry,
              CancellationToken ct, int top = DefaultPreviewTop, string? where = null) =>
-            WithDatabase(alias, db, registry, async (explorer, _) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
                 if (where is not null && !WhereClauseGuard.TryValidate(where, out string? guardError))
                 {
                     return BadRequest(guardError!);
                 }
 
-                var shape = await explorer.ReadTableShapeAsync(schema, name, ct);
+                var shape = await scope.Explorer.ReadTableShapeAsync(schema, name, ct);
                 if (shape is null)
                 {
                     return NotFound($"Table not found: {schema}.{name}");
                 }
 
                 int capped = Math.Clamp(top, 1, 500);
-                return Results.Ok(new { Sql = DataExplorer.BuildPreviewSql(shape, capped, where) });
+                return Results.Ok(new { Sql = scope.Explorer.BuildPreviewSql(shape, capped, where) });
             }));
 
         // The CREATE script for one table, produced by the same Scripting layer the generator uses
@@ -169,9 +171,14 @@ internal static class ExplorerEndpoints
         // The tab is only fetched when it is opened, so the cost lands on a deliberate click.
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}/script",
             (string alias, string db, string schema, string name, ConnectionRegistry registry, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async (_, connectionString) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
-                var reader = new MetadataReader(connectionString);
+                if (RequireSqlServer(scope) is { } unsupported)
+                {
+                    return unsupported;
+                }
+
+                var reader = new MetadataReader(scope.ConnectionString);
                 var collationTask = reader.ReadDatabaseCollationAsync(ct);
                 var tablesTask = reader.ReadTablesAsync(null, ct);
                 await Task.WhenAll(collationTask, tablesTask);
@@ -193,21 +200,21 @@ internal static class ExplorerEndpoints
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}/preview",
             (string alias, string db, string schema, string name, ConnectionRegistry registry,
              CancellationToken ct, int top = 20, string? where = null) =>
-            WithDatabase(alias, db, registry, async (explorer, _) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
                 if (where is not null && !WhereClauseGuard.TryValidate(where, out string? guardError))
                 {
                     return BadRequest(guardError!);
                 }
 
-                var shape = await explorer.ReadTableShapeAsync(schema, name, ct);
+                var shape = await scope.Explorer.ReadTableShapeAsync(schema, name, ct);
                 if (shape is null)
                 {
                     return NotFound($"Table not found: {schema}.{name}");
                 }
 
                 int capped = Math.Clamp(top, 1, 500);
-                return Results.Ok(await explorer.PreviewAsync(shape, capped, where, ct: ct));
+                return Results.Ok(await scope.Explorer.PreviewAsync(shape, capped, where, ct: ct));
             }));
 
         // A statement the user typed. POST because a query does not belong in a URL, and because
@@ -219,7 +226,7 @@ internal static class ExplorerEndpoints
         // query needs to read it.
         api.MapPost("/servers/{alias}/databases/{db}/query",
             (string alias, string db, QueryRequest body, ConnectionRegistry registry, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async (explorer, _) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
                 if (!QueryGuard.TryValidate(body.Sql, out string? guardError))
                 {
@@ -227,27 +234,27 @@ internal static class ExplorerEndpoints
                 }
 
                 int rows = Math.Clamp(body.MaxRows ?? DefaultMaxRows, 1, 5000);
-                return Results.Ok(await explorer.RunQueryAsync(body.Sql!, rows, ct: ct));
+                return Results.Ok(await scope.Explorer.RunQueryAsync(body.Sql!, rows, ct: ct));
             }));
 
         // "Validate & Count": tests the WHERE syntactically and returns the number of matching rows.
         api.MapGet("/servers/{alias}/databases/{db}/tables/{schema}/{name}/count",
             (string alias, string db, string schema, string name, ConnectionRegistry registry,
              CancellationToken ct, string? where = null) =>
-            WithDatabase(alias, db, registry, async (explorer, _) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
                 if (where is not null && !WhereClauseGuard.TryValidate(where, out string? guardError))
                 {
                     return BadRequest(guardError!);
                 }
 
-                var shape = await explorer.ReadTableShapeAsync(schema, name, ct);
+                var shape = await scope.Explorer.ReadTableShapeAsync(schema, name, ct);
                 if (shape is null)
                 {
                     return NotFound($"Table not found: {schema}.{name}");
                 }
 
-                long count = await explorer.CountAsync(shape.Schema, shape.Name, where, ct: ct);
+                long count = await scope.Explorer.CountAsync(shape.Schema, shape.Name, where, ct: ct);
                 return Results.Ok(new { rows = count, where });
             }));
 
@@ -262,10 +269,9 @@ internal static class ExplorerEndpoints
         // the server at all.
         api.MapGet("/servers/{alias}/databases/{db}/graph",
             (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async (_, connectionString) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
-                var reader = new MetadataReader(connectionString);
-                var tables = await reader.ReadTablesAsync(null, ct);
+                var tables = await scope.Catalog.ReadTablesAsync(null, ct);
                 var graph = RelationshipInference.Infer(tables);
 
                 return Results.Ok(new
@@ -310,9 +316,14 @@ internal static class ExplorerEndpoints
         // One round trip, names only — the tree is drawn before anything is read in full.
         api.MapGet("/servers/{alias}/databases/{db}/scriptable",
             (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async (_, connectionString) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
-                var reader = new MetadataReader(connectionString);
+                if (RequireSqlServer(scope) is { } unsupported)
+                {
+                    return unsupported;
+                }
+
+                var reader = new MetadataReader(scope.ConnectionString);
                 return Results.Ok(new
                 {
                     Kinds = ScriptBundle.Kinds.Select(k => new { Kind = k, Title = ScriptBundle.Title(k) }),
@@ -326,17 +337,22 @@ internal static class ExplorerEndpoints
         // not belong in a URL, and generating a script is not something a link should do on its own.
         api.MapPost("/servers/{alias}/databases/{db}/script",
             (string alias, string db, ScriptRequest body, ConnectionRegistry registry, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async (_, connectionString) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
+                if (RequireSqlServer(scope) is { } unsupported)
+                {
+                    return unsupported;
+                }
+
                 if (!TryReadSelection(body, out var wanted, out string? error)
                     || !TryReadData(body, out var data, out error))
                 {
                     return BadRequest(error!);
                 }
 
-                var reader = new MetadataReader(connectionString);
+                var reader = new MetadataReader(scope.ConnectionString);
                 var format = body.ToScriptFormat(await reader.ReadDatabaseCollationAsync(ct));
-                var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, connectionString, format, ct);
+                var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, scope.ConnectionString, format, ct);
 
                 return Results.Ok(new
                 {
@@ -354,17 +370,22 @@ internal static class ExplorerEndpoints
         // The same bundle as files, in the layout the generator writes to disk, zipped.
         api.MapPost("/servers/{alias}/databases/{db}/script/files",
             (string alias, string db, ScriptRequest body, ConnectionRegistry registry, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async (_, connectionString) =>
+            WithDatabase(alias, db, registry, async scope =>
             {
+                if (RequireSqlServer(scope) is { } unsupported)
+                {
+                    return unsupported;
+                }
+
                 if (!TryReadSelection(body, out var wanted, out string? error)
                     || !TryReadData(body, out var data, out error))
                 {
                     return BadRequest(error!);
                 }
 
-                var reader = new MetadataReader(connectionString);
+                var reader = new MetadataReader(scope.ConnectionString);
                 var format = body.ToScriptFormat(await reader.ReadDatabaseCollationAsync(ct));
-                var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, connectionString, format, ct);
+                var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, scope.ConnectionString, format, ct);
 
                 var files = bundle.Items
                     .Select(item => (Path: ScriptBundle.FilePath(item), Content: item.Sql.TrimEnd() + "\n"))
@@ -468,8 +489,18 @@ internal static class ExplorerEndpoints
         return true;
     }
 
+    // Everything one request needs to talk to one database, and the ONLY place in the web layer
+    // that knows which engine is behind an alias. Every endpoint works through the interfaces; the
+    // four that cannot (script generation reads the full SQL Server catalog and emits T-SQL) say
+    // so by calling RequireSqlServer, rather than by failing somewhere deep in a reader.
+    private sealed record DbScope(
+        IDataExplorer Explorer,
+        ICatalogReader Catalog,
+        string ConnectionString,
+        DatabaseProvider Provider);
+
     private static async Task<IResult> WithServer(
-        string alias, ConnectionRegistry registry, Func<ServerExplorer, Task<IResult>> action)
+        string alias, ConnectionRegistry registry, Func<IServerExplorer, Task<IResult>> action)
     {
         var entry = registry.Find(alias);
         if (entry is null)
@@ -479,14 +510,18 @@ internal static class ExplorerEndpoints
 
         return await Guarded(() =>
         {
+            var provider = DatabaseProviders.Parse(entry.Provider);
             string cs = ConnectionRegistry.BuildConnectionString(entry, null);
-            return action(new ServerExplorer(cs));
+            IServerExplorer explorer = provider == DatabaseProvider.Postgres
+                ? new PgServerExplorer(cs)
+                : new ServerExplorer(cs);
+            return action(explorer);
         });
     }
 
     private static async Task<IResult> WithDatabase(
         string alias, string database, ConnectionRegistry registry,
-        Func<DataExplorer, string, Task<IResult>> action)
+        Func<DbScope, Task<IResult>> action)
     {
         var entry = registry.Find(alias);
         if (entry is null)
@@ -496,17 +531,31 @@ internal static class ExplorerEndpoints
 
         return await Guarded(() =>
         {
+            var provider = DatabaseProviders.Parse(entry.Provider);
             string cs = ConnectionRegistry.BuildConnectionString(entry, database);
-            return action(new DataExplorer(cs), cs);
+            return action(provider == DatabaseProvider.Postgres
+                ? new DbScope(new PgDataExplorer(cs), new PgCatalogReader(cs), cs, provider)
+                : new DbScope(new DataExplorer(cs), new MetadataReader(cs), cs, provider));
         });
     }
+
+    // The script generator is SQL Server only: it reads catalog views that have no PostgreSQL
+    // counterpart and writes T-SQL. Saying that plainly up front beats letting the picker fill
+    // with objects whose Generate button cannot work.
+    private static IResult? RequireSqlServer(DbScope scope) =>
+        scope.Provider == DatabaseProvider.SqlServer
+            ? null
+            : Results.Problem(
+                title: "SQL Server only",
+                detail: "Script generation reads the SQL Server catalog and writes T-SQL. "
+                      + "Browsing, queries and the relationship diagram work on PostgreSQL; scripting does not.",
+                statusCode: 501);
 
     // Modules answer from sys.sql_modules. The other three kinds have no stored statement, so the
     // whole-database reader runs and the one row is picked out: these lists are a handful of rows
     // each, and reusing the tested readers beats a second, near-duplicate single-object query.
     private static async Task<ObjectDetail?> ReadObjectDetailAsync(
-        DataExplorer explorer,
-        string connectionString,
+        DbScope scope,
         string kind,
         string schema,
         string name,
@@ -514,10 +563,17 @@ internal static class ExplorerEndpoints
     {
         if (kind is "views" or "procedures" or "functions" or "triggers")
         {
-            return await explorer.ReadModuleDefinitionAsync(schema, name, ct);
+            return await scope.Explorer.ReadModuleDefinitionAsync(schema, name, ct);
         }
 
-        var reader = new MetadataReader(connectionString);
+        // On PostgreSQL the same reader also composes the sequence and type scripts, so every
+        // kind the dashboard lists is reachable. Synonyms do not exist there and never appear.
+        if (scope.Provider == DatabaseProvider.Postgres)
+        {
+            return await scope.Explorer.ReadModuleDefinitionAsync(schema, name, ct);
+        }
+
+        var reader = new MetadataReader(scope.ConnectionString);
         var fmt = new ScriptFormat();
         bool Matches(ObjectName n) =>
             string.Equals(n.Schema, schema, StringComparison.OrdinalIgnoreCase) &&
@@ -606,6 +662,13 @@ internal static class ExplorerEndpoints
         {
             return Results.Problem(title: "SQL error", detail: ex.Message, statusCode: 400,
                 extensions: new Dictionary<string, object?> { ["sqlNumber"] = ex.Number });
+        }
+        // Npgsql throws PostgresException, which is a DbException and not a SqlException — without
+        // this, a bad WHERE on PostgreSQL would be a 500 page instead of the server's own message.
+        catch (DbException ex)
+        {
+            return Results.Problem(title: "SQL error", detail: ex.Message, statusCode: 400,
+                extensions: new Dictionary<string, object?> { ["sqlState"] = ex.SqlState });
         }
     }
 

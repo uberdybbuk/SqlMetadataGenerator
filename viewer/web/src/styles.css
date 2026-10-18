@@ -313,6 +313,12 @@ input[type="search"]:focus {
     cursor: pointer;
 }
 
+/* A chip for something this connection cannot do: still readable, visibly not available. */
+.chip:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 .chip[aria-pressed="true"] {
     background: var(--accent);
     border-color: var(--accent);

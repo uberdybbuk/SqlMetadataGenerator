@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { api, type ConnectionRequest, type ConnectionSummary } from "../api";
+import { api, type ConnectionRequest, type ConnectionSummary, type Provider } from "../api";
 import { useApi } from "../useApi";
 import { Icon } from "../Icon";
 
@@ -16,6 +16,20 @@ type PasswordSource = "stored" | "env";
 // The same rule the backend enforces, checked here too so the Save button can say why before
 // a round trip does.
 const ALIAS_RULE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+// SQL Server writes a port after a comma and PostgreSQL after a colon; both forms are accepted
+// for either, but the placeholder shows the one that engine's own tools print.
+const SERVER_HINT: Record<Provider, string> = {
+    sqlserver: "localhost,1433",
+    postgres: "localhost:5432",
+};
+
+// "integrated" means Windows authentication on SQL Server and peer/trust on PostgreSQL — the
+// same thing from the form's point of view (no password is sent) under two different names.
+const INTEGRATED_LABEL: Record<Provider, string> = {
+    sqlserver: "Windows",
+    postgres: "OS user",
+};
 
 // The environment variable the backend falls back to when none is named.
 function defaultPasswordEnv(alias: string): string {
@@ -58,6 +72,7 @@ function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
     const [alias, setAlias] = useState(existing?.alias ?? "");
     const [description, setDescription] = useState(existing?.description ?? "");
     const [server, setServer] = useState(existing?.server ?? "");
+    const [provider, setProvider] = useState<Provider>(existing?.provider ?? "sqlserver");
     const [auth, setAuth] = useState<"sql" | "integrated">(
         existing?.auth === "integrated" ? "integrated" : "sql",
     );
@@ -94,6 +109,7 @@ function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
         return {
             alias: alias.trim(),
             server: server.trim(),
+            provider,
             auth,
             user: sql ? user.trim() : undefined,
             password: pw,
@@ -114,7 +130,7 @@ function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
             return "Server is required.";
         }
         if (auth === "sql" && !user.trim()) {
-            return "User is required for SQL Server authentication.";
+            return "User is required for password authentication.";
         }
         if (auth === "sql" && source === "stored" && !password && !hasStored) {
             return "Enter a password, or read it from an environment variable.";
@@ -128,7 +144,7 @@ function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
             const info = await api.testConnection(request());
             setTest({
                 kind: "ok",
-                message: `${info.edition} · ${info.productVersion} ${info.productLevel} · ${info.machineName}`,
+                message: `${info.product} ${info.productVersion} ${info.productLevel} · ${info.edition} · ${info.machineName}`,
             });
         } catch (err) {
             setTest({ kind: "fail", message: err instanceof Error ? err.message : String(err) });
@@ -205,6 +221,33 @@ function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
                 <input id="cf-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
             </div>
 
+            <fieldset className="field">
+                <legend>Engine</legend>
+                <div className="radios">
+                    <label className="opt">
+                        <input
+                            type="radio"
+                            checked={provider === "sqlserver"}
+                            onChange={() => setProvider("sqlserver")}
+                        />
+                        SQL Server
+                    </label>
+                    <label className="opt">
+                        <input
+                            type="radio"
+                            checked={provider === "postgres"}
+                            onChange={() => setProvider("postgres")}
+                        />
+                        PostgreSQL
+                    </label>
+                </div>
+                <span className="hint">
+                    {provider === "postgres"
+                        ? "Browsing, queries and the relationship diagram. Script generation is SQL Server only."
+                        : "Everything, including script generation."}
+                </span>
+            </fieldset>
+
             <div className="field">
                 <label htmlFor="cf-server">Server</label>
                 <input
@@ -212,7 +255,7 @@ function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
                     className="mono"
                     value={server}
                     onChange={(e) => setServer(e.target.value)}
-                    placeholder="localhost,1433"
+                    placeholder={SERVER_HINT[provider]}
                     autoFocus={existing !== null}
                     autoComplete="off"
                 />
@@ -223,11 +266,11 @@ function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
                 <div className="radios">
                     <label className="opt">
                         <input type="radio" checked={auth === "sql"} onChange={() => setAuth("sql")} />
-                        SQL Server
+                        Password
                     </label>
                     <label className="opt">
                         <input type="radio" checked={auth === "integrated"} onChange={() => setAuth("integrated")} />
-                        Windows
+                        {INTEGRATED_LABEL[provider]}
                     </label>
                 </div>
             </fieldset>

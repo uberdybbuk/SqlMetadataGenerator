@@ -271,7 +271,8 @@ export function DataTable<T>({
         const th = (event.currentTarget as HTMLElement).closest("th");
         const startWidth = th?.getBoundingClientRect().width ?? MIN_WIDTH;
 
-        const onMove = (e: MouseEvent) => {
+        // globalThis, because React's own MouseEvent is in scope here and is a different type.
+        const onMove = (e: globalThis.MouseEvent) => {
             const next = Math.max(MIN_WIDTH, Math.round(startWidth + e.clientX - startX));
             setWidths((current) => ({ ...(current ?? {}), [key]: next }));
         };

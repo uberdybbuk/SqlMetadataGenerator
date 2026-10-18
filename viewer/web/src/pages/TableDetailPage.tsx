@@ -28,6 +28,10 @@ export function TableDetailPage() {
     // The script costs a whole-database metadata read, so it waits for a deliberate click and,
     // once fetched, is not asked for again while the page stays open.
     const [scriptWanted, setScriptWanted] = useState(false);
+    // The CREATE script is written by the SQL Server generator; there is nothing to show for a
+    // PostgreSQL table, so the tab says so instead of fetching a 501.
+    const connections = useApi(() => api.connections(), []);
+    const scriptable = connections.data?.find((c) => c.alias === alias)?.provider !== "postgres";
     const detail = useApi(
         () => api.table(alias, db, schema, name),
         [alias, db, schema, name],
@@ -72,6 +76,8 @@ export function TableDetailPage() {
                 <button
                     className="chip"
                     aria-pressed={tab === "script"}
+                    disabled={!scriptable}
+                    title={scriptable ? undefined : "Script generation is SQL Server only."}
                     onClick={() => {
                         setScriptWanted(true);
                         setTab("script");
@@ -89,7 +95,7 @@ export function TableDetailPage() {
                 />
             )}
             {tab === "detail" && <DetailTab detail={detail} />}
-            {tab === "script" && <ScriptTab script={script} />}
+            {tab === "script" && scriptable && <ScriptTab script={script} />}
         </>
     );
 }

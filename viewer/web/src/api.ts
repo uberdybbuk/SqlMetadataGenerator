@@ -1,8 +1,13 @@
 // A mirror of the backend DTOs. The names match exactly because ASP.NET Core serialises camelCase.
 
+// Which engine is behind a connection. Everything browsing-related works on both; script
+// generation is SQL Server only and the server answers 501 for it.
+export type Provider = "sqlserver" | "postgres";
+
 export interface ConnectionSummary {
     alias: string;
     server: string;
+    provider: Provider;
     auth: string;
     user: string | null;
     description: string | null;
@@ -20,6 +25,7 @@ export interface ConnectionSummary {
 export interface ConnectionRequest {
     alias: string;
     server: string;
+    provider: Provider;
     auth: "sql" | "integrated";
     user?: string;
     password?: string;
@@ -30,6 +36,9 @@ export interface ConnectionRequest {
 }
 
 export interface ServerInfo {
+    // "SQL Server" or "PostgreSQL" — what the server calls itself, rather than a guess from the
+    // connection entry.
+    product: string;
     productVersion: string;
     productLevel: string;
     edition: string;
@@ -37,22 +46,25 @@ export interface ServerInfo {
     machineName: string;
 }
 
+// Null on the fields PostgreSQL has no counterpart for: there is no recovery model, no
+// compatibility level, no separate log file, and no creation timestamp in the catalog.
 export interface DatabaseInfo {
     name: string;
     state: string;
-    recoveryModel: string;
-    compatibilityLevel: number;
+    recoveryModel: string | null;
+    compatibilityLevel: number | null;
     collation: string | null;
-    createDate: string;
+    createDate: string | null;
     dataMb: number;
-    logMb: number;
+    logMb: number | null;
     isBrowsable: boolean;
 }
 
 export interface TableStats {
     schema: string;
     name: string;
-    rowCount: number;
+    // Null means unknown: PostgreSQL has no estimate for a table that was never analysed.
+    rowCount: number | null;
     reservedKb: number;
     usedKb: number;
 }
@@ -167,7 +179,8 @@ export interface QueryColumn {
 
 export interface QueryResult {
     columns: QueryColumn[];
-    rows: unknown[][];
+    // The same shape a preview returns: the server formats every value before it is serialised.
+    rows: (string | number | boolean | null)[][];
     sql: string;
     elapsedMs: number;
     messages: string[];

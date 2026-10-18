@@ -1,13 +1,15 @@
 using Microsoft.Data.SqlClient;
 using SqlMetadataGenerator.Model;
 
+using SqlMetadataGenerator.Providers;
+
 namespace SqlMetadataGenerator;
 
 // Reads table, view and module metadata from the SQL Server system catalog views.
 // Concurrency: every read opens its own connection (SqlConnection is not thread-safe), so
 // independent queries can run at the same time. Module definitions (view/sp/function/trigger) are
 // fetched in parallel, in batches keyed by object_id, instead of as one huge result set.
-public sealed class MetadataReader(string connectionString)
+public sealed class MetadataReader(string connectionString) : ICatalogReader
 {
     private const int ModuleBatchSize = 1000;
     private readonly string _connectionString = connectionString;

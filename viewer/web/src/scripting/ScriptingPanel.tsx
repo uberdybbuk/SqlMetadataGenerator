@@ -136,8 +136,11 @@ export function ScriptingPanel({ alias, db, selection, onSelection }: ScriptingP
             .map((k) => k.kind);
     }, [objects, inventory.data]);
 
+    // null is a table whose size is UNKNOWN (PostgreSQL, never analysed); absent is a table the
+    // stats read has not produced yet. The two are kept apart because the size warning below
+    // must treat unknown as big and must not fire while the counts are still loading.
     const rowCounts = useMemo(() => {
-        const map = new Map<string, number>();
+        const map = new Map<string, number | null>();
         for (const t of stats.data ?? []) {
             map.set(idOf({ kind: "tables", schema: t.schema, name: t.name }), t.rowCount);
         }
@@ -332,9 +335,16 @@ export function ScriptingPanel({ alias, db, selection, onSelection }: ScriptingP
     // thought about it; "all" on a fact table usually means nobody did.
     const unbounded = useMemo(
         () =>
-            targets.filter(
-                (o) => modeOf(idOf(o)) === "all" && (rowCounts.get(idOf(o)) ?? 0) > WARN_ROWS,
-            ),
+            targets.filter((o) => {
+                const id = idOf(o);
+                if (modeOf(id) !== "all") {
+                    return false;
+                }
+                const estimate = rowCounts.get(id);
+                // Unknown counts as too big. Waving a table through because nobody measured it is
+                // the one failure that silently produces the enormous script this warning exists for.
+                return estimate === null || (estimate !== undefined && estimate > WARN_ROWS);
+            }),
         [targets, modeOf, rowCounts],
     );
 
@@ -547,7 +557,7 @@ export function ScriptingPanel({ alias, db, selection, onSelection }: ScriptingP
                                             <span className="grow" />
                                             <span className="kindcol">{KIND_LABEL[o.kind] ?? o.kind}</span>
                                             <span className="rowcol">
-                                                {count !== undefined && count > 0 ? count.toLocaleString("en-US") : ""}
+                                                {count === null ? "?" : count !== undefined && count > 0 ? count.toLocaleString("en-US") : ""}
                                             </span>
                                         </div>
                                     );
@@ -841,7 +851,7 @@ function countLabel(
     mode: Rows,
     id: string,
     counted: Record<string, number>,
-    rowCounts: Map<string, number>,
+    rowCounts: Map<string, number | null>,
     tops: Record<string, number | null>,
 ): string {
     const estimate = rowCounts.get(id);
@@ -859,6 +869,9 @@ function countLabel(
                 return (cap === null ? found : Math.min(found, cap)).toLocaleString("en-US");
             }
         case "all":
+            if (estimate === null) {
+                return "?";
+            }
             return estimate !== undefined ? "~" + estimate.toLocaleString("en-US") : "—";
     }
 }

@@ -4,6 +4,7 @@
          it must carry no console- or web-specific dependency. -->
     <ItemGroup>
         <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.1" />
+        <PackageReference Include="Npgsql" Version="10.0.3" />
     </ItemGroup>
 
 </Project>

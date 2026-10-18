@@ -63,7 +63,7 @@ export function TableListPage() {
             key: "rows",
             header: "Rows",
             numeric: true,
-            sortValue: (t) => t.rowCount,
+            sortValue: (t) => t.rowCount ?? -1,
             render: (t) => formatRows(t.rowCount),
         },
         {

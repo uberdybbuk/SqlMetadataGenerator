@@ -15,6 +15,13 @@
             "description": "Local development",
             "server": "localhost,1433",
             "auth": "integrated"
+        },
+        {
+            "alias": "pg",
+            "description": "Local PostgreSQL",
+            "provider": "postgres",
+            "server": "localhost:5432",
+            "auth": "integrated"
         }
     ]
 }

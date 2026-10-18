@@ -37,9 +37,20 @@ export function ConnectionsPage() {
                                 <Icon name="server" size={18} />
                                 {c.alias}
                             </div>
-                            <div className="meta">{c.server}</div>
                             <div className="meta">
-                                {c.auth === "integrated" ? "windows auth" : c.user}
+                                {c.server}
+                                {/* Only the odd one out is labelled: an unmarked card is SQL Server,
+                                    which is what nearly every connection here is. */}
+                                {c.provider === "postgres" && <> · postgresql</>}
+                            </div>
+                            <div className="meta">
+                                {/* "integrated" is Windows authentication on SQL Server and the
+                                    operating-system user on PostgreSQL. */}
+                                {c.auth === "integrated"
+                                    ? c.provider === "postgres"
+                                        ? "os user"
+                                        : "windows auth"
+                                    : c.user}
                                 {!c.passwordSet && c.auth !== "integrated" && (
                                     <> · <span style={{ color: "var(--danger)" }}>no password</span></>
                                 )}

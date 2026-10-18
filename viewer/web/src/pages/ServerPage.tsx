@@ -27,6 +27,11 @@ export function ServerPage() {
     const connection = connections.data?.find((c) => c.alias.toLowerCase() === alias.toLowerCase());
     const totalMb = databases.reduce((sum, db) => sum + db.dataMb, 0);
 
+    // A column every row leaves empty is noise. PostgreSQL has no recovery model, no separate
+    // log file and no creation timestamp in the catalog, so those three headers would sit over a
+    // column of dashes; this drops them instead of explaining them.
+    const has = (pick: (db: DatabaseInfo) => unknown) => databases.some((db) => pick(db) !== null);
+
     const columns: Column<DatabaseInfo>[] = [
         {
             key: "name",
@@ -50,7 +55,15 @@ export function ServerPage() {
                 ),
         },
         { key: "data", header: "Data", numeric: true, sortValue: (db) => db.dataMb, render: (db) => formatMb(db.dataMb) },
-        { key: "log", header: "Log", numeric: true, sortValue: (db) => db.logMb, render: (db) => formatMb(db.logMb) },
+        ...(has((db) => db.logMb)
+            ? [{
+                  key: "log",
+                  header: "Log",
+                  numeric: true,
+                  sortValue: (db: DatabaseInfo) => db.logMb ?? -1,
+                  render: (db: DatabaseInfo) => formatMb(db.logMb),
+              } satisfies Column<DatabaseInfo>]
+            : []),
         {
             key: "state",
             header: "State",
@@ -59,27 +72,33 @@ export function ServerPage() {
             render: (db) =>
                 db.state === "ONLINE" ? <span className="muted">online</span> : <span className="pill">{db.state.toLowerCase()}</span>,
         },
-        {
-            key: "recovery",
-            header: "Recovery",
-            sortValue: (db) => db.recoveryModel,
-            copyValue: (db) => db.recoveryModel.toLowerCase(),
-            render: (db) => <span className="muted">{db.recoveryModel.toLowerCase()}</span>,
-            className: "muted",
-        },
+        ...(has((db) => db.recoveryModel)
+            ? [{
+                  key: "recovery",
+                  header: "Recovery",
+                  sortValue: (db: DatabaseInfo) => db.recoveryModel ?? "",
+                  copyValue: (db: DatabaseInfo) => db.recoveryModel?.toLowerCase() ?? "",
+                  render: (db: DatabaseInfo) => <span className="muted">{db.recoveryModel?.toLowerCase() ?? "—"}</span>,
+                  className: "muted",
+              } satisfies Column<DatabaseInfo>]
+            : []),
         {
             key: "collation",
             header: "Collation",
             sortValue: (db) => db.collation,
             render: (db) => <span className="muted mono" style={{ fontSize: 12 }}>{db.collation ?? "—"}</span>,
         },
-        {
-            key: "created",
-            header: "Created",
-            sortValue: (db) => db.createDate,
-            copyType: "datetime2",
-            render: (db) => <span className="muted mono" style={{ fontSize: 12 }}>{formatDate(db.createDate)}</span>,
-        },
+        ...(has((db) => db.createDate)
+            ? [{
+                  key: "created",
+                  header: "Created",
+                  sortValue: (db: DatabaseInfo) => db.createDate ?? "",
+                  copyType: "datetime2" as const,
+                  render: (db: DatabaseInfo) => (
+                      <span className="muted mono" style={{ fontSize: 12 }}>{formatDate(db.createDate)}</span>
+                  ),
+              } satisfies Column<DatabaseInfo>]
+            : []),
     ];
 
     return (
@@ -90,7 +109,7 @@ export function ServerPage() {
                 {connection?.user && <> · {connection.user}</>}
                 {connection?.description && <> · {connection.description}</>}
                 <br />
-                SQL Server {server.productVersion} {server.productLevel} · {server.edition} ·{" "}
+                {server.product} {server.productVersion} {server.productLevel} · {server.edition} ·{" "}
                 {server.collation} · machine {server.machineName}
             </p>
 
@@ -112,7 +131,11 @@ export function ServerPage() {
                 resizable
             />
             <p className="subtitle" style={{ marginTop: 12 }}>
-                Sizes come from <code>sys.master_files</code>: allocated file size, not space in use.
+                {server.product === "PostgreSQL" ? (
+                    <>Sizes come from <code>pg_database_size</code>: what the database occupies on disk.</>
+                ) : (
+                    <>Sizes come from <code>sys.master_files</code>: allocated file size, not space in use.</>
+                )}
             </p>
         </>
     );

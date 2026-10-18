@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Data.SqlClient;
 
+using SqlMetadataGenerator.Providers;
+
 namespace SqlMetadataGenerator.Exploration;
 
 // Database-level exploration: table statistics, row preview and WHERE counts.
@@ -10,8 +12,13 @@ namespace SqlMetadataGenerator.Exploration;
 // requires VIEW DATABASE PERFORMANCE STATE, which a read-only user does not have.
 // sys.partitions + sys.allocation_units give the same numbers and need only metadata
 // visibility — the normal scenario for this tool is a low-privilege user.
-public sealed class DataExplorer(string connectionString)
+public sealed class DataExplorer(string connectionString) : IDataExplorer
 {
+    // The interface wants an instance; the static stays because the endpoint that returns only
+    // the query text calls it without an explorer.
+    string IDataExplorer.BuildPreviewSql(TableShape shape, int top, string? where) =>
+        BuildPreviewSql(shape, top, where);
+
     // How many characters a text column is truncated to in the preview. The projection is written
     // against this limit, and whether truncation happened is read off the same limit.
     internal const int TextLimit = 256;

@@ -1,11 +1,13 @@
 using Microsoft.Data.SqlClient;
 
+using SqlMetadataGenerator.Providers;
+
 namespace SqlMetadataGenerator.Exploration;
 
 // Server-level exploration: version information and the database list.
 // The connection opens against 'master'; no SEPARATE connection is opened per database (unlike SMO),
 // because sys.master_files is server-wide.
-public sealed class ServerExplorer(string connectionString)
+public sealed class ServerExplorer(string connectionString) : IServerExplorer
 {
     private readonly string _connectionString = connectionString;
 
@@ -39,6 +41,7 @@ public sealed class ServerExplorer(string connectionString)
 
         return new ServerInfo
         {
+            Product = "SQL Server",
             ProductVersion = reader.IsDBNull(0) ? "?" : reader.GetString(0),
             ProductLevel = reader.IsDBNull(1) ? "?" : reader.GetString(1),
             Edition = reader.IsDBNull(2) ? "?" : reader.GetString(2),

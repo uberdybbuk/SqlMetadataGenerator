@@ -1,6 +1,9 @@
+using System.Data.Common;
 using Microsoft.Data.SqlClient;
+using Npgsql;
 using SqlMetadataGenerator.Connections;
 using SqlMetadataGenerator.Exploration;
+using SqlMetadataGenerator.Providers;
 
 namespace SqlMetadataGenerator.Web.Endpoints;
 
@@ -22,6 +25,7 @@ internal static class ConnectionEndpoints
             {
                 c.Alias,
                 c.Server,
+                provider = c.Kind.Name(),
                 c.Auth,
                 c.User,
                 c.Description,
@@ -73,18 +77,27 @@ internal static class ConnectionEndpoints
             {
                 var entry = body.ToEntry(alias, registry.Find(alias));
                 ConnectionRegistry.Validate(entry);
-                var builder = new SqlConnectionStringBuilder(ConnectionRegistry.BuildConnectionString(entry, null))
+                string cs = ConnectionRegistry.BuildConnectionString(entry, null);
+                IServerExplorer explorer;
+                if (entry.Kind == DatabaseProvider.Postgres)
                 {
-                    ConnectTimeout = TestTimeoutSeconds,
-                };
-                var info = await new ServerExplorer(builder.ConnectionString).ReadServerInfoAsync(ct);
+                    var pg = new NpgsqlConnectionStringBuilder(cs) { Timeout = TestTimeoutSeconds };
+                    explorer = new PgServerExplorer(pg.ConnectionString);
+                }
+                else
+                {
+                    var sql = new SqlConnectionStringBuilder(cs) { ConnectTimeout = TestTimeoutSeconds };
+                    explorer = new ServerExplorer(sql.ConnectionString);
+                }
+
+                var info = await explorer.ReadServerInfoAsync(ct);
                 return Results.Ok(info);
             }
             catch (InvalidOperationException ex)
             {
                 return BadRequest(ex.Message);
             }
-            catch (SqlException ex)
+            catch (DbException ex)
             {
                 return Results.Problem(title: "Connection failed", detail: ex.Message, statusCode: 400);
             }
@@ -121,6 +134,7 @@ internal static class ConnectionEndpoints
     public sealed record ConnectionRequest(
         string? Alias,
         string? Server,
+        string? Provider,
         string? Auth,
         string? User,
         string? Password,
@@ -141,10 +155,17 @@ internal static class ConnectionEndpoints
                 _ => Password,
             };
 
+            // An absent provider means "leave it as it was", which matters on an edit: a form
+            // that posts without the field would otherwise rewrite a postgres entry as sqlserver.
+            string provider = (string.IsNullOrWhiteSpace(Provider) ? existing?.Provider : Provider) ?? string.Empty;
+
             return new ConnectionEntry
             {
                 Alias = alias,
                 Server = Server?.Trim() ?? string.Empty,
+                // Parsed and written back in canonical form, so the file never holds "pgsql" or
+                // "MSSQL" and every later read agrees about what the entry means.
+                Provider = DatabaseProviders.Parse(provider).Name(),
                 Auth = auth,
                 // Windows authentication has no use for any of the three; keeping them would leave
                 // a stale password in the file that nothing reads.

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SqlMetadataGenerator.Providers;
 
 namespace SqlMetadataGenerator.Connections;
 
@@ -11,7 +12,10 @@ public sealed class ConnectionEntry
     // Used as a URL segment, which is why it has to obey the slug rules.
     public required string Alias { get; set; }
     public required string Server { get; set; }
-    // Either "sql" or "integrated".
+    // "sqlserver" (the default, and what every existing entry means) or "postgres".
+    public string? Provider { get; set; }
+    // Either "sql" or "integrated". On PostgreSQL "integrated" means no password is sent and the
+    // operating-system user is used, which is how a local peer/trust setup authenticates.
     public string Auth { get; set; } = "sql";
     public string? User { get; set; }
     // Clear text. Takes precedence over PasswordEnv when set. Never returned by the API.
@@ -22,6 +26,9 @@ public sealed class ConnectionEntry
     public bool Encrypt { get; set; } = true;
     // Free-form description shown in the UI.
     public string? Description { get; set; }
+
+    [JsonIgnore]
+    public DatabaseProvider Kind => DatabaseProviders.Parse(Provider);
 
     [JsonIgnore]
     public bool IsIntegrated => Auth.Equals("integrated", StringComparison.OrdinalIgnoreCase);

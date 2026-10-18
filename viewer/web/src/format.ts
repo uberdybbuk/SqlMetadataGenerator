@@ -1,6 +1,11 @@
 // Row counts and sizes come from catalog views; they are approximate, because nothing is
 // scanned. The display does not hide that.
-export function formatRows(value: number): string {
+export function formatRows(value: number | null): string {
+    // An absent count is not a zero. Only PostgreSQL produces one, on a table no ANALYZE has
+    // reached yet, and it reads the same as every other unknown in the UI.
+    if (value === null) {
+        return "—";
+    }
     return value.toLocaleString("en-US");
 }
 
@@ -18,15 +23,15 @@ export function formatKb(kb: number): string {
     return `${(mb / 1024).toFixed(1)} GB`;
 }
 
-export function formatMb(mb: number): string {
-    if (mb <= 0) {
+export function formatMb(mb: number | null): string {
+    if (mb === null || mb <= 0) {
         return "—";
     }
     return mb < 1024 ? `${mb} MB` : `${(mb / 1024).toFixed(1)} GB`;
 }
 
-export function formatDate(iso: string): string {
-    return iso.slice(0, 10);
+export function formatDate(iso: string | null): string {
+    return iso === null ? "—" : iso.slice(0, 10);
 }
 
 // Turns a SQL type from the column metadata into something readable (nvarchar(max), decimal(18, 2) ...).

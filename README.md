@@ -4,12 +4,15 @@
 			   	     	        	         	   	            	    	        	       	           	      	      	      	          	        	          	       	         	    	            	     	            	      	       	      	     	 	           	      	     	       	 	   	      	       	 	       	          	   	               	     	            	      	        	    	            	        	      	        	      	    	               	
 # SqlMetadataGenerator
 			        	     	   	               	    	               	     	             	      	       	       	                	        	          	      	      	     	          	        	 	   	 	        	 	     	             	       	            	      	    	        	       	     	      	       	        	      	            	       	          	    	     	     	    	    	 	    	           	     	                	     	   	
-A .NET 10 toolkit for SQL Server:
+A .NET 10 toolkit for SQL Server, whose web explorer also browses PostgreSQL:
 			      	               	      	             	     	   	        	        	      	       	      	  	     	 	    	    	   	            	       	              	       	         	        	      	        	      	       	               	     	               	     	              	    	    	       	    	   	              	        	           	      	  	      	    	       	      	   	               	   	 	       	        	
 - **CLI:** export database object definitions into an SSMS-like folder tree and apply those scripts to an existing target database.
 - **Web explorer:** browse servers, databases and objects through an ASP.NET Core API and a React + TypeScript interface.
 			 	           	               	                	            	            	            	                	   	               	      	 	        	     	       	            	       	            	        	  	     	       	   	            	    	 	 	              	 	           	     	             	       	         	       	      	        	              	     	                	     	         	       	            	      	    	
 Script generation exports object definitions, not table data; it is not a database backup.
+It reads the SQL Server catalog and writes T-SQL, so it is SQL Server only. Everything else in
+the web explorer — browsing, data preview, queries and the relationship diagram — works on
+PostgreSQL as well.
 			      	      	       	  	    	   	        	         	   	 	       	   	 	              	 	           	       	            	      	               	     	         	      	      	       	        	      	             	   	      	   	         	      	               	        	   	     	        	      	     	     	                	   	             	        	   	      	                	        	        	        	 	   	    	
 ## Web explorer features
 			      	       	   	         	       	    	   	              	    	             	 	              	 	           	     	   	   	     	   	  	     	    	      	                	       	      	   	     	       	         	       	            	     	  	        	 	   	             	        	   	 	              	 	           	    	    	        	    	     	               	   	            	     	            	    	      	
@@ -24,7 +27,7 @@ Script generation exports object definitions, not table data; it is not a databa
 			       	       	      	               	   	  	      	    	 	              	 	           	 	              	 	           	    	          	    	         	      	           	     	              	     	 	      	  	        	  	     	               	   	         	    	          	      	 	   	   	       	              	   	            	     	        	 	              	 	           	       	          	      	                	
 For example, `/app/demo/MyDb` opens a database dashboard and
 `/app/demo/MyDb/tables/dbo/Customers` opens a table. The `demo` segment is the connection alias from `connections.json`.
-The explorer reads live SQL Server metadata and data; it does not require a previous CLI export.
+The explorer reads live metadata and data from the server; it does not require a previous CLI export.
 			       	             	    	    	    	            	      	        	       	   	    	             	   	       	        	           	   	           	       	                	    	  	     	     	        	    	        	         	   	    	        	     	       	 	      	           	      	              	 	              	 	           	 	              	 	           	      	  	        	              	     	          	
 ## Project layout
 			      	               	    	             	   	             	        	     	   	              	      	         	     	         	    	       	    	               	      	              	     	                	     	            	       	        	     	                	     	          	     	  	   	               	      	               	    	       	     	  	   	          	       	       	       	       	   	  	      	       	
@@ -41,6 +44,7 @@ connections.example.json        example web connection configuration
 - .NET 10 **SDK** (all .NET projects target `net10.0`).
 - Node.js and npm for the web frontend. The locked tooling requires Node.js `^20.19.0 || >=22.12.0`.
 - Access to SQL Server with permission to read the required metadata and object definitions. Deploy additionally requires permission to execute the generated DDL in the target database.
+- PostgreSQL 10 or later for a `postgres` connection. Only read permission on the catalog and the data you browse is needed; the explorer never writes.
 			   	   	 	              	 	           	        	             	     	               	    	     	       	       	        	       	        	 	       	              	    	 	   	       	        	              	     	        	    	          	   	       	   	    	    	      	       	               	     	          	      	               	      	 	   	               	     	              	   	     	        	           	
 The commands below use **PowerShell** and start in the repository root unless stated otherwise.
 Replace example server names, database names, users and passwords with your own values.
@@ -69,6 +73,7 @@ Edit `connections.json`:
 			    	             	      	               	     	      	       	       	    	      	        	     	        	             	      	          	       	  	       	     	   	             	     	 	     	      	       	     	     	            	    	               	      	                	    	         	      	  	   	   	   	             	    	                	      	           	        	   	     	                	        	  	
 - For the `demo` entry, set `server` (for example `localhost,1433`) and `user`. Its `auth: "sql"` uses the password from the environment variable named by `passwordEnv`, which is `SQLMETA_PW_DEMO` in the template.
 - For Windows authentication, use the `local` entry with `auth: "integrated"` and set its `server`. It uses the identity running the API and needs no password variable.
+- For PostgreSQL, add `"provider": "postgres"` to the entry and write the port after a colon, for example `localhost:5432`. Without `provider` an entry means SQL Server, which is what every existing entry means. `auth: "integrated"` sends no password and connects as the operating-system user (peer or trust); `auth: "sql"` uses `user` and the password, as on SQL Server.
 - Remove example entries you do not need. Each `alias` must be unique and use ASCII letters, digits, `-` or `_`, starting with a letter or digit.
 			    	        	      	        	      	             	     	  	    	         	   	 	    	          	       	  	   	          	        	           	 	              	 	           	     	               	        	           	   	       	       	       	     	         	    	          	   	          	     	              	   	          	    	    	       	 	   	           	       	                	       	 	     	                	
 Local `connections*.json` files are ignored by Git; `connections.example.json` is the tracked template.

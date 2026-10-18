@@ -46,7 +46,7 @@ export function ObjectDetailPage() {
                 <div className="badges">
                     {detail.data.generated ? (
                         <span className="badge" title="The catalog stores this object as parts, not as a statement. This is the script the generator would write.">
-                            composed by the generator
+                            composed from the catalog
                         </span>
                     ) : (
                         <span className="badge" title="Returned by sys.sql_modules — the text the server itself stores.">

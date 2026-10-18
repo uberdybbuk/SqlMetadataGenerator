@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
+using Npgsql;
+using SqlMetadataGenerator.Providers;
 
 namespace SqlMetadataGenerator.Connections;
 
@@ -165,12 +167,74 @@ public sealed class ConnectionRegistry
         {
             throw new InvalidOperationException("SQL Server authentication needs a user name.");
         }
+
+        // Throws with the list of accepted names when the provider is not one of them.
+        _ = entry.Kind;
     }
 
     // Builds the connection string. When database is null, server-level queries use 'master'.
     // Under SQL auth a stored password wins; otherwise it comes from the environment, and without
     // it the error names the variable that was expected.
     public static string BuildConnectionString(ConnectionEntry entry, string? database)
+    {
+        return entry.Kind == DatabaseProvider.Postgres
+            ? BuildPostgres(entry, database)
+            : BuildSqlServer(entry, database);
+    }
+
+    // PostgreSQL takes the port as its own setting rather than inside the host, so "localhost:5432"
+    // and the SQL Server spelling "localhost,5432" are both split here. Without a port it is 5432.
+    private static string BuildPostgres(ConnectionEntry entry, string? database)
+    {
+        string host = entry.Server.Trim();
+        int port = 5432;
+        int cut = host.LastIndexOfAny([':', ',']);
+        if (cut > 0 && int.TryParse(host[(cut + 1)..], out int parsed))
+        {
+            port = parsed;
+            host = host[..cut];
+        }
+
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = host,
+            Port = port,
+            Database = string.IsNullOrWhiteSpace(database) ? DatabaseProvider.Postgres.DefaultDatabase() : database,
+            ApplicationName = "SqlMetadataGenerator.Web",
+            // Encrypt means "use TLS where the server offers it"; TrustServerCertificate decides
+            // whether an unverifiable certificate is accepted. The same two switches as SQL Server,
+            // spelled differently.
+            SslMode = entry.Encrypt
+                ? (entry.TrustServerCertificate ? SslMode.Prefer : SslMode.VerifyFull)
+                : SslMode.Disable,
+        };
+
+        if (!string.IsNullOrWhiteSpace(entry.User))
+        {
+            builder.Username = entry.User;
+        }
+
+        if (entry.IsIntegrated)
+        {
+            // No password: a local peer/trust setup authenticates by operating-system user, and
+            // Npgsql falls back to that user when none is given.
+            return builder.ConnectionString;
+        }
+
+        string? pgPassword = entry.HasStoredPassword
+            ? entry.Password
+            : Environment.GetEnvironmentVariable(entry.ResolvedPasswordEnv);
+        if (string.IsNullOrEmpty(pgPassword))
+        {
+            throw new InvalidOperationException(
+                $"No password for '{entry.Alias}'. Enter one on the connection screen or set the '{entry.ResolvedPasswordEnv}' environment variable.");
+        }
+
+        builder.Password = pgPassword;
+        return builder.ConnectionString;
+    }
+
+    private static string BuildSqlServer(ConnectionEntry entry, string? database)
     {
         var builder = new SqlConnectionStringBuilder
         {
