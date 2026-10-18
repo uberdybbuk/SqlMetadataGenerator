@@ -259,6 +259,17 @@ export interface PreviewResult {
     messages: string[];
 }
 
+// A query someone kept so the link could be sent to a colleague. The text lives on the server;
+// the link only carries the id, which is why it stays short enough to paste into a chat.
+export interface SharedQuery {
+    id: string;
+    alias: string;
+    database: string;
+    sql: string;
+    title: string | null;
+    createdUtc: string;
+}
+
 // Backend errors come back as RFC 7807 ProblemDetails; the "detail" field carries the
 // message meant for the user (e.g. SQL Server's own syntax error).
 export class ApiError extends Error {
@@ -365,6 +376,13 @@ export const api = {
     // able to run one on its own.
     query: (alias: string, db: string, sql: string, signal?: AbortSignal) =>
         post<QueryResult>(`/api/servers/${seg(alias)}/databases/${seg(db)}/query`, { sql }, signal),
+
+    // Keeps a query server-side and answers with its id. Validated there with the same guard the
+    // runner uses, so a link can never carry something that only fails when the colleague runs it.
+    shareQuery: (alias: string, db: string, sql: string, title?: string) =>
+        post<SharedQuery>("/api/shares", { alias, database: db, sql, title }),
+
+    sharedQuery: (id: string) => get<SharedQuery>(`/api/shares/${seg(id)}`),
 
     // The scripting picker's inventory: names only, one round trip. The kinds come back with it so
     // the panel does not carry its own copy of the generator's vocabulary.

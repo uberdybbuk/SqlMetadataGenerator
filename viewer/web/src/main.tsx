@@ -9,6 +9,7 @@ import { ServerPage } from "./pages/ServerPage";
 import { DatabasePage } from "./pages/DatabasePage";
 import { TableListPage } from "./pages/TableListPage";
 import { TableDetailPage } from "./pages/TableDetailPage";
+import { QueryPage } from "./pages/QueryPage";
 import { ObjectListPage, SchemaListPage } from "./pages/ObjectListPage";
 import { ObjectDetailPage } from "./pages/ObjectDetailPage";
 import "./styles.css";
@@ -32,6 +33,7 @@ createRoot(document.getElementById("root")!).render(
                         <Route path="scripting" element={null} />
                         <Route path="diagram" element={null} />
                     </Route>
+                    <Route path=":alias/:db/query" element={<QueryPage />} />
                     <Route path=":alias/:db/tables" element={<TableListPage />} />
                     <Route path=":alias/:db/tables/:schema" element={<TableListPage />} />
                     <Route path=":alias/:db/tables/:schema/:name" element={<TableDetailPage />} />

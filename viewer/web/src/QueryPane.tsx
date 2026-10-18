@@ -24,9 +24,21 @@ interface QueryPaneProps {
     // Aborts the request in flight; disabled while nothing is running.
     onCancel: () => void;
     running: boolean;
+    // Keeps the query somewhere a colleague can open it and answers with the link. Absent where
+    // there is nothing to share against, which leaves the button out entirely rather than
+    // showing one that cannot work.
+    onShare?: (sql: string) => Promise<string>;
 }
 
-export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPaneProps) {
+// What the Share button is doing. The link is held so it can be shown after copying: a clipboard
+// write that reports success and leaves nothing visible is indistinguishable from one that failed.
+type ShareState =
+    | { kind: "idle" }
+    | { kind: "saving" }
+    | { kind: "done"; url: string }
+    | { kind: "failed"; message: string };
+
+export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }: QueryPaneProps) {
     const [text, setText] = useState(sql);
     // Once someone has typed, the incoming sql prop stops being an instruction and becomes just
     // the query this pane happened to open with. The preview's text arrives a moment after the
@@ -116,6 +128,29 @@ export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPa
     const textRef = useRef(text);
     textRef.current = text;
 
+    const [shared, setShared] = useState<ShareState>({ kind: "idle" });
+    // A link made from an older version of the text would be a quiet lie, so editing clears it.
+    useEffect(() => setShared({ kind: "idle" }), [text]);
+
+    const copyLink = async () => {
+        if (!onShare) {
+            return;
+        }
+        setShared({ kind: "saving" });
+        try {
+            const url = await onShare(textRef.current);
+            try {
+                await navigator.clipboard.writeText(url);
+            } catch {
+                // Clipboard access can be refused; the link is on screen either way, which is
+                // what makes that survivable rather than a dead end.
+            }
+            setShared({ kind: "done", url });
+        } catch (err) {
+            setShared({ kind: "failed", message: err instanceof Error ? err.message : String(err) });
+        }
+    };
+
     return (
         <div className="workbench" ref={frame} style={height ? { height } : undefined}>
             <div className="qtoolbar">
@@ -133,6 +168,21 @@ export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPa
                     <Icon name="stop" size={13} />
                     Cancel
                 </button>
+                {onShare && (
+                    <>
+                        <span className="tool-sep" />
+                        <button
+                            type="button"
+                            className="tool"
+                            onClick={copyLink}
+                            disabled={shared.kind === "saving" || text.trim() === ""}
+                            title="Save this query and copy a link to it"
+                        >
+                            <Icon name="link" size={14} />
+                            Share
+                        </button>
+                    </>
+                )}
                 {running && (
                     <>
                         <span className="tool-sep" />
@@ -140,6 +190,14 @@ export function QueryPane({ sql, result, onExecute, onCancel, running }: QueryPa
                     </>
                 )}
             </div>
+
+            {shared.kind === "done" && (
+                <div className="sharebar">
+                    <span className="muted">Link copied — it opens the query without running it.</span>
+                    <input className="mono" readOnly value={shared.url} onFocus={(e) => e.currentTarget.select()} />
+                </div>
+            )}
+            {shared.kind === "failed" && <div className="error">{shared.message}</div>}
             <div className="pane" ref={editorPane} style={{ height: `${share}%` }}>
                 <Suspense fallback={<div className="editor-placeholder" />}>
                     <SqlEditor

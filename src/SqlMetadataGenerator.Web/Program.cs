@@ -1,4 +1,5 @@
 using SqlMetadataGenerator.Connections;
+using SqlMetadataGenerator.Sharing;
 using SqlMetadataGenerator.Web.Endpoints;
 
 namespace SqlMetadataGenerator.Web;
@@ -15,6 +16,13 @@ internal static class Program
         // creates the file in the working directory (the repository root under 'dotnet run').
         string target = resolved ?? Path.GetFullPath(configured);
         builder.Services.AddSingleton(ConnectionRegistry.Load(target));
+
+        // Shared queries live beside the connections file, because that is already where this
+        // installation keeps its own state, so the two are backed up and moved together.
+        string shareDir = Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(target)) ?? Directory.GetCurrentDirectory(),
+            "shared-queries");
+        builder.Services.AddSingleton(new SharedQueryStore(shareDir));
 
         var app = builder.Build();
 
@@ -33,6 +41,7 @@ internal static class Program
 
         app.MapConnectionEndpoints();
         app.MapExplorerEndpoints();
+        app.MapShareEndpoints();
 
         // In production the SPA is served from wwwroot. The fallback is required: on a client-side
         // route like /app/demo/Bpm/tables the server has no such file when the page is refreshed.

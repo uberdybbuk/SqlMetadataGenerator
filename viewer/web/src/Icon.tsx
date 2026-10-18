@@ -26,7 +26,8 @@ export type IconName =
     | "stop"
     | "plus"
     | "edit"
-    | "trash";
+    | "trash"
+    | "link";
 
 const PATHS: Record<IconName, string> = {
     "plus": '<path d="M12 5l0 14" /> <path d="M5 12l14 0" />',
@@ -61,6 +62,8 @@ const PATHS: Record<IconName, string> = {
         '<path d="M4 6l5.5 0" /> <path d="M4 10l5.5 0" /> <path d="M4 14l5.5 0" /> <path d="M4 18l5.5 0" /> <path d="M14.5 6l5.5 0" /> <path d="M14.5 10l5.5 0" /> <path d="M14.5 14l5.5 0" /> <path d="M14.5 18l5.5 0" />',
     "key":
         '<path d="M16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1 -4.069 0l-.301 -.301l-6.558 6.558a2 2 0 0 1 -1.239 .578l-.175 .008h-1.172a1 1 0 0 1 -.993 -.883l-.007 -.117v-1.172a2 2 0 0 1 .467 -1.284l.119 -.13l.414 -.414h2v-2h2v-2l2.144 -2.144l-.301 -.301a2.877 2.877 0 0 1 0 -4.069l2.643 -2.643a2.877 2.877 0 0 1 4.069 0" /> <path d="M15 9h.01" />',
+    "link":
+        '<path d="M9 15l6 -6" /> <path d="M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464" /> <path d="M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463" />',
     "search":
         '<path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0" /> <path d="M21 21l-6 -6" />',
 };
@@ -86,6 +89,7 @@ export const ICON_LABELS: Record<IconName, string> = {
     plus: "add",
     edit: "edit",
     trash: "delete",
+    link: "link",
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {

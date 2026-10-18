@@ -18,6 +18,7 @@ const SECTION_LABELS: Record<string, string> = {
     schemas: "Schemas",
     scripting: "Scripting",
     diagram: "Diagram",
+    query: "Query",
 };
 
 interface Crumb {

@@ -8,6 +8,7 @@ import { DataTable, type Column } from "../DataTable";
 import { Icon } from "../Icon";
 import { ResultGrid, type ResultColumn } from "../ResultGrid";
 import { QueryPane } from "../QueryPane";
+import { shareLinkFor } from "../share";
 import { useQueryRunner, type QueryRunner } from "../useQueryRunner";
 
 const SqlEditor = lazy(() => import("../SqlEditor"));
@@ -92,6 +93,8 @@ export function TableDetailPage() {
                     preview={preview}
                     runner={runner}
                     sql={previewSql.data?.sql ?? preview.data?.sql ?? ""}
+                    alias={alias}
+                    db={db}
                 />
             )}
             {tab === "detail" && <DetailTab detail={detail} />}
@@ -104,10 +107,14 @@ function DataTab({
     preview,
     runner,
     sql,
+    alias,
+    db,
 }: {
     preview: AsyncState<PreviewResult>;
     runner: QueryRunner;
     sql: string;
+    alias: string;
+    db: string;
 }) {
     // Until something is run here the grid shows the preview the page opened with; afterwards it
     // shows the answer to the query on screen. Two shapes, one grid: the preview knows its columns
@@ -200,6 +207,7 @@ function DataTab({
                 runner.cancel();
             }}
             running={preview.loading || runner.loading}
+            onShare={shareLinkFor(alias, db)}
         />
     );
 }

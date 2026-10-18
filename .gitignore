@@ -498,3 +498,6 @@ connections*.json
 
 # The Vite build output is copied into the Web project's wwwroot.
 src/SqlMetadataGenerator.Web/wwwroot/
+
+# Shared queries saved from the UI: this installation's own data, not source.
+shared-queries/
