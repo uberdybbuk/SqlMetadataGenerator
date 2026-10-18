@@ -546,7 +546,7 @@ export function DiagramPanel({ alias, db }: DiagramPanelProps) {
 
                 <div className="dgcanvas" ref={attachCanvas} onWheel={onWheel} onMouseDown={startPan}>
                     {visible.length === 0 ? (
-                        <div className="empty">
+                        <div className="panel-empty">
                             <b>Pick a table to start from</b>
                             <span>Then expand it along its relationships.</span>
                         </div>

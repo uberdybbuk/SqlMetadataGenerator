@@ -624,7 +624,7 @@ export function ScriptingPanel({ alias, db, selection, onSelection }: ScriptingP
 
                             <div className="picker-rows">
                                 {targets.length === 0 ? (
-                                    <div className="empty">
+                                    <div className="panel-empty">
                                         <b>Nothing chosen yet</b>
                                         <span>Tick objects on the left, then Move.</span>
                                     </div>
