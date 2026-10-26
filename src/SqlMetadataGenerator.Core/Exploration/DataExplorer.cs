@@ -656,6 +656,11 @@ public sealed class DataExplorer(string connectionString) : IDataExplorer
             float or double => Convert.ToDouble(value, CultureInfo.InvariantCulture),
             DateTime dt => dt.ToString("o", CultureInfo.InvariantCulture),
             DateTimeOffset dto => dto.ToString("o", CultureInfo.InvariantCulture),
+            // PostgreSQL's date and time map to these, and without a case here they fell through
+            // to ToString() — which formats by the SERVER's culture, so a date reached the browser
+            // as "1.10.2026" and the grid had no way to know it was one.
+            DateOnly d => d.ToString("o", CultureInfo.InvariantCulture),
+            TimeOnly t => t.ToString("o", CultureInfo.InvariantCulture),
             TimeSpan ts => ts.ToString(),
             Guid g => g.ToString(),
             byte[] bytes => "0x" + Convert.ToHexString(bytes),
