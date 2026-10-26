@@ -1909,3 +1909,90 @@ body.resizing .dgresizer::after {
 .dgtools > g.drop:hover rect {
     fill: var(--warn);
 }
+
+/* ---- Pivot ---- */
+.pivot {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.pivot-spec {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+}
+
+.pivot-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.pivot-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+
+.pivot-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 2px 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--head);
+}
+
+.pivot-field select {
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    max-width: 190px;
+}
+
+.pivot-x {
+    border: none;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 5px;
+}
+
+.pivot-x:hover {
+    color: var(--danger);
+}
+
+.pivot-where {
+    width: 100%;
+    min-width: 180px;
+    padding: 4px 8px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: inherit;
+}
+
+.pivot-sql pre {
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    font-size: 12px;
+    overflow: auto;
+}

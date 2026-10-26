@@ -4,6 +4,7 @@ using SqlMetadataGenerator.Connections;
 using SqlMetadataGenerator.Diagram;
 using SqlMetadataGenerator.Exploration;
 using SqlMetadataGenerator.Model;
+using SqlMetadataGenerator.Pivot;
 using SqlMetadataGenerator.Providers;
 using SqlMetadataGenerator.Scripting;
 
@@ -256,6 +257,56 @@ internal static class ExplorerEndpoints
 
                 long count = await scope.Explorer.CountAsync(shape.Schema, shape.Name, where, ct: ct);
                 return Results.Ok(new { rows = count, where });
+            }));
+
+        // The pivot: a GROUP BY composed from a spec, run by the DATABASE.
+        //
+        // POST because the spec is a structure, not an address, and because the browser must not
+        // be able to put an aggregate over a whole table behind a plain link.
+        //
+        // Nothing in the spec is pasted into SQL as text. Every column named is looked up in the
+        // table's own shape and only its catalog name is quoted; the aggregates and date periods
+        // are closed sets; the WHERE goes through the same guard the preview uses. The generated
+        // statement comes back with the rows, so the screen can show exactly what it ran.
+        api.MapPost("/servers/{alias}/databases/{db}/tables/{schema}/{name}/pivot",
+            (string alias, string db, string schema, string name, PivotRequest body,
+             ConnectionRegistry registry, CancellationToken ct) =>
+            WithDatabase(alias, db, registry, async scope =>
+            {
+                if (body.Where is not null && !WhereClauseGuard.TryValidate(body.Where, out string? guardError))
+                {
+                    return BadRequest(guardError!);
+                }
+
+                var shape = await scope.Explorer.ReadTableShapeAsync(schema, name, ct);
+                if (shape is null)
+                {
+                    return NotFound($"Table not found: {schema}.{name}");
+                }
+
+                PivotQuery.Built built;
+                try
+                {
+                    built = PivotQuery.Build(scope.Provider, shape, body.ToSpec());
+                }
+                catch (InvalidOperationException ex)
+                {
+                    // A spec the screen should not have been able to build: say which part of it
+                    // was wrong rather than letting the database answer with its own syntax error.
+                    return BadRequest(ex.Message);
+                }
+
+                var result = await scope.Explorer.RunQueryAsync(built.Sql, PivotQuery.MaxLimit, ct: ct);
+                return Results.Ok(new
+                {
+                    built.Sql,
+                    built.RowFieldCount,
+                    built.MeasureCount,
+                    result.Columns,
+                    result.Rows,
+                    result.ElapsedMs,
+                    result.Capped,
+                });
             }));
 
         // The relationship graph: every table, and the links inferred between them from COLUMN
@@ -619,6 +670,51 @@ internal static class ExplorerEndpoints
     // The body of a query request. A record rather than loose parameters so the JSON shape is
     // stated once and read by the binder.
     public sealed record QueryRequest(string? Sql, int? MaxRows);
+
+    // The pivot spec as it arrives. Strings rather than enums on the wire, parsed here against the
+    // closed sets, so an unknown aggregate is a 400 with a readable message instead of a binder
+    // failure the user cannot act on.
+    public sealed record PivotFieldRequest(string? Column, string? Grain);
+
+    public sealed record PivotValueRequest(string? Agg, string? Column);
+
+    public sealed record PivotRequest(
+        List<PivotFieldRequest>? Rows,
+        List<PivotValueRequest>? Values,
+        string? Where,
+        bool? Totals)
+    {
+        public PivotSpec ToSpec() => new()
+        {
+            Rows = (Rows ?? []).Select(r => new PivotField(
+                r.Column ?? throw new InvalidOperationException("A row field needs a column."),
+                ParseGrain(r.Grain))).ToList(),
+            Values = (Values ?? []).Select(v => new PivotMeasure(ParseAggregate(v.Agg), v.Column)).ToList(),
+            Where = Where,
+            Totals = Totals ?? true,
+        };
+
+        private static DateGrain ParseGrain(string? grain) => grain?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "none" => DateGrain.None,
+            "year" => DateGrain.Year,
+            "quarter" => DateGrain.Quarter,
+            "month" => DateGrain.Month,
+            "day" => DateGrain.Day,
+            _ => throw new InvalidOperationException($"Unknown period '{grain}'. Use year, quarter, month or day."),
+        };
+
+        private static Aggregate ParseAggregate(string? agg) => agg?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "count" => Aggregate.Count,
+            "countdistinct" or "count_distinct" or "distinct" => Aggregate.CountDistinct,
+            "sum" => Aggregate.Sum,
+            "avg" => Aggregate.Avg,
+            "min" => Aggregate.Min,
+            "max" => Aggregate.Max,
+            _ => throw new InvalidOperationException($"Unknown aggregate '{agg}'. Use count, sum, avg, min, max or countDistinct."),
+        };
+    }
 
     // The scripting request: what to script, and how to format it. The formatting fields are
     // nullable so that omitting one means "the generator's default" rather than "false".

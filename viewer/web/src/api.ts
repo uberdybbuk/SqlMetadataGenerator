@@ -259,6 +259,41 @@ export interface PreviewResult {
     messages: string[];
 }
 
+// The pivot. The spec travels as a STRUCTURE, never as SQL: the server looks every column up in
+// the table's own shape and composes the GROUP BY itself, so nothing here is pasted into a
+// statement as a name.
+export type PivotGrain = "none" | "year" | "quarter" | "month" | "day";
+export type PivotAgg = "count" | "countDistinct" | "sum" | "avg" | "min" | "max";
+
+export interface PivotRowField {
+    column: string;
+    grain?: PivotGrain;
+}
+
+export interface PivotValueField {
+    agg: PivotAgg;
+    column?: string;
+}
+
+export interface PivotSpec {
+    rows: PivotRowField[];
+    values: PivotValueField[];
+    where?: string;
+    totals?: boolean;
+}
+
+export interface PivotResult {
+    // The statement the server composed and ran. Shown on screen: a pivot you cannot read is a
+    // black box over your own data.
+    sql: string;
+    rowFieldCount: number;
+    measureCount: number;
+    columns: QueryColumn[];
+    rows: (string | number | boolean | null)[][];
+    elapsedMs: number;
+    capped: boolean;
+}
+
 // A query someone kept so the link could be sent to a colleague. The text lives on the server;
 // the link only carries the id, which is why it stays short enough to paste into a chat.
 export interface SharedQuery {
@@ -376,6 +411,13 @@ export const api = {
     // able to run one on its own.
     query: (alias: string, db: string, sql: string, signal?: AbortSignal) =>
         post<QueryResult>(`/api/servers/${seg(alias)}/databases/${seg(db)}/query`, { sql }, signal),
+
+    pivot: (alias: string, db: string, schema: string, name: string, spec: PivotSpec, signal?: AbortSignal) =>
+        post<PivotResult>(
+            `/api/servers/${seg(alias)}/databases/${seg(db)}/tables/${seg(schema)}/${seg(name)}/pivot`,
+            spec,
+            signal,
+        ),
 
     // Keeps a query server-side and answers with its id. Validated there with the same guard the
     // runner uses, so a link can never carry something that only fails when the colleague runs it.

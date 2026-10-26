@@ -36,7 +36,11 @@ createRoot(document.getElementById("root")!).render(
                     <Route path=":alias/:db/query" element={<QueryPage />} />
                     <Route path=":alias/:db/tables" element={<TableListPage />} />
                     <Route path=":alias/:db/tables/:schema" element={<TableListPage />} />
-                    <Route path=":alias/:db/tables/:schema/:name" element={<TableDetailPage />} />
+                    <Route path=":alias/:db/tables/:schema/:name" element={<TableDetailPage />}>
+                        {/* The pivot is a MODE, in the URL like scripting and the diagram, so it
+                            can be linked to and shared. The parent stays mounted. */}
+                        <Route path="pivot" element={null} />
+                    </Route>
                     <Route path=":alias/:db/schemas" element={<SchemaListPage />} />
                     <Route path=":alias/:db/:section" element={<ObjectListPage />} />
                     <Route path=":alias/:db/:section/:schema/:name" element={<ObjectDetailPage />} />

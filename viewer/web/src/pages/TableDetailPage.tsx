@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useMatch, useNavigate, useParams } from "react-router-dom";
 
 import { api, type ColumnSummary, type IndexSummary, type PreviewResult, type TableDetail } from "../api";
 import { useApi, type AsyncState } from "../useApi";
@@ -9,6 +9,7 @@ import { Icon } from "../Icon";
 import { ResultGrid, type ResultColumn } from "../ResultGrid";
 import { QueryPane } from "../QueryPane";
 import { shareLinkFor } from "../share";
+import { PivotPanel } from "../pivot/PivotPanel";
 import { useQueryRunner, type QueryRunner } from "../useQueryRunner";
 
 const SqlEditor = lazy(() => import("../SqlEditor"));
@@ -17,6 +18,17 @@ export function TableDetailPage() {
     const { alias = "", db = "", schema = "", name = "" } = useParams();
     // Whoever clicks a table wants to see the DATA first; the column list is the second question.
     const [tab, setTab] = useState<"data" | "detail" | "script">("data");
+    // The pivot lives in the URL rather than in state: everything else in this application is
+    // addressable, and an analysis you cannot send to someone is the odd one out.
+    const navigate = useNavigate();
+    const base = `/app/${encodeURIComponent(alias)}/${encodeURIComponent(db)}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(name)}`;
+    const pivoting = useMatch("/app/:alias/:db/tables/:schema/:name/pivot") !== null;
+    const show = (next: "data" | "detail" | "script") => {
+        if (pivoting) {
+            navigate(base);
+        }
+        setTab(next);
+    };
 
     // The two requests start in PARALLEL. The preview does not depend on the table metadata — only
     // on the names in the URL. Previously the preview component mounted after the metadata had
@@ -61,34 +73,44 @@ export function TableDetailPage() {
 
             {/* The tabs wait on no request: the skeleton shows at once and the content fills in. */}
             <div className="toolbar">
-                <button className="chip" aria-pressed={tab === "data"} onClick={() => setTab("data")}>
+                <button className="chip" aria-pressed={!pivoting && tab === "data"} onClick={() => show("data")}>
                     data (first 20)
                 </button>
                 <button
                     className="chip"
-                    aria-pressed={tab === "detail"}
+                    aria-pressed={!pivoting && tab === "detail"}
                     onClick={() => {
                         setDetailWanted(true);
-                        setTab("detail");
+                        show("detail");
                     }}
                 >
                     detail
                 </button>
                 <button
                     className="chip"
-                    aria-pressed={tab === "script"}
+                    aria-pressed={!pivoting && tab === "script"}
                     disabled={!scriptable}
                     title={scriptable ? undefined : "Script generation is SQL Server only."}
                     onClick={() => {
                         setScriptWanted(true);
-                        setTab("script");
+                        show("script");
                     }}
                 >
                     script
                 </button>
+                <button
+                    className="chip"
+                    aria-pressed={pivoting}
+                    onClick={() => navigate(`${base}/pivot`)}
+                    title="Group and total this table in the database"
+                >
+                    pivot
+                </button>
             </div>
 
-            {tab === "data" && (
+            {pivoting && <PivotPanel alias={alias} db={db} schema={schema} name={name} />}
+
+            {!pivoting && tab === "data" && (
                 <DataTab
                     preview={preview}
                     runner={runner}
@@ -97,8 +119,8 @@ export function TableDetailPage() {
                     db={db}
                 />
             )}
-            {tab === "detail" && <DetailTab detail={detail} />}
-            {tab === "script" && scriptable && <ScriptTab script={script} />}
+            {!pivoting && tab === "detail" && <DetailTab detail={detail} />}
+            {!pivoting && tab === "script" && scriptable && <ScriptTab script={script} />}
         </>
     );
 }
