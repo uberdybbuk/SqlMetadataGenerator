@@ -195,8 +195,15 @@ export function DataTable<T>({
 
     // A selection is only useful if it can be copied. Two flavours go on the clipboard at once:
     // plain text (editor/terminal) and HTML (Excel — see clipboard.ts).
+    //
+    // The listener is on the document, so it hears every copy on the page. It answers only while
+    // focus is inside THIS grid: a selection left behind in the grid must not hijack Cmd+C pressed
+    // in the SQL editor or a text box, and with two grids on a page only the focused one may answer.
     useEffect(() => {
         function onCopy(event: ClipboardEvent) {
+            if (!wrapRef.current?.contains(document.activeElement)) {
+                return;
+            }
             const region = buildRegion(selection, columns, sorted, rowKey);
             // A real text selection on the page wins: the user dragged over something and means
             // that, not the grid's block selection.
@@ -341,7 +348,20 @@ export function DataTable<T>({
     const tableWidth = fixed ? (growKey ? Math.max(totalWidth ?? 0, avail) : totalWidth) : undefined;
 
     return (
-        <div className={dense ? "table-wrap dense" : "table-wrap"} ref={wrapRef}>
+        <div
+            className={dense ? "table-wrap dense" : "table-wrap"}
+            ref={wrapRef}
+            // Focusable so that a click in the grid takes focus away from the editor, which is what
+            // the copy handler goes by. Focused explicitly: Safari does not focus a clicked button,
+            // and a click on a plain cell would otherwise leave focus wherever it was.
+            tabIndex={-1}
+            onClick={() => {
+                const wrap = wrapRef.current;
+                if (wrap && !wrap.contains(document.activeElement)) {
+                    wrap.focus({ preventScroll: true });
+                }
+            }}
+        >
             <table
                 ref={tableRef}
                 style={fixed ? { tableLayout: "fixed", width: tableWidth } : undefined}

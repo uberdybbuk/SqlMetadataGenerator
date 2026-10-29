@@ -208,6 +208,11 @@ a.badge:hover {
     background: var(--panel);
 }
 
+/* Focusable only so the copy shortcut knows which grid is meant; not a stop for the keyboard. */
+.table-wrap:focus {
+    outline: none;
+}
+
 table {
     border-collapse: collapse;
     width: 100%;
