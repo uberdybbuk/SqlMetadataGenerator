@@ -5,6 +5,10 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 // editor.api entry and add the single language contribution by hand.
 import * as monaco from "monaco-editor/editor/editor.api";
 import "monaco-editor/languages/definitions/sql/register";
+// editor.api is the bare editor: toggling a comment, moving by word, the command palette (F1),
+// find and multi-cursor are all separate contributions, and without them those keys do nothing.
+// register.all brings every editor feature but no language, so the cost above stays avoided.
+import "monaco-editor/features/register.all";
 import editorWorker from "monaco-editor/editor/editor.worker?worker";
 
 import { useDarkMode } from "./theme";
