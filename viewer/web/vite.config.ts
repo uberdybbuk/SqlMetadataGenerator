@@ -5,6 +5,8 @@ export default defineConfig({
     plugins: [react()],
     server: {
         port: 5173,
+        // A leading dot allows the domain and every subdomain: quick tunnels get a new name each run.
+        allowedHosts: [".trycloudflare.com"],
         proxy: {
             // A single-origin illusion: the frontend writes "/api/..." in both modes, so CORS never comes up.
             "/api": {
