@@ -12,7 +12,11 @@ import { TableDetailPage } from "./pages/TableDetailPage";
 import { QueryPage } from "./pages/QueryPage";
 import { ObjectListPage, SchemaListPage } from "./pages/ObjectListPage";
 import { ObjectDetailPage } from "./pages/ObjectDetailPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { installTheme } from "./theme";
 import "./styles.css";
+
+installTheme();
 
 // The URL is the location: every level is a real page, and every page can be bookmarked.
 createRoot(document.getElementById("root")!).render(
@@ -24,6 +28,7 @@ createRoot(document.getElementById("root")!).render(
                     <Route index element={<ConnectionsPage />} />
                     <Route path="_connections/new" element={<ConnectionFormPage />} />
                     <Route path="_connections/:alias/edit" element={<ConnectionFormPage />} />
+                    <Route path="_settings" element={<SettingsPage />} />
                     <Route path=":alias" element={<ServerPage />} />
                     {/* Scripting is nested rather than a sibling: a nested route keeps the
                         parent mounted, so moving between the two modes does not throw away the

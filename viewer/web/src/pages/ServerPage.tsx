@@ -6,9 +6,11 @@ import { formatDate, formatMb, plural } from "../format";
 import { DataTable, type Column } from "../DataTable";
 import type { DatabaseInfo } from "../api";
 import { Icon } from "../Icon";
+import { useSortSetting } from "../settings";
 
 export function ServerPage() {
     const { alias = "" } = useParams();
+    const sort = useSortSetting("lists.databases.sort");
     const { data, error, loading } = useApi(() => api.server(alias), [alias]);
     // The alias alone does not say which server you are looking at; show the real address too.
     const connections = useApi(() => api.connections(), []);
@@ -126,7 +128,7 @@ export function ServerPage() {
                 columns={columns}
                 rows={databases}
                 rowKey={(db) => db.name}
-                initialSort={{ key: "data", desc: true }}
+                initialSort={sort}
                 dense
                 resizable
             />

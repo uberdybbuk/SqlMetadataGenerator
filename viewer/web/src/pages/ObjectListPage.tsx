@@ -7,6 +7,7 @@ import { plural } from "../format";
 import { DataTable, type Column } from "../DataTable";
 import { formatCell } from "../cell";
 import { Icon, type IconName } from "../Icon";
+import { useSortSetting } from "../settings";
 
 // The sections this page serves. Tables have their own page (sizes, treemap, drill-down), so
 // they are deliberately absent; schemas come from the dashboard response rather than the object
@@ -29,6 +30,7 @@ function readableType(typeDesc: string): string {
 
 export function ObjectListPage() {
     const { alias = "", db = "", section = "" } = useParams();
+    const sort = useSortSetting("lists.objects.sort");
     const known = SECTIONS[section];
     const { data, error, loading } = useApi(
         () => api.objects(alias, db, section),
@@ -126,7 +128,7 @@ export function ObjectListPage() {
                         columns={columns}
                         rows={rows}
                         rowKey={(o) => `${o.schema}.${o.name}`}
-                        initialSort={{ key: "name" }}
+                        initialSort={sort}
                         dense
                         resizable
                         emptyNote={`No matching ${known.title.toLowerCase()}.`}
@@ -142,6 +144,7 @@ export function ObjectListPage() {
 // makes an empty schema visible as such rather than simply absent.
 export function SchemaListPage() {
     const { alias = "", db = "" } = useParams();
+    const sort = useSortSetting("lists.schemas.sort");
     const overview = useApi(() => api.database(alias, db), [alias, db]);
     const tables = useApi(() => api.tables(alias, db), [alias, db]);
 
@@ -198,7 +201,7 @@ export function SchemaListPage() {
                     columns={columns}
                     rows={rows}
                     rowKey={(s) => s.name}
-                    initialSort={{ key: "tables", desc: true }}
+                    initialSort={sort}
                     dense
                     resizable
                 />

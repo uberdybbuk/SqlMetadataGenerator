@@ -13,6 +13,7 @@ import { useApi } from "../useApi";
 import { Icon } from "../Icon";
 import { ResultGrid, type ResultColumn } from "../ResultGrid";
 import { isNumericType } from "../cell";
+import { useSetting } from "../settings";
 
 // Analysing a table by grouping it.
 //
@@ -49,6 +50,7 @@ const ADDITIVE = new Set<PivotAgg>(["count", "sum"]);
 export function PivotPanel({ alias, db, schema, name }: { alias: string; db: string; schema: string; name: string }) {
     const shape = useApi(() => api.table(alias, db, schema, name), [alias, db, schema, name]);
     const columns: ColumnSummary[] = useMemo(() => shape.data?.columns ?? [], [shape.data]);
+    const limit = useSetting("pivot.limit");
 
     const [rows, setRows] = useState<PivotRowField[]>([]);
     const [values, setValues] = useState<PivotValueField[]>([{ agg: "count" }]);
@@ -76,6 +78,7 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
                     values,
                     where: where.trim() || undefined,
                     totals: true,
+                    limit,
                 }),
             );
         } catch (err) {

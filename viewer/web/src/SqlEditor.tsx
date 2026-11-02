@@ -11,6 +11,7 @@ import "monaco-editor/languages/definitions/sql/register";
 import "monaco-editor/features/register.all";
 import editorWorker from "monaco-editor/editor/editor.worker?worker";
 
+import { useSetting } from "./settings";
 import { useDarkMode } from "./theme";
 
 // By default Monaco loads itself from a CDN. This is a local tool and has to work without
@@ -186,6 +187,21 @@ export default function SqlEditor({ value, readOnly = true, onChange, onExecute,
     useEffect(() => {
         monaco.editor.setTheme(dark ? "vs-dark" : "vs");
     }, [dark]);
+
+    // The instance is shared, so the settings are applied on every mount rather than built in:
+    // one changed on the settings page reaches the parked editor the next time it is shown.
+    const fontSize = useSetting("editor.fontSize");
+    const lineNumbers = useSetting("editor.lineNumbers");
+    const wordWrap = useSetting("editor.wordWrap");
+    const minimap = useSetting("editor.minimap");
+    useEffect(() => {
+        instance.current?.editor.updateOptions({
+            fontSize,
+            lineNumbers: lineNumbers ? "on" : "off",
+            wordWrap: wordWrap ? "on" : "off",
+            minimap: { enabled: minimap },
+        });
+    }, [fontSize, lineNumbers, wordWrap, minimap]);
 
     // The height is fixed by .editor-wrap and never follows the query. Sizing to the text meant
     // every table opened at three lines and then jumped to its real height once the preview

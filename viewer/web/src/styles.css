@@ -17,28 +17,31 @@
     --sel: #dbe8fb;
     --sel-head: #c7dbf7;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-    :root {
-        --bg: #16171a;
-        --panel: #1d1f23;
-        --border: #2f3238;
-        --text: #e6e4e1;
-        --muted: #8d8f96;
-        --accent: #6ea8fe;
-        --accent-soft: #1e2a3d;
-        --danger: #f4776a;
-        --danger-soft: #2e1c1a;
-        --warn: #e8963c;
-        --head: #24262b;
-        --head-line: #3d4149;
-        --null: #cbb583;
-        --null-bg: #33301f;
-        --null-bg-hover: #3d3926;
-        --sel: #24354d;
-        --sel-head: #2e455f;
-    }
+/* Set by theme.ts from the Theme setting, which itself may follow the operating system. The
+   media query is not used here: it could not be overruled by the setting. color-scheme makes the
+   browser's own controls (selects, checkboxes, scrollbars) follow too. */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #16171a;
+    --panel: #1d1f23;
+    --border: #2f3238;
+    --text: #e6e4e1;
+    --muted: #8d8f96;
+    --accent: #6ea8fe;
+    --accent-soft: #1e2a3d;
+    --danger: #f4776a;
+    --danger-soft: #2e1c1a;
+    --warn: #e8963c;
+    --head: #24262b;
+    --head-line: #3d4149;
+    --null: #cbb583;
+    --null-bg: #33301f;
+    --null-bg-hover: #3d3926;
+    --sel: #24354d;
+    --sel-head: #2e455f;
 }
 
 * {
@@ -2000,4 +2003,229 @@ body.resizing .dgresizer::after {
     background: var(--panel);
     font-size: 12px;
     overflow: auto;
+}
+
+/* ---- Settings: laid out after VS Code's settings editor ---- */
+.crumbs .settings-link {
+    margin-left: auto;
+    color: var(--muted);
+}
+
+/* Not the full width: a description line across a wide monitor is too long to read, and the
+   controls drift far from their labels. Centred, as VS Code's settings editor is. */
+.settings {
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+/* Stuck under the breadcrumb bar; theme-coloured so the list scrolls out of sight beneath it. */
+.settings-head {
+    position: sticky;
+    top: var(--settings-top, 0px);
+    z-index: 9;
+    background: var(--bg);
+}
+
+.settings-search {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.settings-search input {
+    flex: 1 1 auto;
+}
+
+.settings-scope {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+}
+
+.settings-scope .on {
+    padding: 6px 0;
+    border-bottom: 2px solid var(--accent);
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.settings-scope .muted {
+    align-self: center;
+}
+
+.settings-body {
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+    gap: 28px;
+    margin-top: 14px;
+}
+
+/* The tree stays in view while the list scrolls, just under the sticky breadcrumb bar. */
+.settings-tree {
+    position: sticky;
+    top: calc(var(--settings-top, 0px) + var(--settings-head, 0px) + 14px);
+    align-self: start;
+    display: flex;
+    flex-direction: column;
+}
+
+.settings-tree .node {
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: var(--muted);
+    font: inherit;
+    cursor: pointer;
+}
+
+.settings-tree .node.depth1 {
+    padding-left: 22px;
+}
+
+.settings-tree .node:hover:not(:disabled) {
+    color: var(--text);
+}
+
+.settings-tree .node.on {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.settings-tree .node.empty {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.settings-list {
+    /* Room for the last category to scroll up under the tree's highlight. */
+    padding-bottom: 50vh;
+}
+
+.settings-list h2 {
+    font-size: 20px;
+    margin: 0 0 4px;
+}
+
+.settings-list section + section h2 {
+    margin-top: 26px;
+}
+
+.settings-list h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 18px 0 2px;
+}
+
+.setting {
+    position: relative;
+    padding: 10px 12px 12px 16px;
+    margin-left: -16px;
+    border-radius: 4px;
+}
+
+.setting:hover {
+    background: color-mix(in srgb, var(--head) 70%, transparent);
+}
+
+/* The changed-from-default marker, as in VS Code: a bar in the gutter. */
+.setting.modified::before {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 12px;
+    bottom: 12px;
+    width: 2px;
+    background: var(--accent);
+}
+
+.setting-title {
+    display: flex;
+    align-items: baseline;
+    gap: 0;
+    font-weight: 600;
+}
+
+.setting-title .category {
+    color: var(--muted);
+    font-weight: 400;
+    white-space: pre;
+}
+
+.setting-title .badge {
+    margin-left: 10px;
+    font-size: 11px;
+    font-style: italic;
+    font-weight: 400;
+    color: var(--muted);
+}
+
+.setting-title .link-button {
+    margin-left: 8px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--accent);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 400;
+    cursor: pointer;
+}
+
+.setting-desc {
+    color: var(--muted);
+    margin: 2px 0 6px;
+}
+
+.setting select,
+.setting input[type="number"] {
+    font: inherit;
+    padding: 3px 6px;
+    border: 1px solid var(--head-line);
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--text);
+}
+
+.setting select {
+    min-width: 240px;
+}
+
+.setting input[type="number"] {
+    width: 100px;
+}
+
+.setting input[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+
+.setting-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 2px;
+    cursor: pointer;
+}
+
+.setting-check input {
+    margin-top: 3px;
+}
+
+.setting-check .setting-desc {
+    margin: 0;
+}
+
+.setting-number {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.setting-error {
+    color: var(--danger);
+    font-size: 12px;
 }

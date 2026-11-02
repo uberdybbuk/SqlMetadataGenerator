@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 
 export const HOME = "🏠";
 export const APP_NAME = "SQL Browser";
+export const SETTINGS_ROUTE = "/app/_settings";
 
 // Readable equivalents of the type segment in the URL (tables, views ...).
 // The keys match the ObjectFilter.ValidTypes vocabulary: the CLI, the manifest and the URL speak one language.
@@ -53,6 +54,11 @@ function buildCrumbs(pathname: string): Crumb[] {
             label: editing ? `Edit ${decodeURIComponent(db)}` : "New connection",
             href: pathname,
         });
+        return crumbs;
+    }
+
+    if (alias === "_settings") {
+        crumbs.push({ label: "Settings", href: SETTINGS_ROUTE });
         return crumbs;
     }
 
@@ -144,6 +150,11 @@ function Breadcrumbs() {
                     </span>
                 );
             })}
+            {pathname !== SETTINGS_ROUTE && (
+                <Link className="settings-link" to={SETTINGS_ROUTE}>
+                    Settings
+                </Link>
+            )}
         </nav>
     );
 }

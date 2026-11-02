@@ -280,6 +280,8 @@ export interface PivotSpec {
     values: PivotValueField[];
     where?: string;
     totals?: boolean;
+    // At most this many groups; the server clamps it to its own ceiling.
+    limit?: number;
 }
 
 export interface PivotResult {

@@ -1,18 +1,38 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
+
+import { getSetting, subscribeSettings } from "./settings";
+
+// Light or dark is decided here, once, and written on <html> as data-theme. The stylesheet keys
+// its dark colours on that attribute rather than on the media query, so the Theme setting can
+// overrule the operating system. "System" keeps following it, live.
+const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+
+function resolveDark(): boolean {
+    const choice = getSetting("appearance.theme");
+    return choice === "system" ? systemDark.matches : choice === "dark";
+}
+
+function subscribe(listener: () => void): () => void {
+    systemDark.addEventListener("change", listener);
+    const unsubscribe = subscribeSettings(listener);
+    return () => {
+        systemDark.removeEventListener("change", listener);
+        unsubscribe();
+    };
+}
+
+function apply(): void {
+    document.documentElement.dataset.theme = resolveDark() ? "dark" : "light";
+}
+
+// Called before the first render, so the page never paints in the wrong colours first.
+export function installTheme(): void {
+    apply();
+    subscribe(apply);
+}
 
 export function useDarkMode(): boolean {
-    const [dark, setDark] = useState(
-        () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
-    );
-
-    useEffect(() => {
-        const query = window.matchMedia("(prefers-color-scheme: dark)");
-        const handler = (e: MediaQueryListEvent) => setDark(e.matches);
-        query.addEventListener("change", handler);
-        return () => query.removeEventListener("change", handler);
-    }, []);
-
-    return dark;
+    return useSyncExternalStore(subscribe, resolveDark);
 }
 
 // A single hue (blue), a sequential ramp from light to dark — for encoding magnitude.

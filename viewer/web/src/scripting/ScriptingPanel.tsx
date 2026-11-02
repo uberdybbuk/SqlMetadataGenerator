@@ -4,6 +4,7 @@ import { api, type ScriptRequest, type ScriptResult } from "../api";
 import { useApi } from "../useApi";
 import { useFillHeight } from "../useFillHeight";
 import { Icon, type IconName } from "../Icon";
+import { useSetting } from "../settings";
 import { EMPTY, apply, bulk, idOf, resolve, type ScriptableObject, type Selection, type Target } from "./selection";
 
 const SqlEditor = lazy(() => import("../SqlEditor"));
@@ -18,10 +19,6 @@ const SqlEditor = lazy(() => import("../SqlEditor"));
 // question — which rows come with it — and that is the only thing the set's rows column asks.
 
 const RENDER_CAP = 300;
-
-// Above this, "all rows" is not something to ask for without thinking; top or query is.
-// Mirrors DataScripter.WarnRows.
-const WARN_ROWS = 1000;
 
 const ICONS: Record<string, IconName> = {
     dataTypes: "type",
@@ -99,6 +96,9 @@ export function ScriptingPanel({ alias, db, selection, onSelection }: ScriptingP
     const [error, setError] = useState<string | null>(null);
     const [checking, setChecking] = useState(false);
     const { frame, height } = useFillHeight(420);
+    // Above this, "all rows" is not something to ask for without thinking; top or query is.
+    // The default matches DataScripter.WarnRows.
+    const warnRows = useSetting("scripting.warnRows");
     const list = useRef<HTMLDivElement>(null);
 
     // A schema is a dependency of the objects inside it, never a choice: the generator creates the
@@ -343,9 +343,9 @@ export function ScriptingPanel({ alias, db, selection, onSelection }: ScriptingP
                 const estimate = rowCounts.get(id);
                 // Unknown counts as too big. Waving a table through because nobody measured it is
                 // the one failure that silently produces the enormous script this warning exists for.
-                return estimate === null || (estimate !== undefined && estimate > WARN_ROWS);
+                return estimate === null || (estimate !== undefined && estimate > warnRows);
             }),
-        [targets, modeOf, rowCounts],
+        [targets, modeOf, rowCounts, warnRows],
     );
 
     const request = (): ScriptRequest => ({
@@ -465,7 +465,7 @@ export function ScriptingPanel({ alias, db, selection, onSelection }: ScriptingP
             {unbounded.length > 0 && (
                 <div className="warn-note">
                     {unbounded.length === 1 ? "This table has" : "These tables have"} more than{" "}
-                    {WARN_ROWS.toLocaleString("en-US")} rows, so <b>all</b> is probably not what you want:{" "}
+                    {warnRows.toLocaleString("en-US")} rows, so <b>all</b> is probably not what you want:{" "}
                     {unbounded.map((o) => o.schema + "." + o.name).join(", ")}. Use <b>top</b> or <b>query</b> instead.
                 </div>
             )}

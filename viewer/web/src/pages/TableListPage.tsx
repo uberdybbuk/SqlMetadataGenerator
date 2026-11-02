@@ -6,9 +6,11 @@ import { useApi } from "../useApi";
 import { formatKb, formatRows, plural } from "../format";
 import { DataTable, type Column } from "../DataTable";
 import { Icon } from "../Icon";
+import { useSortSetting } from "../settings";
 
 export function TableListPage() {
     const { alias = "", db = "", schema } = useParams();
+    const sort = useSortSetting("lists.tables.sort");
     const navigate = useNavigate();
     const { data, error, loading } = useApi(() => api.tables(alias, db), [alias, db]);
     const [search, setSearch] = useState("");
@@ -125,7 +127,7 @@ export function TableListPage() {
                 columns={columns}
                 rows={shown}
                 rowKey={(t) => `${t.schema}.${t.name}`}
-                initialSort={{ key: "reserved", desc: true }}
+                initialSort={sort}
                 dense
                 resizable
                 emptyNote="No matching tables."

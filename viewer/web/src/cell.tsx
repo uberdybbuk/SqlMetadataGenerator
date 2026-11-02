@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { getSetting } from "./settings";
+
 // Formats values according to their SQL type.
 //
 // The backend sends date and time values as ISO 8601 ("o"), which is right for a machine but
@@ -30,7 +32,7 @@ export function formatCell(value: unknown, typeName: string): ReactNode {
 
     if (DATE_ONLY.has(t)) {
         // "2026-07-22T00:00:00.0000000" -> "2026-07-22"
-        return text.slice(0, 10);
+        return showDate(text.slice(0, 10));
     }
 
     if (DATE_TIME.has(t)) {
@@ -42,7 +44,7 @@ export function formatCell(value: unknown, typeName: string): ReactNode {
         return (
             <>
                 {main}
-                {fraction && <span className="sub">{fraction}</span>}
+                {showFraction(fraction)}
             </>
         );
     }
@@ -61,10 +63,34 @@ function splitTimestamp(text: string): ReactNode {
     const [time, fraction] = splitFraction(text.slice(t + 1));
     return (
         <>
-            {date} {time}
-            {fraction && <span className="sub">{fraction}</span>}
+            {showDate(date)} {time}
+            {showFraction(fraction)}
         </>
     );
+}
+
+// The Date Format setting. Display only: the clipboard keeps year-first (see formatCellText).
+// "2026-07-22" -> "22.07.2026"
+function showDate(iso: string): string {
+    if (getSetting("grid.dateFormat") !== "dmy") {
+        return iso;
+    }
+    const [year, month, day] = iso.split("-");
+    return day && month ? `${day}.${month}.${year}` : iso;
+}
+
+// ".1717949+03:00" -> the faint fraction and the offset. With fractional seconds turned off only
+// the digits go: the offset is part of the value, not precision, and hiding it would change the
+// moment the cell names.
+function showFraction(fraction: string): ReactNode {
+    if (!fraction) {
+        return null;
+    }
+    if (getSetting("grid.fractionalSeconds")) {
+        return <span className="sub">{fraction}</span>;
+    }
+    const rest = fraction.replace(/^\.\d*/, "");
+    return rest ? <span className="sub">{rest}</span> : null;
 }
 
 // Separates the sub-second part and the time-zone suffix, when there is one.

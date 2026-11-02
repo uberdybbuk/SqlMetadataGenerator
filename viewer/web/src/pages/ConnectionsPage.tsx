@@ -4,7 +4,7 @@ import { api } from "../api";
 import { useApi } from "../useApi";
 import { plural } from "../format";
 import { Icon } from "../Icon";
-import { APP_NAME } from "../Layout";
+import { APP_NAME, SETTINGS_ROUTE } from "../Layout";
 import { CONNECTIONS_ROUTE } from "./ConnectionFormPage";
 
 export function ConnectionsPage() {
@@ -26,6 +26,9 @@ export function ConnectionsPage() {
                 {connections.length
                     ? `${connections.length} ${plural(connections.length, "server")} configured`
                     : "No connections yet. Add one to start exploring."}
+                {/* The home page has no breadcrumb bar, so the way to the settings is spelled out here. */}
+                {" · "}
+                <Link to={SETTINGS_ROUTE}>Settings</Link>
             </p>
             <div className="cards">
                 {connections.map((c) => (
