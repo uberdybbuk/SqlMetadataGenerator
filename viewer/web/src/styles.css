@@ -2675,7 +2675,8 @@ body.resizing .dgresizer::after {
 }
 
 .setting select,
-.setting input[type="number"] {
+.setting input[type="number"],
+.setting input[type="text"] {
     font: inherit;
     padding: 3px 6px;
     border: 1px solid var(--head-line);
@@ -2716,6 +2717,68 @@ body.resizing .dgresizer::after {
     display: flex;
     align-items: center;
     gap: 10px;
+}
+
+.setting-list ul {
+    list-style: none;
+    margin: 0 0 6px;
+    padding: 0;
+    max-width: 420px;
+    border: 1px solid var(--head-line);
+    border-radius: 4px;
+    background: var(--panel);
+}
+
+.setting-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 3px 4px 3px 8px;
+}
+
+.setting-list li + li {
+    border-top: 1px solid var(--border);
+}
+
+.setting-remove {
+    padding: 0 6px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.setting-remove:hover {
+    color: var(--danger);
+}
+
+.setting-list-add {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* After .setting's "font: inherit", which would otherwise take the mono face away. */
+.setting-list-add input {
+    width: 300px;
+    font-family: var(--mono);
+}
+
+.setting-list-add button {
+    font: inherit;
+    padding: 3px 12px;
+    border: 1px solid var(--head-line);
+    border-radius: 4px;
+    background: var(--head);
+    color: var(--text);
+    cursor: pointer;
+}
+
+.setting-list-add button:disabled {
+    cursor: default;
+    opacity: 0.5;
 }
 
 .setting-error {

@@ -6,6 +6,7 @@ import {
     resetSetting,
     setSetting,
     useSetting,
+    type ListSetting,
     type NumberSetting,
     type Setting,
     type SettingId,
@@ -242,8 +243,10 @@ function SettingRow({ setting }: { setting: Entry }) {
                                 </option>
                             ))}
                         </select>
-                    ) : (
+                    ) : setting.kind === "number" ? (
                         <NumberInput id={control} setting={setting} value={value as number} />
+                    ) : (
+                        <ListInput id={control} setting={setting} value={value as readonly string[]} />
                     )}
                 </>
             )}
@@ -284,6 +287,68 @@ function NumberInput({ id, setting, value }: { id: string; setting: NumberSettin
                     A whole number from {setting.min.toLocaleString("en-US")} to {setting.max.toLocaleString("en-US")}.
                 </span>
             )}
+        </div>
+    );
+}
+
+// As VS Code edits a string array: the items one per line, each with its own remove button, and
+// a field below for the next one. Enter adds, so a few patterns go in without touching the mouse.
+// Blanks and repeats (in any case, since matching ignores it) are not added.
+function ListInput({ id, setting, value }: { id: string; setting: ListSetting; value: readonly string[] }) {
+    const [draft, setDraft] = useState("");
+    const item = draft.trim();
+    const repeat = value.some((v) => v.toLowerCase() === item.toLowerCase());
+
+    const add = () => {
+        if (item && !repeat) {
+            setSetting(setting.id as SettingId, [...value, item] as never);
+            setDraft("");
+        }
+    };
+
+    return (
+        <div className="setting-list">
+            {value.length > 0 && (
+                <ul>
+                    {value.map((entry, index) => (
+                        <li key={entry}>
+                            <span className="mono">{entry}</span>
+                            <button
+                                type="button"
+                                className="setting-remove"
+                                title={`Remove ${entry}`}
+                                aria-label={`Remove ${entry}`}
+                                onClick={() =>
+                                    setSetting(setting.id as SettingId, value.filter((_, i) => i !== index) as never)
+                                }
+                            >
+                                ×
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            <div className="setting-list-add">
+                <input
+                    id={id}
+                    type="text"
+                    className="mono"
+                    placeholder={setting.placeholder}
+                    value={draft}
+                    aria-invalid={repeat && item !== ""}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                            e.preventDefault();
+                            add();
+                        }
+                    }}
+                />
+                <button type="button" onClick={add} disabled={!item || repeat}>
+                    Add
+                </button>
+                {repeat && item !== "" && <span className="setting-error">Already in the list.</span>}
+            </div>
         </div>
     );
 }

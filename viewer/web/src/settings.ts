@@ -34,7 +34,14 @@ export interface BooleanSetting extends Base {
     default: boolean;
 }
 
-export type Setting = ChoiceSetting | NumberSetting | BooleanSetting;
+// A list of short strings, edited one item at a time. Order is kept as entered.
+export interface ListSetting extends Base {
+    kind: "list";
+    placeholder: string;
+    default: readonly string[];
+}
+
+export type Setting = ChoiceSetting | NumberSetting | BooleanSetting | ListSetting;
 
 // A list's sort is stored as "column:asc" or "column:desc", the column being DataTable's key.
 function sortOption(column: string, desc: boolean, label: string) {
@@ -156,6 +163,16 @@ export const SETTINGS = [
         default: "tables:desc",
     },
     {
+        id: "treemap.hidden",
+        section: "Treemap",
+        title: "Hidden Schemas and Tables",
+        description:
+            "Left off the database treemap, so a few huge log tables do not squeeze everything else into slivers. A name without a dot is a schema (Infra), a name with a dot is a table (Infra.TranRequestLog), and * matches any run of characters (*.TranRequestLog, Infra.*Log). Case does not matter. The table list and the totals still count them, and the treemap says how much it is leaving out.",
+        kind: "list",
+        placeholder: "Infra or Infra.TranRequestLog",
+        default: [],
+    },
+    {
         id: "pivot.limit",
         section: "Pivot",
         title: "Group Limit",
@@ -189,14 +206,20 @@ export const SETTINGS = [
 
 export type SettingId = (typeof SETTINGS)[number]["id"];
 
-type ValueOf<S> = S extends { kind: "number" } ? number : S extends { kind: "boolean" } ? boolean : string;
+type ValueOf<S> = S extends { kind: "number" }
+    ? number
+    : S extends { kind: "boolean" }
+      ? boolean
+      : S extends { kind: "list" }
+        ? readonly string[]
+        : string;
 export type SettingValue<K extends SettingId> = ValueOf<Extract<(typeof SETTINGS)[number], { id: K }>>;
 
 const byId = new Map<string, Setting>(SETTINGS.map((s) => [s.id, s]));
 
 // ---------------------------------------------------------------- store
 
-type Stored = Record<string, string | number | boolean>;
+type Stored = Record<string, string | number | boolean | readonly string[]>;
 
 function load(): Stored {
     try {
@@ -232,7 +255,18 @@ function valid(setting: Setting, value: unknown): boolean {
             return typeof value === "number" && Number.isInteger(value) && value >= setting.min && value <= setting.max;
         case "boolean":
             return typeof value === "boolean";
+        case "list":
+            return Array.isArray(value) && value.every((item) => typeof item === "string");
     }
+}
+
+// Lists are compared by content: a list emptied item by item equals the empty default and
+// should stop counting as modified.
+function same(a: unknown, b: unknown): boolean {
+    if (Array.isArray(a) && Array.isArray(b)) {
+        return a.length === b.length && a.every((item, i) => item === b[i]);
+    }
+    return a === b;
 }
 
 export function getSetting<K extends SettingId>(id: K): SettingValue<K> {
@@ -251,7 +285,7 @@ export function setSetting<K extends SettingId>(id: K, value: SettingValue<K>): 
         return;
     }
     const next = { ...stored };
-    if (value === setting.default) {
+    if (same(value, setting.default)) {
         delete next[id];
     } else {
         next[id] = value;

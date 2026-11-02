@@ -11,6 +11,8 @@ import { Icon, type IconName } from "../Icon";
 import { ScriptingPanel } from "../scripting/ScriptingPanel";
 import { DiagramPanel } from "../diagram/DiagramPanel";
 import { EMPTY, type Selection } from "../scripting/selection";
+import { useSetting } from "../settings";
+import { SETTINGS_ROUTE } from "../Layout";
 
 // How many rows the "Largest tables" block shows before the link to the full list. Enough that a
 // mid-sized database is covered here and the link is for the long tail, rather than the block
@@ -58,6 +60,15 @@ export function DatabasePage() {
     // objects, and the same name in another database is a different object.
     useEffect(() => setSelection(EMPTY), [alias, db]);
 
+    // Schemas and tables the settings keep off the treemap (huge log tables, typically). The
+    // "show" chip brings them back for the moment without touching the setting. It remembers
+    // which database it was pressed in, so the next database starts with them hidden again.
+    const hiddenPatterns = useSetting("treemap.hidden");
+    const isHidden = useMemo(() => hiddenMatcher(hiddenPatterns), [hiddenPatterns]);
+    const here = `${alias}/${db}`;
+    const [shownIn, setShownIn] = useState<string | null>(null);
+    const showHidden = shownIn === here;
+
     const overview = useApi(() => api.database(alias, db), [alias, db]);
     // Which engine this alias is. Script generation is SQL Server only, so the tab says so
     // rather than opening a picker whose Generate button would come back 501.
@@ -68,9 +79,16 @@ export function DatabasePage() {
     const base = `/app/${encodeURIComponent(alias)}/${encodeURIComponent(db)}`;
     const rows = tables.data ?? [];
     const sized = useMemo(() => rows.filter((t) => t.reservedKb > 0), [rows]);
-    const inScope = useMemo(
+    const inDrill = useMemo(
         () => (drill ? sized.filter((t) => t.schema === drill) : sized),
         [sized, drill],
+    );
+    // Counted within the drill, so the note under a schema speaks about that schema only.
+    const hidden = useMemo(() => (isHidden ? inDrill.filter(isHidden) : []), [inDrill, isHidden]);
+    const hiddenKb = hidden.reduce((sum, t) => sum + t.reservedKb, 0);
+    const inScope = useMemo(
+        () => (showHidden || !isHidden || hidden.length === 0 ? inDrill : inDrill.filter((t) => !isHidden(t))),
+        [inDrill, isHidden, hidden, showHidden],
     );
     const option = useMemo(() => buildTreemap(inScope, dark, drill !== null), [inScope, dark, drill]);
 
@@ -233,6 +251,20 @@ export function DatabasePage() {
                                 </span>
                             )}
                             {!drill && <span className="muted">click a schema to drill in</span>}
+                            {/* Never silent: the map is about where the space goes, and a 40 GB
+                                table that quietly vanished would make it lie. */}
+                            {hidden.length > 0 && (
+                                <>
+                                    <span className="muted" title={hidden.map((t) => `${t.schema}.${t.name}`).join("\n")}>
+                                        {hidden.length} {plural(hidden.length, "table")} ({formatKb(hiddenKb)}){" "}
+                                        {showHidden ? "normally hidden" : "hidden"} by{" "}
+                                        <Link to={SETTINGS_ROUTE}>settings</Link>
+                                    </span>
+                                    <button className="chip" aria-pressed={showHidden} onClick={() => setShownIn(showHidden ? null : here)}>
+                                        show them
+                                    </button>
+                                </>
+                            )}
                         </div>
 
                         <div style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel)" }}>
@@ -327,6 +359,27 @@ function ColorScale({ dark }: { dark: boolean }) {
             <span>more rows</span>
         </div>
     );
+}
+
+// The Treemap › Hidden setting's patterns: "Infra" is a schema, "Infra.TranRequestLog" a table
+// (split at the first dot), and * matches any run of characters. SQL Server compares names
+// without case by default and PostgreSQL folds them, so case is ignored here too.
+function hiddenMatcher(patterns: readonly string[]): ((t: TableStats) => boolean) | null {
+    const glob = (text: string) =>
+        new RegExp("^" + text.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$", "i");
+    const rules = patterns
+        .map((p) => p.trim())
+        .filter(Boolean)
+        .map((p) => {
+            const dot = p.indexOf(".");
+            return dot < 0
+                ? { schema: glob(p), table: null }
+                : { schema: glob(p.slice(0, dot)), table: glob(p.slice(dot + 1)) };
+        });
+    if (rules.length === 0) {
+        return null;
+    }
+    return (t) => rules.some((r) => r.schema.test(t.schema) && (r.table === null || r.table.test(t.name)));
 }
 
 function buildTreemap(rows: TableStats[], dark: boolean, flat: boolean) {
