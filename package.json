@@ -1,0 +1,7 @@
+{
+    "private": true,
+    "scripts": {
+        "start": "bun start.ts",
+        "stop": "bun start.ts stop"
+    }
+}

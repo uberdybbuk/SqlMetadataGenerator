@@ -18,7 +18,7 @@ npm install
 npm run dev
 ```
 
-`http://localhost:5173` açılır; `/api` istekleri `:5099`'a proxy'lenir, böylece
+`http://localhost:7750` açılır; `/api` istekleri `:7751`'a proxy'lenir, böylece
 frontend her iki modda da `/api/...` yazar ve CORS gerekmez.
 
 ## Production

@@ -88,8 +88,8 @@ Skip the environment-variable command if you only use integrated authentication.
 In Bash, the equivalent is `export SQLMETA_PW_DEMO='YOUR_SQL_PASSWORD'`.
 The application does not automatically load a `.env` file.
 			       	  	      	             	     	          	        	   	
-The included launch profile starts the API at `http://localhost:5099`.
-Open `http://localhost:5099/api/health` to check that it is running; this endpoint does not test SQL Server connectivity.
+The included launch profile starts the API at `http://localhost:7751`.
+Open `http://localhost:7751/api/health` to check that it is running; this endpoint does not test SQL Server connectivity.
 			     	          	        	          	 	              	 	           	   	  	
 The host searches for `connections.json` in the working directory, content root and parent directories.
 To select another file, pass its absolute path:
@@ -108,7 +108,7 @@ npm ci
 npm run dev
 ```
 			     	   	   	          	        	           	       	              	
-Open **http://localhost:5173/app**. Vite proxies `/api` requests to `http://localhost:5099`.
+Open **http://localhost:7750/app**. Vite proxies `/api` requests to `http://localhost:7751`.
 Choose a connection, then a database to explore its objects.
 			      	             	     	   	 	              	 	           	        	  	
 ### Serve the built frontend from ASP.NET Core
@@ -126,7 +126,7 @@ dotnet run --project src/SqlMetadataGenerator.Web
 			     	                	      	                	    	  	 	              	
 Set any required password variables in this terminal before starting the API.
 The frontend build writes to `src/SqlMetadataGenerator.Web/wwwroot/`; ASP.NET Core serves it at
-**http://localhost:5099/app**. Rebuild the frontend after changing its source.
+**http://localhost:7751/app**. Rebuild the frontend after changing its source.
 If publishing the web project with `dotnet publish`, run the frontend build first so those assets are included.
 			 	           	       	              	        	    	   	             	
 ## CLI usage
@@ -189,8 +189,8 @@ dotnet run --project src/SqlMetadataGenerator.Cli
 - **`dotnet`, `node` or `npm` is not recognized:** install the required tools or fix `PATH`, then reopen the terminal.
 - **Empty web connection list:** check that `connections.json` exists. The API startup log reports the file it loaded or warns that none was found.
 - **`No password for ...`:** set the environment variable named by that connection's `passwordEnv` in the terminal that starts the API, then restart it.
-- **Frontend cannot reach the API:** ensure the API is running on port `5099`. If you change that port, update the proxy target in `viewer/web/vite.config.ts` too.
-- **No UI on port `5099`:** use the Vite URL during development, or run `npm run build` to create the files served by ASP.NET Core.
+- **Frontend cannot reach the API:** ensure the API is running on port `7751`. If you change that port, update the proxy target in `viewer/web/vite.config.ts` too.
+- **No UI on port `7751`:** use the Vite URL during development, or run `npm run build` to create the files served by ASP.NET Core.
 - **SQL connection fails:** check the server/instance or port, authentication mode and database permissions.
 			        	  	       	           	       	         	      	           	
 			      	           	      	           	    	                	     	    	

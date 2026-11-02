@@ -45,7 +45,7 @@ internal static class Program
 
         // In production the SPA is served from wwwroot. The fallback is required: on a client-side
         // route like /app/demo/Bpm/tables the server has no such file when the page is refreshed.
-        // In development Vite serves the SPA (:5173) and proxies /api here.
+        // In development Vite serves the SPA (:7750) and proxies /api here.
         app.UseStaticFiles();
         app.MapFallbackToFile("index.html");
 
