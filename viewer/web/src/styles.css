@@ -1918,91 +1918,584 @@ body.resizing .dgresizer::after {
     fill: var(--warn);
 }
 
-/* ---- Pivot ---- */
+/* ---- Pivot: laid out as Excel's pivot table ---- */
+/* The matrix and its SQL on the left; the field list and the four areas on the right. */
 .pivot {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 16px;
+    align-items: start;
     margin-top: 12px;
 }
 
-.pivot-spec {
+.pivot-main {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px 14px;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--panel);
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
 }
 
-.pivot-group {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-}
-
-.pivot-label {
+.plabel {
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--muted);
 }
 
-.pivot-field {
+.pivot .link-button {
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+}
+
+.pivot .link-button:disabled {
+    color: var(--muted);
+    cursor: default;
+}
+
+/* Filters and WHERE */
+.pfilterline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+}
+
+.pfilterbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.pchip-wrap {
+    position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 2px;
-    padding: 2px 2px 2px 6px;
     border: 1px solid var(--border);
     border-radius: 999px;
+    background: var(--panel);
+}
+
+.pchip-wrap:has(.pchip.active) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.pchip,
+.pchip-x {
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.pchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 4px 3px 10px;
+}
+
+.pchip .caret,
+.pchip-x {
+    color: var(--muted);
+}
+
+.pchip-x {
+    padding: 3px 9px 3px 4px;
+}
+
+.pchip-x:hover {
+    color: var(--danger);
+}
+
+.pwhere {
+    flex: 1 1 320px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pwhere input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 5px 9px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    color: inherit;
+}
+
+/* The value list a filter chip opens */
+.ppicker {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 20;
+    width: 300px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+}
+
+.ppicker input[type="search"] {
+    width: 100%;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.ppicker-list {
+    max-height: 260px;
+    overflow: auto;
+    margin: 6px 0;
+}
+
+.ppicker-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px;
+    font-size: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.ppicker-row:hover {
     background: var(--head);
 }
 
-.pivot-field select {
+.ppicker-row.all {
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2px;
+}
+
+.ppicker-row .mono {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ppicker-row .count {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.ppicker-note {
+    color: var(--muted);
+    font-size: 11px;
+    margin-bottom: 6px;
+}
+
+.ppicker-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.null-label {
+    color: var(--null);
+    font-style: italic;
+}
+
+/* The matrix */
+.pmatrix-box {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+}
+
+/* A result that no longer answers the areas is still worth reading, but not mistaking for the
+   current one. */
+.pmatrix-box.stale .pmatrix {
+    opacity: 0.55;
+}
+
+.pstale {
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--warn);
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+.pmatrix-scroll {
+    overflow: auto;
+    max-height: 70vh;
+}
+
+.pmatrix {
+    width: auto;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 12px;
+}
+
+.pmatrix th,
+.pmatrix td {
+    padding: 3px 10px;
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.pmatrix thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--head);
+    font-weight: 600;
+    text-align: right;
+}
+
+.pmatrix thead tr + tr th {
+    top: 24px;
+}
+
+.pmatrix thead th.corner {
+    left: 0;
+    z-index: 3;
+    text-align: left;
+    vertical-align: bottom;
+    color: var(--muted);
+    font-weight: 500;
+}
+
+.pmatrix thead th.corner .axis {
+    display: block;
+    font-size: 11px;
+    margin-bottom: 2px;
+}
+
+.pmatrix td {
+    text-align: right;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+
+/* The label column stays in view while a wide cross-tab scrolls sideways. */
+.pmatrix tbody th.label {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--panel);
+    text-align: left;
+    font-weight: 400;
+    font-family: var(--mono);
+}
+
+.pmatrix .twist {
+    display: inline-block;
+    width: 16px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    cursor: pointer;
+}
+
+.pmatrix tr.sub td,
+.pmatrix tr.sub th.label {
+    font-weight: 600;
+    background: color-mix(in srgb, var(--head) 55%, var(--panel));
+}
+
+.pmatrix td.tot {
+    font-weight: 600;
+    background: color-mix(in srgb, var(--head) 55%, var(--panel));
+}
+
+.pmatrix tr.grand td,
+.pmatrix tr.grand th.label {
+    font-weight: 700;
+    background: var(--head);
+    border-top: 2px solid var(--head-line);
+    position: sticky;
+    bottom: 0;
+}
+
+.pmatrix tr.grand th.label {
+    z-index: 2;
+}
+
+.pmatrix td.share {
+    color: var(--muted);
+}
+
+.pmatrix tbody tr:hover td,
+.pmatrix tbody tr:hover th.label {
+    background: var(--accent-soft);
+}
+
+.pcapped {
+    margin: 8px 10px;
+}
+
+.pstatus {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 10px;
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+    border-top: 1px solid var(--border);
+    background: var(--head);
+}
+
+.pstatus-tools {
+    display: flex;
+    gap: 12px;
+}
+
+.pstatus-tools .link-button {
+    font-size: 11px;
+}
+
+/* The SQL */
+.psql {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+}
+
+.psql-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+}
+
+.psql-bar .grow {
+    flex: 1;
+}
+
+.psql .tag {
+    padding: 0 6px;
+    border-radius: 4px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.psql-editor {
+    height: 220px;
+}
+
+.psql-error {
+    margin: 10px;
+}
+
+.psql-empty {
+    padding: 16px 12px;
+}
+
+/* The field list and the four areas */
+.pfields {
+    position: sticky;
+    top: 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+}
+
+.pfield-search {
+    width: 100%;
+    padding: 5px 9px;
+    font-size: 12px;
+}
+
+.pfield-list {
+    max-height: 260px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 0;
+}
+
+.pfield {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    font-size: 12px;
+    cursor: grab;
+}
+
+.pfield:hover {
+    background: var(--head);
+}
+
+.pfield .name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pfield.on .name {
+    font-weight: 600;
+}
+
+.pfield .type {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+}
+
+.pfield-none {
+    padding: 6px 8px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.pareas {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.parea {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.pzone {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    min-height: 64px;
+    padding: 5px;
+    border: 1px dashed var(--head-line);
+    border-radius: 6px;
+    background: var(--bg);
+}
+
+.pzone.hot {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.phint {
+    color: var(--muted);
+    font-size: 11px;
+    padding: 2px;
+}
+
+/* Wraps rather than truncates: the areas are narrow, and "Crea… by mo" names neither the field
+   nor its period. The period drops under the name when the two do not fit side by side. */
+.ppill {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 2px;
+    min-width: 0;
+    padding: 2px 2px 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--head);
+    font-size: 12px;
+    cursor: grab;
+}
+
+.ppill.filter {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.ppill .ptext {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ppill select {
+    flex: 1 1 auto;
+    min-width: 0;
     border: none;
     background: none;
     color: inherit;
     font: inherit;
-    font-size: 12px;
-    max-width: 190px;
+    font-size: 11.5px;
 }
 
-.pivot-x {
+.ppill .ptext + select {
+    flex: 0 0 auto;
+    order: 3;
+    color: var(--muted);
+}
+
+.ppill .x {
+    order: 2;
+}
+
+.ppill .x {
     border: none;
     background: none;
     color: var(--muted);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1;
     padding: 0 5px;
 }
 
-.pivot-x:hover {
+.ppill .x:hover {
     color: var(--danger);
 }
 
-.pivot-where {
-    width: 100%;
-    min-width: 180px;
-    padding: 4px 8px;
+.padd-count {
+    align-self: flex-start;
     font-size: 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg);
-    color: inherit;
 }
 
-.pivot-sql pre {
-    margin: 8px 0 0;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--panel);
+.prun {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 4px;
+}
+
+.pauto {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 12px;
-    overflow: auto;
+    color: var(--muted);
+}
+
+.pblocker {
+    font-size: 11px;
+    color: var(--muted);
 }
 
 /* ---- Settings: laid out after VS Code's settings editor ---- */

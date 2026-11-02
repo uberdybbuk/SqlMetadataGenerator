@@ -275,12 +275,25 @@ export interface PivotValueField {
     column?: string;
 }
 
+// Excel's report filter: the values ticked in a field's list. A null entry stands for NULL.
+// Exclude turns the list around ("everything but these"), which is what unticking a few values of
+// a list that only shows the most frequent ones has to mean.
+export interface PivotFilterField {
+    column: string;
+    values: (string | null)[];
+    exclude?: boolean;
+}
+
 export interface PivotSpec {
     rows: PivotRowField[];
+    // The cross-tab fields: their values become the matrix's column headers.
+    columns?: PivotRowField[];
     values: PivotValueField[];
+    filters?: PivotFilterField[];
     where?: string;
     totals?: boolean;
-    // At most this many groups; the server clamps it to its own ceiling.
+    // At most this many result rows; the server clamps it to its own ceiling. With column fields
+    // a result row is one cell of the matrix, and the ceiling is higher.
     limit?: number;
 }
 
@@ -289,6 +302,7 @@ export interface PivotResult {
     // black box over your own data.
     sql: string;
     rowFieldCount: number;
+    columnFieldCount: number;
     measureCount: number;
     columns: QueryColumn[];
     rows: (string | number | boolean | null)[][];
@@ -418,6 +432,15 @@ export const api = {
         post<PivotResult>(
             `/api/servers/${seg(alias)}/databases/${seg(db)}/tables/${seg(schema)}/${seg(name)}/pivot`,
             spec,
+            signal,
+        ),
+
+    // The statement a spec would run, without running it: the screen shows it while the spec is
+    // still being put together.
+    pivotSql: (alias: string, db: string, schema: string, name: string, spec: PivotSpec, signal?: AbortSignal) =>
+        post<{ sql: string }>(
+            `/api/servers/${seg(alias)}/databases/${seg(db)}/tables/${seg(schema)}/${seg(name)}/pivot`,
+            { ...spec, dryRun: true },
             signal,
         ),
 

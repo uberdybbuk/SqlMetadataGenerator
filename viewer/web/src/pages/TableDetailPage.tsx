@@ -108,7 +108,11 @@ export function TableDetailPage() {
                 </button>
             </div>
 
-            {pivoting && <PivotPanel alias={alias} db={db} schema={schema} name={name} />}
+            {/* Keyed by the table: this page stays mounted when the URL moves to another table, and
+                without a key the previous table's pivot would carry over into it. */}
+            {pivoting && (
+                <PivotPanel key={`${alias}/${db}/${schema}/${name}`} alias={alias} db={db} schema={schema} name={name} />
+            )}
 
             {!pivoting && tab === "data" && (
                 <DataTab

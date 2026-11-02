@@ -296,11 +296,20 @@ internal static class ExplorerEndpoints
                     return BadRequest(ex.Message);
                 }
 
-                var result = await scope.Explorer.RunQueryAsync(built.Sql, PivotQuery.MaxLimit, ct: ct);
+                // A dry run answers with the statement alone. The screen shows the SQL while the
+                // spec is still being put together, and composing it costs nothing — running it
+                // is the expensive part, and that stays behind the Run button.
+                if (body.DryRun == true)
+                {
+                    return Results.Ok(new { built.Sql });
+                }
+
+                var result = await scope.Explorer.RunQueryAsync(built.Sql, built.Limit, ct: ct);
                 return Results.Ok(new
                 {
                     built.Sql,
                     built.RowFieldCount,
+                    built.ColumnFieldCount,
                     built.MeasureCount,
                     result.Columns,
                     result.Rows,
@@ -678,21 +687,37 @@ internal static class ExplorerEndpoints
 
     public sealed record PivotValueRequest(string? Agg, string? Column);
 
+    public sealed record PivotFilterRequest(string? Column, List<string?>? Values, bool? Exclude);
+
     public sealed record PivotRequest(
         List<PivotFieldRequest>? Rows,
+        List<PivotFieldRequest>? Columns,
         List<PivotValueRequest>? Values,
+        List<PivotFilterRequest>? Filters,
         string? Where,
-        bool? Totals)
+        bool? Totals,
+        int? Limit,
+        bool? DryRun)
     {
         public PivotSpec ToSpec() => new()
         {
-            Rows = (Rows ?? []).Select(r => new PivotField(
-                r.Column ?? throw new InvalidOperationException("A row field needs a column."),
-                ParseGrain(r.Grain))).ToList(),
+            Rows = Fields(Rows, "row"),
+            Columns = Fields(Columns, "column"),
             Values = (Values ?? []).Select(v => new PivotMeasure(ParseAggregate(v.Agg), v.Column)).ToList(),
+            Filters = (Filters ?? []).Select(f => new PivotFilter(
+                f.Column ?? throw new InvalidOperationException("A filter needs a column."),
+                f.Values ?? [],
+                f.Exclude ?? false)).ToList(),
             Where = Where,
             Totals = Totals ?? true,
+            // Capped again in PivotQuery, so this can only ask for fewer rows, never more.
+            Limit = Limit ?? PivotQuery.MaxCells,
         };
+
+        private static List<PivotField> Fields(List<PivotFieldRequest>? fields, string role) =>
+            (fields ?? []).Select(f => new PivotField(
+                f.Column ?? throw new InvalidOperationException($"A {role} field needs a column."),
+                ParseGrain(f.Grain))).ToList();
 
         private static DateGrain ParseGrain(string? grain) => grain?.Trim().ToLowerInvariant() switch
         {

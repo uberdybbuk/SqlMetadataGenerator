@@ -1,21 +1,19 @@
-import { useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-import {
-    api,
-    type ColumnSummary,
-    type PivotAgg,
-    type PivotGrain,
-    type PivotResult,
-    type PivotRowField,
-    type PivotValueField,
-} from "../api";
+import { api, type ColumnSummary, type PivotResult } from "../api";
 import { useApi } from "../useApi";
-import { Icon } from "../Icon";
-import { ResultGrid, type ResultColumn } from "../ResultGrid";
-import { isNumericType } from "../cell";
-import { useSetting } from "../settings";
+import { setSetting, useSetting } from "../settings";
+import { FieldPane } from "./FieldPane";
+import { FilterBar, type ValueList } from "./FilterBar";
+import { EMPTY_LAYOUT, toSpec, type Layout } from "./layout";
+import { formatLabel, toMatrix, toTsv, visibleRows, type RowNode } from "./matrix";
+import { PivotMatrix } from "./PivotMatrix";
 
-// Analysing a table by grouping it.
+const SqlEditor = lazy(() => import("../SqlEditor"));
+
+// Analysing a table by grouping it, laid out as Excel's pivot table: the matrix and its SQL on
+// the left, the field list and the four areas on the right.
 //
 // The aggregation happens in the DATABASE, not over the rows on screen. The grid holds at most a
 // thousand rows because the server caps it there, and a total computed from a capped sample is a
@@ -23,73 +21,220 @@ import { useSetting } from "../settings";
 // produce. What travels to the server is a spec; what comes back is the summary and the exact
 // statement that produced it.
 
-const AGGREGATES: { value: PivotAgg; label: string; needsColumn: boolean; numericOnly: boolean }[] = [
-    { value: "count", label: "count rows", needsColumn: false, numericOnly: false },
-    { value: "sum", label: "sum", needsColumn: true, numericOnly: true },
-    { value: "avg", label: "average", needsColumn: true, numericOnly: true },
-    { value: "min", label: "min", needsColumn: true, numericOnly: false },
-    { value: "max", label: "max", needsColumn: true, numericOnly: false },
-    { value: "countDistinct", label: "distinct values", needsColumn: true, numericOnly: false },
-];
+// How many of a field's values its filter list offers. The most frequent come first.
+const VALUE_LIST_LIMIT = 200;
 
-const GRAINS: PivotGrain[] = ["year", "quarter", "month", "day"];
+// The panel unmounts whenever another tab is picked, and an analysis that is gone when you come
+// back to it is one you cannot work with. So the layout AND its result are kept per table for the
+// life of the page. The result is kept rather than recomputed on return: re-running would put a
+// whole-table aggregate behind a tab click, which is what the POST endpoint exists to avoid.
+interface Ran {
+    // The spec the result answers, as sent. Compared with the current one to tell a result that
+    // still matches the areas from one the areas have since moved away from.
+    key: string;
+    layout: Layout;
+    result: PivotResult;
+}
 
-// Grouping a timestamp as it stands gives one group per microsecond, so a date field always
-// carries a period. Month is the one people mean most often.
-const DATE_TYPES = new Set([
-    "date", "datetime", "datetime2", "smalldatetime", "datetimeoffset",
-    "timestamp", "timestamptz", "timestamp without time zone", "timestamp with time zone",
-]);
+interface Kept {
+    layout: Layout;
+    where: string;
+    ran: Ran | null;
+    error: string | null;
+    showSql: boolean;
+    collapsed: string[];
+}
 
-const isDate = (typeName: string) => DATE_TYPES.has(typeName.toLowerCase());
-
-// A share of the total only means something for a measure that adds up. The average of the parts
-// is not a share of the average of the whole, so those columns simply do not get one.
-const ADDITIVE = new Set<PivotAgg>(["count", "sum"]);
+const kept = new Map<string, Kept>();
 
 export function PivotPanel({ alias, db, schema, name }: { alias: string; db: string; schema: string; name: string }) {
     const shape = useApi(() => api.table(alias, db, schema, name), [alias, db, schema, name]);
     const columns: ColumnSummary[] = useMemo(() => shape.data?.columns ?? [], [shape.data]);
     const limit = useSetting("pivot.limit");
+    const autoRun = useSetting("pivot.autoRun");
+    const navigate = useNavigate();
 
-    const [rows, setRows] = useState<PivotRowField[]>([]);
-    const [values, setValues] = useState<PivotValueField[]>([{ agg: "count" }]);
-    const [where, setWhere] = useState("");
-    const [result, setResult] = useState<PivotResult | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    const key = [alias, db, schema, name].join("\u0000");
+    const [initial] = useState(() => kept.get(key));
+    const [layout, setLayout] = useState<Layout>(initial?.layout ?? EMPTY_LAYOUT);
+    const [where, setWhere] = useState(initial?.where ?? "");
+    const [ran, setRan] = useState<Ran | null>(initial?.ran ?? null);
+    const [error, setError] = useState<string | null>(initial?.error ?? null);
+    const [showSql, setShowSql] = useState(initial?.showSql ?? true);
+    const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(initial?.collapsed ?? []));
     const [running, setRunning] = useState(false);
-    const [showSql, setShowSql] = useState(false);
+    const [preview, setPreview] = useState<{ key: string; sql: string | null; error: string | null } | null>(null);
+    const runController = useRef<AbortController | null>(null);
 
-    const addRow = () => {
-        const used = new Set(rows.map((r) => r.column));
-        const next = columns.find((c) => !used.has(c.name));
-        if (next) {
-            setRows([...rows, { column: next.name, grain: isDate(next.typeName) ? "month" : undefined }]);
+    useEffect(() => {
+        kept.set(key, { layout, where, ran, error, showSql, collapsed: [...collapsed] });
+    }, [key, layout, where, ran, error, showSql, collapsed]);
+
+    const spec = useMemo(() => toSpec(layout, where, limit), [layout, where, limit]);
+    const specKey = JSON.stringify(spec);
+    const runBlocker =
+        layout.rows.length === 0
+            ? "Put at least one field in Rows."
+            : layout.values.length === 0
+              ? "Put at least one field in Values."
+              : null;
+
+    // The answer is also written straight into the kept entry: if the tab was left while the query
+    // ran, this panel is gone and its setState goes nowhere, but the result is still waiting there.
+    const settle = useCallback(
+        (next: { ran?: Ran; error: string | null }) => {
+            const entry = kept.get(key);
+            if (entry) {
+                kept.set(key, { ...entry, ran: next.ran ?? entry.ran, error: next.error, collapsed: next.ran ? [] : entry.collapsed });
+            }
+            if (next.ran) {
+                setRan(next.ran);
+                setCollapsed(new Set());
+            }
+            setError(next.error);
+        },
+        [key],
+    );
+
+    const run = useCallback(async () => {
+        if (runBlocker) {
+            return;
         }
-    };
-
-    const run = async () => {
+        runController.current?.abort();
+        const controller = new AbortController();
+        runController.current = controller;
+        const sentKey = specKey;
+        const sentLayout = layout;
         setRunning(true);
         setError(null);
         try {
-            setResult(
-                await api.pivot(alias, db, schema, name, {
-                    rows,
-                    values,
-                    where: where.trim() || undefined,
-                    totals: true,
-                    limit,
-                }),
-            );
+            const result = await api.pivot(alias, db, schema, name, spec, controller.signal);
+            settle({ ran: { key: sentKey, layout: sentLayout, result }, error: null });
         } catch (err) {
-            setResult(null);
-            setError(err instanceof Error ? err.message : String(err));
+            if (!controller.signal.aborted) {
+                settle({ error: err instanceof Error ? err.message : String(err) });
+            }
         } finally {
-            setRunning(false);
+            if (runController.current === controller) {
+                setRunning(false);
+            }
         }
-    };
+    }, [alias, db, schema, name, spec, specKey, layout, runBlocker, settle]);
 
-    const view = useMemo(() => (result ? toGrid(result, values) : null), [result, values]);
+    // The statement is shown while the areas are still being filled, before anything has run:
+    // composing it costs the server nothing, and it is what the matrix will be computed from.
+    useEffect(() => {
+        if (runBlocker) {
+            return;
+        }
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => {
+            api.pivotSql(alias, db, schema, name, spec, controller.signal).then(
+                (answer) => setPreview({ key: specKey, sql: answer.sql, error: null }),
+                (err) => {
+                    if (!controller.signal.aborted) {
+                        setPreview({ key: specKey, sql: null, error: err instanceof Error ? err.message : String(err) });
+                    }
+                },
+            );
+        }, 250);
+        return () => {
+            window.clearTimeout(timer);
+            controller.abort();
+        };
+    }, [alias, db, schema, name, spec, specKey, runBlocker]);
+
+    // Run on every change: after a pause, so dragging three fields in a row runs once, not three
+    // times, and typing a WHERE does not fire a query per keystroke.
+    useEffect(() => {
+        if (!autoRun || runBlocker || ran?.key === specKey) {
+            return;
+        }
+        const timer = window.setTimeout(() => void run(), 700);
+        return () => window.clearTimeout(timer);
+    }, [autoRun, runBlocker, ran?.key, specKey, run]);
+
+    useEffect(() => () => runController.current?.abort(), []);
+
+    // A field's filter list: the field's values with how often each occurs, most frequent first.
+    // It is itself a pivot — one row field, a count, no totals — so it is computed the same way and
+    // goes through the same checks. Kept per field: the values of a table do not change between
+    // two clicks on the same filter.
+    const valueLists = useRef(new Map<string, Promise<ValueList>>());
+    const loadValues = useCallback(
+        (column: string): Promise<ValueList> => {
+            const cached = valueLists.current.get(column);
+            if (cached) {
+                return cached;
+            }
+            const request = api
+                .pivot(alias, db, schema, name, {
+                    rows: [{ column }],
+                    values: [{ agg: "count" }],
+                    totals: false,
+                    limit: VALUE_LIST_LIMIT,
+                })
+                .then((answer) => ({
+                    values: answer.rows.map((row) => ({
+                        value: row[0] === null ? null : String(row[0]),
+                        count: Number(row[1]),
+                    })),
+                    complete: !answer.capped,
+                }));
+            request.catch(() => valueLists.current.delete(column));
+            valueLists.current.set(column, request);
+            return request;
+        },
+        [alias, db, schema, name],
+    );
+
+    const matrix = useMemo(
+        () => (ran ? toMatrix(ran.result, ran.layout.rows, ran.layout.columns, ran.layout.values) : null),
+        [ran],
+    );
+    const rows = useMemo(() => (matrix ? visibleRows(matrix.root, collapsed) : []), [matrix, collapsed]);
+    const groupKeys = useMemo(() => {
+        const keys: string[] = [];
+        const walk = (node: RowNode) =>
+            node.children.forEach((child) => {
+                if (child.children.length > 0) {
+                    keys.push(child.key);
+                    walk(child);
+                }
+            });
+        if (matrix) {
+            walk(matrix.root);
+        }
+        return keys;
+    }, [matrix]);
+
+    const stale = ran !== null && ran.key !== specKey;
+    const current = preview?.key === specKey ? preview : null;
+    const sqlShown = ran && !stale ? ran.result.sql : (current?.sql ?? null);
+    const sqlError = ran && !stale ? null : (current?.error ?? null);
+
+    const copy = async () => {
+        if (!matrix) {
+            return;
+        }
+        const many = matrix.measures.length > 1;
+        const headers = [
+            matrix.rowFields.map((f) => f.column).join(" › "),
+            ...matrix.heads.flatMap((head) =>
+                matrix.measures.map((measure) => {
+                    const place =
+                        head.kind === "grand"
+                            ? matrix.columnFields.length > 0
+                                ? "Total"
+                                : ""
+                            : head.path.map((v, i) => formatLabel(v, matrix.columnFields[i])).join(" / ") +
+                              (head.kind === "subtotal" ? " Total" : "");
+                    return [place, many || !place ? measure.name : ""].filter(Boolean).join(" · ");
+                }),
+            ),
+        ];
+        await navigator.clipboard.writeText(toTsv(matrix, rows, headers));
+    };
 
     if (shape.loading) {
         return <div className="state">Reading the columns…</div>;
@@ -98,185 +243,155 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
         return <div className="error">{shape.error}</div>;
     }
 
+    const leafColumns = matrix ? matrix.heads.filter((h) => h.kind === "leaf").length || 1 : 0;
+
     return (
         <div className="pivot">
-            <div className="pivot-spec">
-                <div className="pivot-group">
-                    <span className="pivot-label">Group by</span>
-                    {rows.map((row, i) => (
-                        <span className="pivot-field" key={i}>
-                            <select
-                                value={row.column}
-                                onChange={(e) => {
-                                    const column = columns.find((c) => c.name === e.target.value);
-                                    setRows(rows.map((r, j) => (j === i
-                                        ? { column: e.target.value, grain: column && isDate(column.typeName) ? (r.grain ?? "month") : undefined }
-                                        : r)));
-                                }}
-                            >
-                                {columns.map((c) => (
-                                    <option key={c.name} value={c.name}>{c.name}</option>
-                                ))}
-                            </select>
-                            {row.grain && (
-                                <select
-                                    value={row.grain}
-                                    onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, grain: e.target.value as PivotGrain } : r)))}
-                                >
-                                    {GRAINS.map((g) => <option key={g} value={g}>by {g}</option>)}
-                                </select>
-                            )}
-                            <button className="pivot-x" onClick={() => setRows(rows.filter((_, j) => j !== i))} title="Remove">
-                                ×
-                            </button>
-                        </span>
-                    ))}
-                    <button className="tool" onClick={addRow} disabled={rows.length >= columns.length}>
-                        <Icon name="plus" size={13} />
-                        field
-                    </button>
-                </div>
-
-                <div className="pivot-group">
-                    <span className="pivot-label">Measure</span>
-                    {values.map((value, i) => {
-                        const spec = AGGREGATES.find((a) => a.value === value.agg)!;
-                        const candidates = columns.filter((c) => !spec.numericOnly || isNumericType(c.typeName));
-                        return (
-                            <span className="pivot-field" key={i}>
-                                <select
-                                    value={value.agg}
-                                    onChange={(e) => {
-                                        const agg = e.target.value as PivotAgg;
-                                        const next = AGGREGATES.find((a) => a.value === agg)!;
-                                        const pool = columns.filter((c) => !next.numericOnly || isNumericType(c.typeName));
-                                        setValues(values.map((v, j) => (j === i
-                                            ? { agg, column: next.needsColumn ? (pool.some((c) => c.name === v.column) ? v.column : pool[0]?.name) : undefined }
-                                            : v)));
-                                    }}
-                                >
-                                    {AGGREGATES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
-                                </select>
-                                {spec.needsColumn && (
-                                    <select
-                                        value={value.column ?? ""}
-                                        onChange={(e) => setValues(values.map((v, j) => (j === i ? { ...v, column: e.target.value } : v)))}
-                                    >
-                                        {candidates.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-                                    </select>
-                                )}
-                                {values.length > 1 && (
-                                    <button className="pivot-x" onClick={() => setValues(values.filter((_, j) => j !== i))} title="Remove">
-                                        ×
-                                    </button>
-                                )}
-                            </span>
-                        );
-                    })}
-                    <button className="tool" onClick={() => setValues([...values, { agg: "count" }])}>
-                        <Icon name="plus" size={13} />
-                        measure
-                    </button>
-                </div>
-
-                <div className="pivot-group grow">
-                    <span className="pivot-label">Where</span>
-                    <input
-                        className="mono pivot-where"
-                        value={where}
-                        placeholder="optional — e.g. CreatedAt >= '2026-01-01'"
-                        onChange={(e) => setWhere(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && rows.length > 0 && run()}
+            <div className="pivot-main">
+                <div className="pfilterline">
+                    <FilterBar
+                        filters={layout.filters}
+                        load={loadValues}
+                        onChange={(i, next) =>
+                            setLayout({ ...layout, filters: layout.filters.map((f, j) => (j === i ? next : f)) })
+                        }
+                        onRemove={(i) => setLayout({ ...layout, filters: layout.filters.filter((_, j) => j !== i) })}
                     />
+                    <label className="pwhere">
+                        <span className="plabel">Where</span>
+                        <input
+                            className="mono"
+                            value={where}
+                            placeholder="optional — e.g. CreatedAt >= '2026-01-01'"
+                            onChange={(e) => setWhere(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && void run()}
+                        />
+                    </label>
                 </div>
 
-                <button className="tool run" onClick={run} disabled={running || rows.length === 0 || values.length === 0}>
-                    <Icon name="play" size={14} />
-                    {running ? "Running…" : "Run"}
-                </button>
+                {error && <div className="error">{error}</div>}
+
+                {!matrix && !error && (
+                    <div className="panel-empty">
+                        <b>{runBlocker ?? "Press Run to compute the matrix"}</b>
+                        Tick a field on the right, or drag it into an area. Every figure is computed by the
+                        database over the whole table, not over the rows on screen.
+                    </div>
+                )}
+
+                {matrix && ran && (
+                    <div className={stale ? "pmatrix-box stale" : "pmatrix-box"}>
+                        {stale && (
+                            <div className="pstale">
+                                The areas have changed since this ran.{" "}
+                                <button
+                                    type="button"
+                                    className="link-button"
+                                    onClick={() => void run()}
+                                    disabled={running || runBlocker !== null}
+                                >
+                                    Run to update
+                                </button>
+                            </div>
+                        )}
+                        <PivotMatrix
+                            matrix={matrix}
+                            rows={rows}
+                            collapsed={collapsed}
+                            onToggle={(nodeKey) => {
+                                const next = new Set(collapsed);
+                                if (next.has(nodeKey)) {
+                                    next.delete(nodeKey);
+                                } else {
+                                    next.add(nodeKey);
+                                }
+                                setCollapsed(next);
+                            }}
+                        />
+                        {ran.result.capped && (
+                            <div className="warn-note pcapped">
+                                The server stopped at {ran.result.rows.length.toLocaleString("en-US")}{" "}
+                                {matrix.columnFields.length > 0 ? "cells" : "groups"}, so some groups are missing
+                                from the matrix. The totals still cover every row. Narrow it down with a filter or
+                                the WHERE.
+                            </div>
+                        )}
+                        <div className="pstatus">
+                            <span>
+                                {matrix.leafRows.toLocaleString("en-US")} row groups × {leafColumns} column
+                                {leafColumns === 1 ? "" : "s"} · {matrix.cells.toLocaleString("en-US")} cells from the
+                                database
+                            </span>
+                            <span className="pstatus-tools">
+                                {groupKeys.length > 0 && (
+                                    <>
+                                        <button type="button" className="link-button" onClick={() => setCollapsed(new Set(groupKeys))}>
+                                            Collapse all
+                                        </button>
+                                        <button type="button" className="link-button" onClick={() => setCollapsed(new Set())}>
+                                            Expand all
+                                        </button>
+                                    </>
+                                )}
+                                <button type="button" className="link-button" onClick={() => void copy()}>
+                                    Copy
+                                </button>
+                                <span>{ran.result.elapsedMs} ms</span>
+                            </span>
+                        </div>
+                    </div>
+                )}
+
+                <div className="psql">
+                    <div className="psql-bar">
+                        <b>SQL</b>
+                        {sqlShown && (
+                            <span className="tag">
+                                {ran && !stale ? `Ran in ${ran.result.elapsedMs} ms` : "Preview · not run yet"}
+                            </span>
+                        )}
+                        <span className="grow" />
+                        <button
+                            type="button"
+                            className="tool"
+                            disabled={!sqlShown}
+                            onClick={() =>
+                                navigate(`/app/${encodeURIComponent(alias)}/${encodeURIComponent(db)}/query`, {
+                                    state: { sql: sqlShown },
+                                })
+                            }
+                        >
+                            Open in query editor
+                        </button>
+                        <button type="button" className="tool" onClick={() => setShowSql(!showSql)}>
+                            {showSql ? "Hide" : "Show"}
+                        </button>
+                    </div>
+                    {showSql &&
+                        (sqlError ? (
+                            <div className="error psql-error">{sqlError}</div>
+                        ) : sqlShown ? (
+                            <div className="psql-editor">
+                                <Suspense fallback={<div className="editor-placeholder" />}>
+                                    <SqlEditor value={sqlShown} />
+                                </Suspense>
+                            </div>
+                        ) : (
+                            <div className="state psql-empty">{runBlocker ?? "Composing the statement…"}</div>
+                        ))}
+                </div>
             </div>
 
-            {rows.length === 0 && !error && (
-                <div className="panel-empty">
-                    <b>Pick a field to group by</b>
-                    Every figure is computed by the database over the whole table, not over the rows on screen.
-                </div>
-            )}
-
-            {error && <div className="error">{error}</div>}
-
-            {view && (
-                <>
-                    <ResultGrid
-                        columns={view.columns}
-                        rows={view.rows}
-                        elapsedMs={result!.elapsedMs}
-                        messages={[]}
-                        limitNote={result!.capped ? `stopped at ${result!.rows.length} groups` : undefined}
-                    />
-                    <div className="pivot-sql">
-                        <button className="tool" onClick={() => setShowSql((on) => !on)}>
-                            {showSql ? "Hide SQL" : "Show SQL"}
-                        </button>
-                        {showSql && <pre className="mono">{result!.sql}</pre>}
-                    </div>
-                </>
-            )}
+            <FieldPane
+                columns={columns}
+                layout={layout}
+                onLayout={setLayout}
+                running={running}
+                runBlocker={runBlocker}
+                onRun={() => void run()}
+                autoRun={autoRun}
+                onAutoRun={(on) => setSetting("pivot.autoRun", on)}
+            />
         </div>
     );
-}
-
-// Turns the server's answer into what the grid shows: the GROUPING flags become readable total
-// labels, the rows are put back in the order a reader expects, and every additive measure gains
-// its share of the grand total.
-function toGrid(result: PivotResult, values: PivotValueField[]) {
-    const fields = result.rowFieldCount;
-    const measures = result.measureCount;
-    const levelAt = fields + measures;
-
-    // How many fields were rolled up: 0 is a leaf, everything else is a subtotal, and all of them
-    // is the grand total.
-    const depth = (row: (string | number | boolean | null)[]) =>
-        Array.from({ length: fields }, (_, i) => Number(row[levelAt + i] ?? 0)).reduce((a, b) => a + b, 0);
-
-    const grand = result.rows.find((row) => depth(row) === fields);
-
-    // Leaves first, subtotals under them, the grand total last — the arrangement Excel uses. The
-    // server sends totals FIRST so the row cap can never drop them; the order is a display choice.
-    const ordered = [...result.rows].sort((a, b) => depth(a) - depth(b));
-
-    const columns: ResultColumn[] = [];
-    for (let i = 0; i < fields; i++) {
-        columns.push({ name: result.columns[i].name, typeName: result.columns[i].typeName, truncated: false });
-    }
-    for (let m = 0; m < measures; m++) {
-        const source = result.columns[fields + m];
-        columns.push({ name: source.name, typeName: source.typeName, truncated: false });
-        if (ADDITIVE.has(values[m]?.agg ?? "count") && grand) {
-            columns.push({ name: "% of total", typeName: "float", truncated: false });
-        }
-    }
-
-    const rows = ordered.map((row) => {
-        const rolled = depth(row);
-        const out: (string | number | boolean | null)[] = [];
-        for (let i = 0; i < fields; i++) {
-            const isRolled = Number(row[levelAt + i] ?? 0) === 1;
-            out.push(isRolled ? (rolled === fields && i === 0 ? "Grand total" : "Total") : row[i]);
-        }
-        for (let m = 0; m < measures; m++) {
-            const value = row[fields + m];
-            out.push(value);
-            if (ADDITIVE.has(values[m]?.agg ?? "count") && grand) {
-                const total = Number(grand[fields + m]);
-                const share = Number(value);
-                // Two decimals, not one: at one, a subtotal of 99.97% printed as 100 beside the
-                // grand total's 100, and every share under 0.05% printed as a flat 0.
-                out.push(total && Number.isFinite(share) ? Math.round((share / total) * 10000) / 100 : null);
-            }
-        }
-        return out;
-    });
-
-    return { columns, rows };
 }

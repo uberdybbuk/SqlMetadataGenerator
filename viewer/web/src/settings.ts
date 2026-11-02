@@ -159,11 +159,20 @@ export const SETTINGS = [
         id: "pivot.limit",
         section: "Pivot",
         title: "Group Limit",
-        description: "How many groups a pivot returns at most. The server does not go above 1000.",
+        description:
+            "How many row groups a pivot returns at most. The server does not go above 1000. With column fields the server's own limit of 10,000 cells applies instead.",
         kind: "number",
         min: 1,
         max: 1000,
         default: 1000,
+    },
+    {
+        id: "pivot.autoRun",
+        section: "Pivot",
+        title: "Run On Every Change",
+        description: "Run the pivot again by itself, shortly after a field is moved or a filter changes, instead of waiting for Run.",
+        kind: "boolean",
+        default: false,
     },
     {
         id: "scripting.warnRows",

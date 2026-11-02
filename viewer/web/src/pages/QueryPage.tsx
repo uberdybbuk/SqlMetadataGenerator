@@ -1,4 +1,4 @@
-import { useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 
 import { api } from "../api";
 import { useApi } from "../useApi";
@@ -16,6 +16,9 @@ export function QueryPage() {
     const { alias = "", db = "" } = useParams();
     const [params] = useSearchParams();
     const sharedId = params.get("q");
+    // A statement handed over by another screen — the pivot's "Open in query editor". It travels in
+    // the navigation state, not the URL: a statement does not belong in a link.
+    const handed = (useLocation().state as { sql?: string } | null)?.sql;
 
     // Only fetched when the URL names one. A share that has been deleted reports the server's
     // own message rather than opening an empty editor as though nothing was asked for.
@@ -63,7 +66,7 @@ export function QueryPage() {
             {shared.error && <div className="error">{shared.error}</div>}
 
             <QueryPane
-                sql={shared.data?.sql ?? ""}
+                sql={shared.data?.sql ?? handed ?? ""}
                 result={result}
                 onExecute={(text) => runner.run(text)}
                 onCancel={() => runner.cancel()}

@@ -21,7 +21,14 @@ public static class PivotQuery
     // group per row. The cap is applied in SQL so the rows never leave the server.
     public const int MaxLimit = 1000;
 
-    public sealed record Built(string Sql, List<string> Headers, int RowFieldCount, int MeasureCount);
+    // With column fields every result row is one CELL of the matrix, not one line of it, so the
+    // same thousand would cut a modest cross-tab in half. The screen still shows one line per row
+    // group; it is the cells behind them that this allows more of.
+    public const int MaxCells = 10000;
+
+    // The result's columns come in a fixed order the screen relies on: row fields, column fields,
+    // measures, then one GROUPING flag per row field and per column field.
+    public sealed record Built(string Sql, List<string> Headers, int RowFieldCount, int ColumnFieldCount, int MeasureCount, int Limit);
 
     public static Built Build(DatabaseProvider provider, TableShape shape, PivotSpec spec)
     {
@@ -37,15 +44,19 @@ public static class PivotQuery
         var columns = shape.Columns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
         var headers = new List<string>();
         var selects = new List<string>();
-        var groupBy = new List<string>();
+        var rowBy = new List<string>();
+        var columnBy = new List<string>();
 
-        foreach (var field in spec.Rows)
+        foreach (var (fields, target) in new[] { (spec.Rows, rowBy), (spec.Columns, columnBy) })
         {
-            var column = Resolve(columns, field.Column);
-            string expression = GroupExpression(provider, column, field.Grain);
-            groupBy.Add(expression);
-            selects.Add($"{expression} AS {Alias(provider, Header(field))}");
-            headers.Add(Header(field));
+            foreach (var field in fields)
+            {
+                var column = Resolve(columns, field.Column);
+                string expression = GroupExpression(provider, column, field.Grain);
+                target.Add(expression);
+                selects.Add($"{expression} AS {Alias(provider, Header(field))}");
+                headers.Add(Header(field));
+            }
         }
 
         foreach (var measure in spec.Values)
@@ -54,35 +65,72 @@ public static class PivotQuery
             headers.Add(Header(measure));
         }
 
-        // One GROUPING flag per row field. It is what tells a subtotal row apart from a group whose
+        var groupBy = rowBy.Concat(columnBy).ToList();
+
+        // One GROUPING flag per field. It is what tells a subtotal row apart from a group whose
         // value genuinely is NULL — without it the two are indistinguishable in the result.
         if (spec.Totals)
         {
-            for (int i = 0; i < spec.Rows.Count; i++)
+            for (int i = 0; i < groupBy.Count; i++)
             {
                 selects.Add($"GROUPING({groupBy[i]}) AS {Alias(provider, "__level" + i)}");
                 headers.Add("__level" + i);
             }
         }
 
+        int limit = Math.Clamp(spec.Limit, 1, spec.Columns.Count > 0 ? MaxCells : MaxLimit);
+
         var sql = new StringBuilder();
         sql.Append("SELECT ");
         if (provider == DatabaseProvider.SqlServer)
         {
-            sql.Append(CultureInfo.InvariantCulture, $"TOP {Math.Clamp(spec.Limit, 1, MaxLimit)} ");
+            sql.Append(CultureInfo.InvariantCulture, $"TOP {limit} ");
         }
         sql.AppendLine();
         sql.AppendLine("    " + string.Join(",\n    ", selects));
         sql.AppendLine($"FROM {Qualify(provider, shape.Schema, shape.Name)}");
 
+        var conditions = new List<string>();
         if (!string.IsNullOrWhiteSpace(spec.Where))
         {
-            sql.AppendLine($"WHERE ({spec.Where})");
+            conditions.Add($"({spec.Where})");
+        }
+        foreach (var filter in spec.Filters)
+        {
+            if (FilterCondition(provider, Resolve(columns, filter.Column), filter) is { } condition)
+            {
+                conditions.Add(condition);
+            }
+        }
+        if (conditions.Count > 0)
+        {
+            sql.AppendLine($"WHERE {string.Join("\n  AND ", conditions)}");
         }
 
-        sql.AppendLine(spec.Totals
-            ? $"GROUP BY ROLLUP({string.Join(", ", groupBy)})"
-            : $"GROUP BY {string.Join(", ", groupBy)}");
+        if (!spec.Totals)
+        {
+            sql.AppendLine($"GROUP BY {string.Join(", ", groupBy)}");
+        }
+        else if (columnBy.Count == 0)
+        {
+            sql.AppendLine($"GROUP BY ROLLUP({string.Join(", ", rowBy)})");
+        }
+        else
+        {
+            // ROLLUP over rows and columns together would only total the columns while the rows
+            // are fully expanded. A cross-tab needs every combination of the two: each row level
+            // with each column level, down to the grand total at () — the row and column margins
+            // of the matrix as well as its corner.
+            var sets = new List<string>();
+            for (int c = columnBy.Count; c >= 0; c--)
+            {
+                for (int r = rowBy.Count; r >= 0; r--)
+                {
+                    sets.Add("(" + string.Join(", ", rowBy.Take(r).Concat(columnBy.Take(c))) + ")");
+                }
+            }
+            sql.AppendLine($"GROUP BY GROUPING SETS (\n    {string.Join(",\n    ", sets)}\n)");
+        }
 
         // Total rows FIRST. Excel puts the grand total at the bottom, but the row cap truncates the
         // tail, and the one row that must never be dropped is the total. The screen puts them back
@@ -90,9 +138,9 @@ public static class PivotQuery
         var order = new List<string>();
         if (spec.Totals)
         {
-            for (int i = 0; i < spec.Rows.Count; i++)
+            foreach (string expression in groupBy)
             {
-                order.Add($"GROUPING({groupBy[i]}) DESC");
+                order.Add($"GROUPING({expression}) DESC");
             }
         }
         order.Add($"{MeasureExpression(provider, columns, spec.Values[0])} DESC");
@@ -100,10 +148,99 @@ public static class PivotQuery
 
         if (provider == DatabaseProvider.Postgres)
         {
-            sql.AppendLine($"LIMIT {Math.Clamp(spec.Limit, 1, MaxLimit)}");
+            sql.AppendLine(CultureInfo.InvariantCulture, $"LIMIT {limit}");
         }
 
-        return new Built(sql.ToString().TrimEnd() + ";", headers, spec.Rows.Count, spec.Values.Count);
+        return new Built(sql.ToString().TrimEnd() + ";", headers, spec.Rows.Count, spec.Columns.Count, spec.Values.Count, limit);
+    }
+
+    // A filter's values arrive as text and are written into the statement as literals, so each one
+    // is checked against the column's type first: a number has to parse as one, and anything else
+    // becomes a quoted string with its quotes doubled. Dates are refused. Their values come back
+    // from the grid in ISO form with seven fractional digits, which a SQL Server datetime column
+    // cannot convert, and a list of individual timestamps is not a filter anyone wants; a date
+    // range belongs in the WHERE.
+    //
+    // Null when the filter excludes nothing, which is what an untouched filter field is.
+    private static string? FilterCondition(DatabaseProvider provider, ColumnSummary column, PivotFilter filter)
+    {
+        if (IsDate(column.TypeName))
+        {
+            throw new InvalidOperationException($"'{column.Name}' is a date; filter it with the WHERE instead.");
+        }
+        if (filter.Values.Count == 0)
+        {
+            if (filter.Exclude)
+            {
+                return null;
+            }
+            throw new InvalidOperationException($"The filter on '{column.Name}' has no values ticked.");
+        }
+
+        string quoted = Quote(provider, column.Name);
+        bool withNull = filter.Values.Contains(null);
+        var literals = filter.Values.OfType<string>().Select(v => FilterLiteral(provider, column, v)).ToList();
+        string list = literals.Count > 0 ? $"{quoted} {(filter.Exclude ? "NOT IN" : "IN")} ({string.Join(", ", literals)})" : "";
+
+        // NULL never matches IN or NOT IN, in either direction, so it is spelled out every time:
+        // otherwise excluding one value would quietly drop every NULL row as well.
+        if (filter.Exclude)
+        {
+            string nulls = withNull ? $"{quoted} IS NOT NULL" : $"{quoted} IS NULL";
+            return literals.Count == 0 ? nulls : withNull ? $"({nulls} AND {list})" : $"({nulls} OR {list})";
+        }
+
+        if (!withNull)
+        {
+            return list;
+        }
+        return literals.Count == 0 ? $"{quoted} IS NULL" : $"({list} OR {quoted} IS NULL)";
+    }
+
+    private static string FilterLiteral(DatabaseProvider provider, ColumnSummary column, string value)
+    {
+        string type = column.TypeName.ToLowerInvariant();
+
+        if (type is "bit" or "boolean" or "bool")
+        {
+            bool flag = value.Trim().ToLowerInvariant() switch
+            {
+                "true" or "1" => true,
+                "false" or "0" => false,
+                _ => throw new InvalidOperationException($"'{value}' is not a value of the {column.TypeName} column '{column.Name}'."),
+            };
+            return provider == DatabaseProvider.Postgres ? (flag ? "TRUE" : "FALSE") : (flag ? "1" : "0");
+        }
+
+        // Re-formatted after parsing rather than passed through, so what reaches the statement is
+        // the parsed number and never the text that was sent.
+        if (IsSummable(type))
+        {
+            if (decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal number))
+            {
+                return number.ToString(CultureInfo.InvariantCulture);
+            }
+            if (type is "float" or "real" or "double precision" or "float8" or "float4"
+                && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double wide)
+                && double.IsFinite(wide))
+            {
+                return wide.ToString("R", CultureInfo.InvariantCulture);
+            }
+            throw new InvalidOperationException($"'{value}' is not a number, and '{column.Name}' is {column.TypeName}.");
+        }
+
+        // PostgreSQL: the E'' form with backslashes doubled too, because with standard_conforming_strings
+        // off a plain '' literal treats a backslash as an escape, and a value ending in one could
+        // close the string early. E'' reads the same whatever that setting is.
+        if (provider == DatabaseProvider.Postgres)
+        {
+            return $"E'{value.Replace("\\", "\\\\").Replace("'", "''")}'";
+        }
+
+        // SQL Server: N'' only for Unicode columns. Comparing a varchar column with an nvarchar
+        // literal converts the COLUMN, row by row, and an index on it can no longer be used.
+        string escaped = value.Replace("'", "''");
+        return type is "varchar" or "char" or "text" ? $"'{escaped}'" : $"N'{escaped}'";
     }
 
     private static ColumnSummary Resolve(Dictionary<string, ColumnSummary> columns, string name) =>
