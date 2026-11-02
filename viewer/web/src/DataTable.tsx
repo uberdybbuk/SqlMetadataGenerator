@@ -220,11 +220,17 @@ export function DataTable<T>({
         return () => document.removeEventListener("copy", onCopy);
     }, [selection, columns, sorted, rowKey]);
 
-    // The widths are measured from the browser's automatic layout and then frozen. Otherwise
-    // table-layout:fixed would kick in from the start and give every column the same width.
+    // Every column is as wide as its content, and only what is left over goes to the grow column.
+    // The widths are measured from the browser's automatic layout, then frozen into a fixed one;
+    // otherwise table-layout:fixed would give every column the same width.
+    //
+    // Measured again whenever the rows on screen change, not just once. A width frozen from an
+    // earlier set of rows is wrong for the next: the Rows column of a database's largest tables
+    // stayed at the width of its header, cutting 28,345,678 down to "28,3…", while the grow
+    // column sat on 1600px of nothing. A column the user has dragged keeps the dragged width.
     useLayoutEffect(() => {
         const table = tableRef.current;
-        if (!resizable || widths || !table) {
+        if (!resizable || !table) {
             return;
         }
 
@@ -234,8 +240,14 @@ export function DataTable<T>({
         // column to fill the panel by the time this runs — on a 2560px monitor a column holding
         // "Trs" measured 320px, and freezing that is what made the surplus disappear before the
         // grow column could be given it. Shrink-to-fit first, read the widths the CONTENT wants,
-        // then restore. This happens inside a layout effect, so nothing is painted in between.
-        const before = table.style.width;
+        // then restore. The fixed layout and the colgroup widths of a previous measurement are
+        // lifted too, or they would be read back as the answer. This happens inside a layout
+        // effect, so nothing is painted in between.
+        const cols = [...table.querySelectorAll("col")];
+        const colWidths = cols.map((col) => col.style.width);
+        const before = { width: table.style.width, layout: table.style.tableLayout };
+        cols.forEach((col) => (col.style.width = ""));
+        table.style.tableLayout = "auto";
         table.style.width = "max-content";
         const cells = table.querySelectorAll("thead th");
         const measured: Record<string, number> = {};
@@ -244,20 +256,28 @@ export function DataTable<T>({
             if (column) {
                 // plain columns are measured too: even when their width comes from CSS, their
                 // contribution to the table's total width still has to count.
-                measured[column.key] = Math.min(
-                    maxWidth,
-                    Math.max(MIN_WIDTH, Math.round(cell.getBoundingClientRect().width)),
-                );
+                measured[column.key] =
+                    widths && dragged.has(column.key)
+                        ? widths[column.key]
+                        : Math.min(maxWidth, Math.max(MIN_WIDTH, Math.round(cell.getBoundingClientRect().width)));
             }
         });
-        table.style.width = before;
+        cols.forEach((col, i) => (col.style.width = colWidths[i]));
+        table.style.width = before.width;
+        table.style.tableLayout = before.layout;
 
-        if (Object.keys(measured).length > 0) {
+        if (Object.keys(measured).length === 0) {
+            return;
+        }
+        // Only a real change is written back; an equal answer would render and measure forever.
+        const same = widths !== null && Object.keys(measured).every((key) => widths[key] === measured[key]);
+        if (!same) {
             setWidths(measured);
         }
         // columnKeys, not allColumns: the column array is rebuilt on every render, and what
-        // actually invalidates a measurement is the SET of columns changing.
-    }, [resizable, widths, columnKeys, maxWidth]);
+        // actually invalidates a measurement is the SET of columns changing, or the rows shown.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [resizable, widths === null, columnKeys, sorted, maxWidth]);
 
     // When the columns change (moving to another table) the measurement has to reset.
     const previousKeys = useRef(columnKeys);

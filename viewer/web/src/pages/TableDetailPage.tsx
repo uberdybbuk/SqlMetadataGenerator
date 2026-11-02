@@ -262,7 +262,9 @@ function ScriptTab({ script }: { script: AsyncState<{ sql: string }> }) {
 function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
     const columns: Column<ColumnSummary>[] = [
         { key: "id", header: "#", numeric: true, sortValue: (c) => c.columnId, render: (c) => c.columnId, className: "muted" },
-        { key: "name", header: "Column", sortValue: (c) => c.name, render: (c) => c.name, className: "mono" },
+        // The name takes what the other columns leave over, as in every list here: it is the field
+        // that runs long, and the one a reader scans.
+        { key: "name", header: "Column", grow: true, sortValue: (c) => c.name, render: (c) => c.name, className: "mono" },
         {
             key: "type",
             header: "Type",
@@ -308,7 +310,6 @@ function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
         {
             key: "default",
             header: "Default",
-            grow: true,
             info: "Shown without the parentheses SQL Server wraps a default in. The script tab keeps the server's exact text.",
             sortValue: (c) => c.defaultDefinition,
             copyValue: (c) => (c.defaultDefinition ? unwrapDefault(c.defaultDefinition) : ""),
@@ -383,6 +384,7 @@ const indexColumns: Column<IndexSummary>[] = [
     {
         key: "name",
         header: "Index",
+        grow: true,
         sortValue: (i) => i.name,
         render: (i) => <span className="mono">{i.name}</span>,
     },
@@ -420,7 +422,6 @@ const indexColumns: Column<IndexSummary>[] = [
     {
         key: "keys",
         header: "Key columns",
-        grow: true,
         info: "In key order. This is the order a query has to match to use the index.",
         sortValue: (i) => i.keyColumns.map((k) => k.name).join(", "),
         copyValue: (i) => i.keyColumns.map((k) => k.name + (k.descending ? " desc" : "")).join(", "),
