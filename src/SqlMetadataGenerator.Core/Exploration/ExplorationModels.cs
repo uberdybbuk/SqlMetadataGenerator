@@ -48,6 +48,10 @@ public sealed class TableStats
     public required long UsedKb { get; init; }
 }
 
+// One entry of the object tree: names only, every kind in one list, so a database expands in
+// one round trip and filtering never goes back to the server.
+public sealed record TreeEntry(string Kind, string Schema, string Name);
+
 // One row of an object list (views, procedures, triggers ...). The dashboard counters and this
 // list come from the same catalog query and the same type mapping, so a badge reading
 // "9 synonyms" always opens a list of exactly nine.

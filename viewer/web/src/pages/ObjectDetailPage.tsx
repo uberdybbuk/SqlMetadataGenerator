@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { api } from "../api";
 import { useApi } from "../useApi";
 import { Icon, type IconName } from "../Icon";
+import { useFillHeight } from "../useFillHeight";
 
 const SqlEditor = lazy(() => import("../SqlEditor"));
 
@@ -23,6 +24,9 @@ function readableType(typeDesc: string): string {
 }
 
 export function ObjectDetailPage() {
+    // Down to the window's foot, level with the object tree beside it, rather than a fixed share
+    // of the window that left an empty strip under it on a tall screen.
+    const { frame, height } = useFillHeight();
     const { alias = "", db = "", section = "", schema = "", name = "" } = useParams();
     const detail = useApi(
         () => api.objectDetail(alias, db, section, schema, name),
@@ -65,7 +69,7 @@ export function ObjectDetailPage() {
 
             {detail.error && <div className="error">{detail.error}</div>}
 
-            <div className="editor-wrap tall">
+            <div className="editor-wrap tall fill" ref={frame} style={height ? { height } : undefined}>
                 <Suspense fallback={<div className="editor-placeholder" />}>
                     <SqlEditor value={detail.data?.definition ?? ""} />
                 </Suspense>

@@ -173,6 +173,24 @@ export const SETTINGS = [
         default: [],
     },
     {
+        id: "tree.groupBySchema",
+        section: "Object Tree",
+        title: "Group By Schema",
+        description:
+            "Put a schema level between a type folder and its objects (Tables › Cor › Pages) instead of listing them as Cor.Pages. The switch at the top of the tree changes the same setting.",
+        kind: "boolean",
+        default: false,
+    },
+    {
+        id: "tree.showSystemDatabases",
+        section: "Object Tree",
+        title: "Show System Databases",
+        description:
+            "List master, model, msdb and tempdb (postgres and the templates on PostgreSQL) at the foot of the tree, under a heading of their own. Hidden, a line at the foot says how many there are and shows them with one click.",
+        kind: "boolean",
+        default: false,
+    },
+    {
         id: "pivot.limit",
         section: "Pivot",
         title: "Group Limit",

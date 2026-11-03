@@ -554,6 +554,12 @@ body.resizing {
     min-height: 320px;
 }
 
+/* Measured to reach the window's foot (useFillHeight); a margin below it would make the page
+   scroll by exactly that much. */
+.editor-wrap.fill {
+    margin-bottom: 0;
+}
+
 .editor-wrap {
     height: 284px;
     border: 1px solid var(--border);
@@ -2784,4 +2790,325 @@ body.resizing .dgresizer::after {
 .setting-error {
     color: var(--danger);
     font-size: 12px;
+}
+
+/* ---- Object tree: SSMS's Object Explorer, on the left of every page inside a server ---- */
+.with-tree {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+/* min-width: a flex child is otherwise as wide as its widest content, and a wide grid would push
+   the page out of the window instead of scrolling inside it. */
+.with-tree-main {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Under the breadcrumb bar and down to the window's foot, scrolling on its own. */
+.otree {
+    position: sticky;
+    top: calc(var(--tree-top, 0px) + 12px);
+    height: calc(100vh - var(--tree-top, 0px) - 36px);
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    font-size: 13px;
+}
+
+.otree.hidden {
+    width: 22px;
+    border: none;
+    background: none;
+}
+
+.otree-show {
+    width: 22px;
+    height: 44px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--muted);
+    cursor: pointer;
+    padding: 0;
+}
+
+.otree-head {
+    padding: 8px 8px 6px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.otree-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.otree-title .muted {
+    font-weight: 400;
+    font-size: 12px;
+}
+
+.otree-icon-button {
+    margin-left: auto;
+    border: none;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 2px;
+}
+
+.otree-icon-button:hover {
+    color: var(--text);
+}
+
+.otree-filter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0 6px;
+    background: var(--bg);
+    color: var(--muted);
+}
+
+.otree-filter:focus-within {
+    border-color: var(--accent);
+}
+
+.otree-filter input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    padding: 4px 0;
+}
+
+.otree-filter kbd {
+    font: 11px var(--mono);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 4px;
+}
+
+.otree-mode {
+    display: inline-flex;
+    align-self: flex-start;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    font-size: 12px;
+}
+
+.otree-mode button {
+    border: none;
+    background: none;
+    color: var(--muted);
+    padding: 1px 8px;
+    cursor: pointer;
+    font: inherit;
+}
+
+.otree-mode button.on {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.otree-list {
+    flex: 1;
+    overflow: auto;
+    outline: none;
+    padding: 4px 0;
+}
+
+.otree-note {
+    padding: 4px 10px;
+    color: var(--muted);
+}
+
+.otree-note.error {
+    color: var(--danger);
+}
+
+.otree-row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-right: 8px;
+    white-space: nowrap;
+    cursor: default;
+    color: var(--text);
+}
+
+a.otree-row {
+    cursor: pointer;
+}
+
+.otree-row:hover {
+    background: var(--head);
+    text-decoration: none;
+}
+
+.otree-row.current {
+    background: var(--sel);
+}
+
+.otree-list:focus .otree-row.focused {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.otree-row .chev {
+    width: 12px;
+    flex: none;
+    text-align: center;
+    color: var(--muted);
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.otree-row .chev.none {
+    cursor: default;
+}
+
+.otree-row .icon {
+    flex: none;
+    color: var(--muted);
+}
+
+.otree-row .label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: inherit;
+    font-family: var(--mono);
+    font-size: 12px;
+}
+
+.otree-row .count {
+    margin-left: auto;
+    padding-left: 8px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.otree-row.muted .label {
+    color: var(--muted);
+}
+
+.otree-row.note .label {
+    font-family: inherit;
+    color: var(--muted);
+}
+
+.otree-row.note.error .label {
+    color: var(--danger);
+    cursor: pointer;
+}
+
+/* The line standing in for the hidden system databases, and the heading above them once shown. */
+.otree-row.note.system {
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.otree-row .action {
+    border: none;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-size: 12px;
+    color: var(--accent);
+    cursor: pointer;
+}
+
+.otree-row.note.system .action::before {
+    content: "· ";
+    color: var(--muted);
+}
+
+.otree-row.note.section {
+    margin: 0 10px;
+    padding-left: 0 !important;
+    border-top: 1px solid var(--border);
+    align-items: flex-end;
+    padding-bottom: 2px;
+}
+
+.otree-row.note.section .chev {
+    display: none;
+}
+
+.otree-row.note.section .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.otree-row.note.section .action {
+    margin-left: auto;
+    font-size: 11px;
+}
+
+.otree-row.note.section:hover {
+    background: none;
+}
+
+.otree-row.note.hint .label {
+    color: var(--accent);
+    cursor: pointer;
+}
+
+.otree-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+}
+
+.otree-foot .muted {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.otree-foot .link-button {
+    border: none;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+}
+
+.otree-foot .link-button:hover {
+    color: var(--text);
+}
+
+.otree-grip {
+    position: absolute;
+    top: 0;
+    right: -5px;
+    width: 8px;
+    height: 100%;
+    cursor: col-resize;
 }

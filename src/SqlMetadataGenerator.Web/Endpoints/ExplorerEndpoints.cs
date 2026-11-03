@@ -93,6 +93,11 @@ internal static class ExplorerEndpoints
                     : Results.Ok(detail);
             }));
 
+        // The object tree's inventory: every object's kind, schema and name in one round trip.
+        // The tree expands, groups and filters on the client from this alone.
+        api.MapGet("/servers/{alias}/databases/{db}/names", (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
+            WithDatabase(alias, db, registry, async scope => Results.Ok(await scope.Explorer.ReadObjectNamesAsync(ct))));
+
         // The statistics behind the treemap and the table grid.
         api.MapGet("/servers/{alias}/databases/{db}/tables", (string alias, string db, ConnectionRegistry registry, CancellationToken ct) =>
             WithDatabase(alias, db, registry, async scope => Results.Ok(await scope.Explorer.ReadTableStatsAsync(ct))));

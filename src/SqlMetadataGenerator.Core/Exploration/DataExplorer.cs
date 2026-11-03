@@ -23,11 +23,9 @@ public sealed class DataExplorer(string connectionString) : IDataExplorer
     // against this limit, and whether truncation happened is read off the same limit.
     internal const int TextLimit = 256;
 
-    private readonly string _connectionString = connectionString;
-
     private async Task<SqlConnection> OpenAsync(CancellationToken ct)
     {
-        var conn = new SqlConnection(_connectionString);
+        var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
         return conn;
     }
@@ -177,6 +175,36 @@ public sealed class DataExplorer(string connectionString) : IDataExplorer
                 CreateDate = reader.GetDateTime(4),
                 ModifyDate = reader.GetDateTime(5),
             });
+        }
+
+        return rows;
+    }
+
+    // The object tree's inventory: every kind the lists show, names only. The kind codes are the
+    // same map the counters and the lists read, so the tree's folder counts match the badges.
+    public async Task<List<TreeEntry>> ReadObjectNamesAsync(CancellationToken ct = default)
+    {
+        string cases = string.Join("\n", KindTypes.SelectMany(k => k.Value.Select(t => $"        WHEN '{t}' THEN '{k.Key}'")));
+        string sql = $"""
+            SELECT kind, schema_name, name FROM (
+                SELECT CASE o.type
+            {cases}
+                END AS kind,
+                SCHEMA_NAME(o.schema_id) AS schema_name, o.name
+                FROM sys.objects o
+                WHERE o.is_ms_shipped = 0
+            ) x
+            WHERE kind IS NOT NULL
+            ORDER BY kind, schema_name, name;
+            """;
+
+        var rows = new List<TreeEntry>();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new TreeEntry(reader.GetString(0), reader.IsDBNull(1) ? string.Empty : reader.GetString(1), reader.GetString(2)));
         }
 
         return rows;

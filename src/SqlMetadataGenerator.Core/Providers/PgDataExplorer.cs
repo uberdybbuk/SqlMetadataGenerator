@@ -169,6 +169,45 @@ public sealed class PgDataExplorer(string connectionString) : IDataExplorer
         return rows;
     }
 
+    // The object tree's inventory in one statement: the same filters as the lists above, so the
+    // tree's folder counts match the dashboard badges.
+    public async Task<List<TreeEntry>> ReadObjectNamesAsync(CancellationToken ct = default)
+    {
+        string sql = $"""
+            SELECT CASE WHEN c.relkind IN ('r','p') THEN 'tables'
+                        WHEN c.relkind IN ('v','m') THEN 'views'
+                        ELSE 'sequences' END, n.nspname, c.relname
+            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relkind IN ('r','p','v','m','S') AND {UserSchemas}
+            UNION ALL
+            SELECT CASE WHEN p.prokind = 'p' THEN 'procedures' ELSE 'functions' END, n.nspname, p.proname
+            FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE p.prokind IN ('p','f','a','w') AND {UserSchemas}
+            UNION ALL
+            SELECT 'triggers', n.nspname, t.tgname
+            FROM pg_trigger t
+            JOIN pg_class c ON c.oid = t.tgrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE NOT t.tgisinternal AND {UserSchemas}
+            UNION ALL
+            SELECT 'types', n.nspname, t.typname
+            FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+            WHERE t.typtype IN ('c','d','e') AND {UserSchemas}
+              AND NOT EXISTS (SELECT 1 FROM pg_class c WHERE c.oid = t.typrelid AND c.relkind <> 'c')
+            ORDER BY 1, 2, 3
+            """;
+
+        var rows = new List<TreeEntry>();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = Db.ReadOnly(Pg, conn, sql);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new TreeEntry(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+        }
+        return rows;
+    }
+
     private static string RelKinds(string kind) => kind.ToLowerInvariant() switch
     {
         "tables" => "'r','p'",

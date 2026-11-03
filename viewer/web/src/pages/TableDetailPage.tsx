@@ -11,6 +11,7 @@ import { QueryPane } from "../QueryPane";
 import { shareLinkFor } from "../share";
 import { PivotPanel } from "../pivot/PivotPanel";
 import { useQueryRunner, type QueryRunner } from "../useQueryRunner";
+import { useFillHeight } from "../useFillHeight";
 
 const SqlEditor = lazy(() => import("../SqlEditor"));
 
@@ -241,6 +242,9 @@ function DataTab({
 // The CREATE script, in the same editor the preview uses. The frame is drawn before the request
 // answers so the tab does not arrive by shoving the page around.
 function ScriptTab({ script }: { script: AsyncState<{ sql: string }> }) {
+    // Down to the window's foot, level with the object tree beside it, rather than a fixed share
+    // of the window that left an empty strip under it on a tall screen.
+    const { frame, height } = useFillHeight();
     return (
         <>
             {script.error && <div className="error">{script.error}</div>}
@@ -252,7 +256,7 @@ function ScriptTab({ script }: { script: AsyncState<{ sql: string }> }) {
                     {script.loading ? "reading metadata…" : "as the generator would write it"}
                 </span>
             </div>
-            <div className="editor-wrap tall">
+            <div className="editor-wrap tall fill" ref={frame} style={height ? { height } : undefined}>
                 <Suspense fallback={<div className="editor-placeholder" />}>
                     <SqlEditor value={script.data?.sql ?? ""} />
                 </Suspense>

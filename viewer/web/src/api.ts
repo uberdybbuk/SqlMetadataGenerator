@@ -127,6 +127,13 @@ export interface ScriptableInventory {
     objects: { kind: string; schema: string; name: string }[];
 }
 
+// One entry of the object tree: every object of a database, names only, in one list.
+export interface TreeEntry {
+    kind: string;
+    schema: string;
+    name: string;
+}
+
 // What to script, and how to format it. The formatting fields are optional: leaving one out means
 // the generator's default, which is what the per-table script tab already shows.
 export interface ScriptRequest {
@@ -506,6 +513,11 @@ export const api = {
         get<ObjectDetail>(
             `/api/servers/${seg(alias)}/databases/${seg(db)}/objects/${seg(kind)}/${seg(schema)}/${seg(name)}`,
         ),
+
+    // The object tree's inventory: one round trip per database, and the tree groups and filters
+    // from it without asking again.
+    names: (alias: string, db: string, signal?: AbortSignal) =>
+        get<TreeEntry[]>(`/api/servers/${seg(alias)}/databases/${seg(db)}/names`, signal),
 
     tables: (alias: string, db: string) =>
         get<TableStats[]>(`/api/servers/${seg(alias)}/databases/${seg(db)}/tables`),

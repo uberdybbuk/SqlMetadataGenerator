@@ -17,6 +17,7 @@ public interface IDataExplorer
     Task<List<TableStats>> ReadTableStatsAsync(CancellationToken ct = default);
     Task<Dictionary<string, int>> ReadObjectCountsAsync(CancellationToken ct = default);
     Task<List<ObjectSummary>> ReadObjectsAsync(string kind, CancellationToken ct = default);
+    Task<List<TreeEntry>> ReadObjectNamesAsync(CancellationToken ct = default);
     Task<TableFacts?> ReadTableFactsAsync(string schema, string name, CancellationToken ct = default);
     Task<QueryResult> RunQueryAsync(string sql, int maxRows = 1000, int timeoutSeconds = 30, CancellationToken ct = default);
     Task<ObjectDetail?> ReadModuleDefinitionAsync(string schema, string name, CancellationToken ct = default);

@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 
+import { ObjectTree } from "./tree/ObjectTree";
+
 export const HOME = "🏠";
 export const APP_NAME = "SQL Browser";
 export const SETTINGS_ROUTE = "/app/_settings";
@@ -178,10 +180,26 @@ export function Layout() {
         };
     }, []);
 
+    // Inside a server the object tree sits on the left. The connection list, the connection form
+    // and the settings have no server to show. Keyed by server, so moving to another one starts
+    // a fresh tree rather than one with the last server's nodes open.
+    const { pathname } = useLocation();
+    const [app, alias] = pathname.split("/").filter(Boolean);
+    const server = app === "app" && alias && !alias.startsWith("_") ? decodeURIComponent(alias) : null;
+
     return (
         <div className="shell">
             <Breadcrumbs />
-            <Outlet />
+            {server ? (
+                <div className="with-tree">
+                    <ObjectTree key={server} alias={server} />
+                    <main className="with-tree-main">
+                        <Outlet />
+                    </main>
+                </div>
+            ) : (
+                <Outlet />
+            )}
         </div>
     );
 }
