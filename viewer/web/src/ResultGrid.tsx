@@ -45,7 +45,10 @@ interface FieldRow {
 const MAX_TRANSPOSED = 50;
 
 export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: ResultGridProps) {
-    const [tab, setTab] = useState<"results" | "messages">("results");
+    const [chosen, setTab] = useState<"results" | "messages">("results");
+    // The Messages tab is there only when the server sent something. A later query without
+    // messages takes the screen back to the results instead of to a tab that is gone.
+    const tab = messages.length === 0 ? "results" : chosen;
     // Transposed: the column names run down the first column and each result row becomes a
     // column of its own. For a wide row — a log table with twenty fields — that is the
     // difference between reading a record and scrolling sideways hunting for it.
@@ -129,9 +132,11 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
                 <button className="tab" aria-selected={tab === "results"} onClick={() => setTab("results")}>
                     Results
                 </button>
-                <button className="tab" aria-selected={tab === "messages"} onClick={() => setTab("messages")}>
-                    Messages{messages.length > 0 && <span className="count">{messages.length}</span>}
-                </button>
+                {messages.length > 0 && (
+                    <button className="tab" aria-selected={tab === "messages"} onClick={() => setTab("messages")}>
+                        Messages<span className="count">{messages.length}</span>
+                    </button>
+                )}
                 <span className="grow" />
                 <button
                     className="tool"
@@ -167,15 +172,11 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
                     />
                 )
             ) : (
-                messages.length === 0 ? (
-                    <div className="empty-note">The server returned no messages.</div>
-                ) : (
-                    <div className="messages">
-                        {messages.map((message, i) => (
-                            <div key={i}>{message}</div>
-                        ))}
-                    </div>
-                )
+                <div className="messages">
+                    {messages.map((message, i) => (
+                        <div key={i}>{message}</div>
+                    ))}
+                </div>
             )}
 
             <div className="status">
