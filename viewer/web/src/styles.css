@@ -2318,7 +2318,8 @@ body.resizing .dgresizer::after {
 /* The field list and the four areas */
 .pfields {
     position: sticky;
-    top: 64px;
+    top: var(--pfields-top, 64px);
+    overflow: auto;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -2334,8 +2335,15 @@ body.resizing .dgresizer::after {
     font-size: 12px;
 }
 
+/* Only the column list gives up height when the pane is short; the areas and Run keep theirs. */
+.pfields > :not(.pfield-list) {
+    flex-shrink: 0;
+}
+
+/* Takes the height the pane has left once the areas and Run are laid out. */
 .pfield-list {
-    max-height: 260px;
+    flex: 1 1 0;
+    min-height: 120px;
     overflow: auto;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -2436,8 +2444,10 @@ body.resizing .dgresizer::after {
     background: var(--accent-soft);
 }
 
+/* A basis of its own rather than its full width: a long name then shortens with an ellipsis and
+   keeps the menu arrow and × beside it, while a period still drops to the next line. */
 .ppill .ptext {
-    flex: 1 1 auto;
+    flex: 1 1 60px;
     min-width: 0;
     max-width: 100%;
     overflow: hidden;
@@ -2845,30 +2855,229 @@ body.resizing .dgresizer::after {
     gap: 6px;
 }
 
-.otree-title {
+/* ---- The server and database pickers at the top of the tree ---- */
+.combo-root {
+    position: relative;
+}
+
+.combo {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-weight: 600;
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--head-line);
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
 }
 
-.otree-title .muted {
-    font-weight: 400;
+.combo.plain {
+    padding-left: 4px;
+    border-color: transparent;
+    background: none;
+}
+
+.combo.plain:hover {
+    background: var(--head);
+}
+
+.combo.open,
+.combo.plain.open {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.combo .icon {
+    flex: none;
+    color: var(--muted);
+}
+
+.combo-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 12.5px;
+}
+
+.combo-placeholder {
+    color: var(--muted);
+    font-style: italic;
+}
+
+.combo-meta {
+    flex: none;
+    margin-left: auto;
+    padding-left: 8px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.combo-caret {
+    flex: none;
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.combo > .combo-caret:nth-child(3) {
+    margin-left: auto;
+}
+
+.combo-pop {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    max-height: min(70vh, 520px);
+    border: 1px solid var(--head-line);
+    border-radius: 6px;
+    background: var(--panel);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+    overflow: hidden;
+}
+
+.combo-search {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 6px;
+    padding: 0 6px;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    color: var(--muted);
+}
+
+.combo-search input {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 0;
+    border: none;
+    outline: none;
+    background: none;
+    color: var(--text);
+    font: inherit;
+}
+
+.combo-options {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    outline: none;
+}
+
+.combo-section + .combo-section {
+    border-top: 1px solid var(--border);
+}
+
+.combo-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 6px 10px 2px;
+    color: var(--muted);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.combo-heading button {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0;
+    text-transform: none;
+    cursor: pointer;
+}
+
+.combo-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 10px;
+    color: var(--text);
+    cursor: pointer;
+}
+
+.combo-item:hover {
+    text-decoration: none;
+}
+
+.combo-item.active {
+    background: var(--accent-soft);
+}
+
+.combo-item .icon {
+    flex: none;
+    color: var(--muted);
+}
+
+.combo-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
     font-size: 12px;
 }
 
-.otree-icon-button {
-    margin-left: auto;
-    border: none;
-    background: none;
-    color: var(--muted);
-    cursor: pointer;
-    font-size: 14px;
-    padding: 0 2px;
+.combo-item.current .combo-label {
+    font-weight: 700;
 }
 
-.otree-icon-button:hover {
-    color: var(--text);
+.combo-item.current::after {
+    content: "✓";
+    flex: none;
+    margin-left: 6px;
+    color: var(--accent);
+    font-size: 11px;
+}
+
+.combo-item.disabled {
+    color: var(--muted);
+    cursor: default;
+}
+
+.combo-item.action .combo-label {
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.combo-badge {
+    flex: none;
+    margin-left: auto;
+    padding: 0 4px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.combo-empty {
+    padding: 6px 10px;
+    color: var(--muted);
+}
+
+.combo-keys {
+    flex: none;
+    padding: 5px 10px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
 }
 
 .otree-filter {
@@ -2880,6 +3089,12 @@ body.resizing .dgresizer::after {
     padding: 0 6px;
     background: var(--bg);
     color: var(--muted);
+}
+
+.otree-filter.off,
+.otree-mode.off {
+    opacity: 0.45;
+    pointer-events: none;
 }
 
 .otree-filter:focus-within {
@@ -3022,57 +3237,68 @@ a.otree-row {
     cursor: pointer;
 }
 
-/* The line standing in for the hidden system databases, and the heading above them once shown. */
-.otree-row.note.system {
-    cursor: pointer;
-    font-size: 12px;
+/* Where the objects go while no database is selected. */
+.otree-empty {
+    padding: 22px 16px;
+    color: var(--muted);
+    font-size: 12.5px;
+    text-align: center;
 }
 
-.otree-row .action {
-    border: none;
-    background: none;
-    padding: 0;
-    font: inherit;
-    font-size: 12px;
-    color: var(--accent);
-    cursor: pointer;
+.otree-empty b {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
 }
 
-.otree-row.note.system .action::before {
-    content: "· ";
+.otree-pick {
+    margin: 0 8px 8px;
+    border-top: 1px solid var(--border);
+}
+
+.otree-pick-title {
+    padding: 4px 4px 2px;
+    color: var(--muted);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.otree-pick-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 4px;
+    border-radius: 3px;
+}
+
+.otree-pick-item:hover {
+    background: var(--head);
+    text-decoration: none;
+}
+
+.otree-pick-item .icon {
+    flex: none;
     color: var(--muted);
 }
 
-.otree-row.note.section {
-    margin: 0 10px;
-    padding-left: 0 !important;
-    border-top: 1px solid var(--border);
-    align-items: flex-end;
-    padding-bottom: 2px;
+.otree-pick-item .label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: 12px;
 }
 
-.otree-row.note.section .chev {
-    display: none;
-}
-
-.otree-row.note.section .label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-.otree-row.note.section .action {
+.otree-pick-item .count {
     margin-left: auto;
+    padding-left: 8px;
+    color: var(--muted);
     font-size: 11px;
-}
-
-.otree-row.note.section:hover {
-    background: none;
-}
-
-.otree-row.note.hint .label {
-    color: var(--accent);
-    cursor: pointer;
 }
 
 .otree-foot {
@@ -3111,4 +3337,95 @@ a.otree-row {
     width: 8px;
     height: 100%;
     cursor: col-resize;
+}
+
+/* ---- Pivot field menu: a Rows or Columns field's sort and value filter ---- */
+.ppill .pmenu-open {
+    order: 2;
+    border: none;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 10px;
+    padding: 0 3px;
+}
+
+.ppill .pmenu-open:hover {
+    color: var(--text);
+}
+
+/* The field's sort and filter in words, on its own line under the name. */
+.ppill .pdesc {
+    order: 4;
+    flex-basis: 100%;
+    color: var(--accent);
+    font-size: 11px;
+    padding-right: 6px;
+}
+
+.pmenu {
+    width: 300px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pmenu-title {
+    font-weight: 600;
+}
+
+.pmenu-group {
+    max-height: 200px;
+    overflow: auto;
+}
+
+.pmenu-filter {
+    display: flex;
+    gap: 6px;
+}
+
+.pmenu-filter select,
+.pmenu-filter input {
+    font: inherit;
+    font-size: 12px;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--text);
+}
+
+.pmenu-filter select:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.pmenu-filter input {
+    width: 80px;
+}
+
+.pmenu-filter input.invalid {
+    border-color: var(--danger);
+}
+
+.pmenu .error-text {
+    color: var(--danger);
+}
+
+.pmenu .pmenu-clear {
+    margin-right: auto;
+}
+
+.pmatrix th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.pmatrix th.sortable:hover {
+    color: var(--accent);
+}
+
+.pmatrix .sort-arrow {
+    font-size: 10px;
+    color: var(--accent);
 }

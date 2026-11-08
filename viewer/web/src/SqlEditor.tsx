@@ -97,6 +97,44 @@ function release(instance: Instance): void {
     instance.host.remove();
 }
 
+// A selection that ends at the start of a line (Shift+Down) does not take that line in: the
+// block closes at the end of the last line that was really selected.
+function comment(editor: monaco.editor.ICodeEditor, mode: "add" | "remove" | "toggle"): void {
+    const model = editor.getModel();
+    if (!model) {
+        return;
+    }
+    const selections = (editor.getSelections() ?? []).map((s) =>
+        s.endLineNumber > s.startLineNumber && s.endColumn === 1
+            ? new monaco.Selection(s.startLineNumber, s.startColumn, s.endLineNumber - 1, model.getLineMaxColumn(s.endLineNumber - 1))
+            : s,
+    );
+    const block = selections.find((s) => s.endLineNumber > s.startLineNumber);
+    if (!block) {
+        const id = { add: "editor.action.addCommentLine", remove: "editor.action.removeCommentLine", toggle: "editor.action.commentLine" }[mode];
+        void editor.getAction(id)?.run();
+        return;
+    }
+    // Monaco only has a toggle for blocks, so whether the lines already are one decides it:
+    // adding to a block that is there, or removing one that is not, would do the opposite.
+    let text = "";
+    for (let line = block.startLineNumber; line <= block.endLineNumber; line++) {
+        text += model.getLineContent(line) + "\n";
+    }
+    text = text.trim();
+    const commented = text.startsWith("/*") && text.endsWith("*/");
+    if (mode === "remove" && !commented) {
+        // Lines commented one by one with -- are still taken off.
+        void editor.getAction("editor.action.removeCommentLine")?.run();
+        return;
+    }
+    if (mode === "add" && commented) {
+        return;
+    }
+    editor.setSelections(selections);
+    void editor.getAction("editor.action.blockComment")?.run();
+}
+
 interface SqlEditorProps {
     value: string;
     // Read-only is the default: most places here show SQL rather than invite it.
@@ -107,13 +145,16 @@ interface SqlEditorProps {
     // editor inserted "≈" and the shortcut never fired. Monaco resolves a keybinding by key code,
     // which is the same whatever character the layout produces, and it consumes the key.
     onExecute?: () => void;
+    // The selected text, or "" when nothing is selected. With several cursors the selections are
+    // joined by line breaks, in the order they appear in the text.
+    onSelection?: (selected: string) => void;
     // Identifies WHICH text `value` is, not what it says. When this changes the editor is showing
     // a different thing (another table's WHERE, another object's script) and the incoming value is
     // applied unconditionally. Without it, an editor that has focus can never be reloaded.
     valueKey?: string;
 }
 
-export default function SqlEditor({ value, readOnly = true, onChange, onExecute, valueKey }: SqlEditorProps) {
+export default function SqlEditor({ value, readOnly = true, onChange, onExecute, onSelection, valueKey }: SqlEditorProps) {
     const slot = useRef<HTMLDivElement>(null);
     const instance = useRef<Instance | null>(null);
     const dark = useDarkMode();
@@ -122,6 +163,8 @@ export default function SqlEditor({ value, readOnly = true, onChange, onExecute,
     changed.current = onChange;
     const execute = useRef(onExecute);
     execute.current = onExecute;
+    const selected = useRef(onSelection);
+    selected.current = onSelection;
     // setValue fires the same event a keystroke does; without this the editor would report our
     // own writes back as if the user had typed them.
     const writing = useRef(false);
@@ -138,6 +181,16 @@ export default function SqlEditor({ value, readOnly = true, onChange, onExecute,
                 changed.current?.(acquired.editor.getValue());
             }
         });
+        // The shared instance comes back with whatever was selected in its last use; that
+        // selection belongs to another page.
+        acquired.editor.setSelection(new monaco.Selection(1, 1, 1, 1));
+        const selection = acquired.editor.onDidChangeCursorSelection(() => {
+            const model = acquired.editor.getModel();
+            const ranges = (acquired.editor.getSelections() ?? [])
+                .filter((range) => !range.isEmpty())
+                .sort((a, b) => monaco.Range.compareRangesUsingStarts(a, b));
+            selected.current?.(model ? ranges.map((range) => model.getValueInRange(range)).join("\n") : "");
+        });
         const action = acquired.editor.addAction({
             id: "sqlbrowser.execute",
             label: "Execute",
@@ -146,8 +199,37 @@ export default function SqlEditor({ value, readOnly = true, onChange, onExecute,
                 execute.current?.();
             },
         });
+        // Comments go by what is selected: a selection over several lines becomes one /* */ block,
+        // which is how a stretch of a script is set aside; a single line, or the line the cursor is
+        // on, gets a -- comment. Cmd+K Cmd+C adds and Cmd+K Cmd+U removes, as in VS Code. On a
+        // Turkish keyboard "/" needs Shift, so Cmd+/ is there only for the layouts where it is
+        // one key; it toggles.
+        const chord = (key: monaco.KeyCode) =>
+            monaco.KeyMod.chord(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, monaco.KeyMod.CtrlCmd | key);
+        const comments = [
+            acquired.editor.addAction({
+                id: "sqlbrowser.addComment",
+                label: "Add Comment",
+                keybindings: [chord(monaco.KeyCode.KeyC)],
+                run: (editor) => comment(editor, "add"),
+            }),
+            acquired.editor.addAction({
+                id: "sqlbrowser.removeComment",
+                label: "Remove Comment",
+                keybindings: [chord(monaco.KeyCode.KeyU)],
+                run: (editor) => comment(editor, "remove"),
+            }),
+            acquired.editor.addAction({
+                id: "sqlbrowser.toggleComment",
+                label: "Toggle Comment",
+                keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Slash],
+                run: (editor) => comment(editor, "toggle"),
+            }),
+        ];
         return () => {
+            comments.forEach((c) => c.dispose());
             action.dispose();
+            selection.dispose();
             subscription.dispose();
             instance.current = null;
             release(acquired);

@@ -1,4 +1,4 @@
-import type { ColumnSummary, PivotAgg, PivotFilterField, PivotRowField, PivotSpec, PivotValueField } from "../api";
+import type { ColumnSummary, PivotAgg, PivotFilterField, PivotOp, PivotRowField, PivotSpec, PivotValueField } from "../api";
 import { isNumericType } from "../cell";
 
 // What the four areas hold, and the rules for moving a field between them.
@@ -13,11 +13,63 @@ export interface FilterState {
     values: (string | null)[];
 }
 
+// A Rows or Columns field as the screen keeps it. Its sort and value filter name a measure by
+// what it IS (measureKey), not by its position in Values: removing or reordering a value would
+// otherwise silently point them at another one. A measure that is gone simply stops applying.
+export interface LayoutField {
+    column: string;
+    grain?: PivotRowField["grain"];
+    // A measure key, or undefined for the labels.
+    sortBy?: string;
+    sortDesc?: boolean;
+    keep?: { measure: string; op: PivotOp; value: number };
+}
+
 export interface Layout {
     filters: FilterState[];
-    columns: PivotRowField[];
-    rows: PivotRowField[];
+    columns: LayoutField[];
+    rows: LayoutField[];
     values: PivotValueField[];
+}
+
+export const measureKey = (value: PivotValueField) => `${value.agg}:${value.column ?? ""}`;
+
+export const OPERATORS: { value: PivotOp; label: string }[] = [
+    { value: "gt", label: ">" },
+    { value: "ge", label: "≥" },
+    { value: "lt", label: "<" },
+    { value: "le", label: "≤" },
+    { value: "eq", label: "=" },
+    { value: "ne", label: "≠" },
+];
+
+// Whether a measure is a number, which a value filter needs. MIN and MAX keep their column's
+// type, so they qualify only over a numeric column.
+export function isNumericMeasure(value: PivotValueField, columns: ColumnSummary[]): boolean {
+    if (value.agg !== "min" && value.agg !== "max") {
+        return true;
+    }
+    const column = columns.find((c) => c.name === value.column);
+    return column !== undefined && isNumericType(column.typeName);
+}
+
+// The sort and filter of a field, in words: "Count > 1 · Count, largest first".
+export function describeField(field: LayoutField, values: PivotValueField[]): string {
+    const name = (key: string) => {
+        const value = values.find((v) => measureKey(v) === key);
+        return value ? measureLabel(value) : null;
+    };
+    const parts: string[] = [];
+    if (field.keep && name(field.keep.measure)) {
+        const op = OPERATORS.find((o) => o.value === field.keep!.op)!.label;
+        parts.push(`${name(field.keep.measure)} ${op} ${field.keep.value.toLocaleString("en-US")}`);
+    }
+    if (field.sortBy && name(field.sortBy)) {
+        parts.push(`${name(field.sortBy)}, ${field.sortDesc ? "largest" : "smallest"} first`);
+    } else if (!field.sortBy && field.sortDesc) {
+        parts.push("Z to A");
+    }
+    return parts.join(" · ");
 }
 
 export const EMPTY_LAYOUT: Layout = { filters: [], columns: [], rows: [], values: [{ agg: "count" }] };
@@ -50,7 +102,7 @@ export function measureLabel(value: PivotValueField): string {
 
 // Grouping a timestamp as it stands gives one group per microsecond, so a date field always
 // carries a period. Month is the one people mean most often.
-function asField(column: ColumnSummary): PivotRowField {
+function asField(column: ColumnSummary): LayoutField {
     return { column: column.name, grain: isDate(column.typeName) ? "month" : undefined };
 }
 
@@ -150,13 +202,30 @@ export function remove(layout: Layout, area: Area, index: number): Layout {
 }
 
 // What the server is sent. An untouched filter is left out: it would only say "everything".
-export function toSpec(layout: Layout, where: string, limit: number): PivotSpec {
+// What the server is sent for a Rows or Columns field: measures by position, as the spec counts
+// them. withSort false leaves the sort out, for telling a re-sort apart from a real change.
+function wireField(field: LayoutField, values: PivotValueField[], withSort: boolean): PivotRowField {
+    const index = (key: string) => values.findIndex((v) => measureKey(v) === key);
+    const out: PivotRowField = { column: field.column, grain: field.grain };
+    if (withSort && (field.sortBy || field.sortDesc)) {
+        const measure = field.sortBy ? index(field.sortBy) : -1;
+        if (!field.sortBy || measure >= 0) {
+            out.sort = { measure: measure >= 0 ? measure : undefined, descending: field.sortDesc === true };
+        }
+    }
+    if (field.keep && index(field.keep.measure) >= 0) {
+        out.filter = { measure: index(field.keep.measure), op: field.keep.op, value: field.keep.value };
+    }
+    return out;
+}
+
+export function toSpec(layout: Layout, where: string, limit: number, withSort = true): PivotSpec {
     const filters: PivotFilterField[] = layout.filters
         .filter((f) => f.mode !== "all")
         .map((f) => ({ column: f.column, values: f.values, exclude: f.mode === "exclude" }));
     return {
-        rows: layout.rows,
-        columns: layout.columns,
+        rows: layout.rows.map((f) => wireField(f, layout.values, withSort)),
+        columns: layout.columns.map((f) => wireField(f, layout.values, withSort)),
         values: layout.values,
         filters,
         where: where.trim() || undefined,

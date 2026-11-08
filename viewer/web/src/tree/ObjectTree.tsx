@@ -2,10 +2,16 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { api, type DatabaseInfo, type TreeEntry } from "../api";
+import { formatMb } from "../format";
+import { useApi } from "../useApi";
 import { Icon, type IconName } from "../Icon";
 import { setSetting, useSetting } from "../settings";
+import { Combo, type ComboItem, type ComboSection } from "./Combo";
 
-// The object tree on the left of every page inside a server, after SSMS's Object Explorer.
+// The object tree on the left of every page inside a server, after SSMS's Object Explorer. It
+// lists one database's objects: two pickers at the top say which server and which database. With
+// thirty databases on a server, a list of them would otherwise push the objects, which are what
+// you came for, one level in and off the screen.
 //
 // Where SSMS is slow, this is built to be fast:
 //   - a database costs ONE request, names only, for every kind at once. Expanding a folder, a
@@ -33,6 +39,10 @@ const KINDS: { kind: string; label: string; icon: IconName }[] = [
 const KIND_INFO = new Map(KINDS.map((k) => [k.kind, k]));
 
 const NO_DATABASES: DatabaseInfo[] = [];
+const NO_SYSTEM_DATABASES = new Set<string>();
+
+// How many databases the server page's tree offers as "largest" while none is selected.
+const LARGEST_DATABASES = 5;
 
 // The databases each engine brings along, by the product name the server reports.
 const SYSTEM_DATABASES: Record<string, Set<string>> = {
@@ -73,7 +83,6 @@ const namesKey = (alias: string, db: string) => ["names", alias, db].join(SEP);
 
 // ---------------------------------------------------------------- node ids
 
-const dbId = (db: string) => ["db", db].join(SEP);
 const folderId = (db: string, kind: string) => ["folder", db, kind].join(SEP);
 const schemaId = (db: string, kind: string, schema: string) => ["schema", db, kind, schema].join(SEP);
 const objectId = (db: string, kind: string, schema: string, name: string) => ["object", db, kind, schema, name].join(SEP);
@@ -89,10 +98,9 @@ interface Row {
     expandable: boolean;
     expanded: boolean;
     href?: string;
-    // A row that is not a node: still loading, a failure (clicking it tries again), a hint, the
-    // note that a database is empty, the line saying the system databases are hidden, or the
-    // heading above them once they are shown.
-    note?: "loading" | "error" | "hint" | "empty" | "system" | "section";
+    // A row that is not a node: still loading, a failure (clicking it tries again), or the note
+    // that a database has nothing to list.
+    note?: "loading" | "error" | "empty";
     retryKey?: string;
 }
 
@@ -123,23 +131,20 @@ function currentId(place: Place, grouped: boolean): string | null {
         }
         return folderId(db, section);
     }
-    return dbId(db);
+    return null;
 }
 
 // The nodes that have to be open for the current page's node to be on screen.
 function ancestors(place: Place, grouped: boolean): string[] {
     const { db, section, schema } = place;
-    if (!db) {
+    if (!db || !section || !KIND_INFO.has(section)) {
         return [];
     }
-    const ids = [dbId(db)];
-    if (section && KIND_INFO.has(section)) {
-        if (schema) {
-            ids.push(folderId(db, section));
-            if (grouped && place.name) {
-                ids.push(schemaId(db, section, schema));
-            }
-        }
+    // The folder itself too, on its own list page: the tree holds nothing else to look at, and
+    // moving to another database lands right there.
+    const ids = [folderId(db, section)];
+    if (schema && grouped && place.name) {
+        ids.push(schemaId(db, section, schema));
     }
     return ids;
 }
@@ -148,217 +153,164 @@ function ancestors(place: Place, grouped: boolean): string[] {
 
 interface BuildInput {
     alias: string;
-    product: string;
-    databases: DatabaseInfo[];
+    db: string;
+    // What the server says about this database. Unknown until it has answered, or for a name it
+    // does not list.
+    database: DatabaseInfo | undefined;
     expanded: Set<string>;
     grouped: boolean;
     filter: string;
-    showSystem: boolean;
 }
 
-function buildRows({ alias, product, databases, expanded, grouped, filter, showSystem }: BuildInput): Row[] {
+function buildRows({ alias, db, database, expanded, grouped, filter }: BuildInput): Row[] {
     const rows: Row[] = [];
-    const base = `/app/${encodeURIComponent(alias)}`;
+    const dbHref = `/app/${encodeURIComponent(alias)}/${encodeURIComponent(db)}`;
     const searching = filter.length > 0;
-    const system = SYSTEM_DATABASES[product] ?? new Set<string>();
-    const isSystem = (database: DatabaseInfo) => system.has(database.name.toLowerCase());
-    const userDatabases = databases.filter((x) => !isSystem(x));
-    const systemDatabases = databases.filter(isSystem);
-    // Hidden system databases are not searched either: what is not shown cannot be a match.
-    const listed = showSystem ? databases : userDatabases;
+    const note = (kind: NonNullable<Row["note"]>, label: string, retryKey?: string): Row => ({
+        id: `note${SEP}${kind}`,
+        parent: null,
+        depth: 0,
+        label,
+        note: kind,
+        retryKey,
+        expandable: false,
+        expanded: false,
+    });
 
-    if (searching) {
-        const unread = listed.filter((d) => d.isBrowsable && read(namesKey(alias, d.name))?.status !== "ready").length;
-        if (unread > 0) {
-            rows.push({
-                id: "hint:unread",
-                parent: null,
-                depth: 0,
-                label: `${unread} ${unread === 1 ? "database is" : "databases are"} not read yet. Search them too`,
-                note: "hint",
-                expandable: false,
-                expanded: false,
-            });
+    if (database && !database.isBrowsable) {
+        return [note("empty", `This database cannot be read (${database.state}).`)];
+    }
+
+    const inventory = read<TreeEntry[]>(namesKey(alias, db));
+    if (!inventory || inventory.status === "loading") {
+        return [note("loading", "Reading…")];
+    }
+    if (inventory.status === "error") {
+        return [note("error", `${inventory.error} Click to try again.`, namesKey(alias, db))];
+    }
+
+    const entries = searching
+        ? inventory.value.filter((e) => `${e.schema}.${e.name}`.toLowerCase().includes(filter))
+        : inventory.value;
+    if (entries.length === 0) {
+        // model, msdb and many a new database hold nothing of their own. Saying so beats an
+        // empty panel. A filter with no match says so under the filter's own heading instead.
+        return searching ? [] : [note("empty", "No objects.")];
+    }
+
+    const byKind = new Map<string, TreeEntry[]>();
+    for (const entry of entries) {
+        const list = byKind.get(entry.kind);
+        if (list) {
+            list.push(entry);
+        } else {
+            byKind.set(entry.kind, [entry]);
         }
     }
 
-    const pushDatabase = (rows: Row[], database: DatabaseInfo, d: number, parent: string | null) => {
-        const db = database.name;
-        const dbHref = `${base}/${encodeURIComponent(db)}`;
-        const id = dbId(db);
-        const inventory = read<TreeEntry[]>(namesKey(alias, db));
-
-        // While searching only the databases with a match are listed, opened.
-        let matches: TreeEntry[] | null = null;
-        if (searching) {
-            if (inventory?.status !== "ready") {
-                return;
-            }
-            matches = inventory.value.filter((e) => `${e.schema}.${e.name}`.toLowerCase().includes(filter));
-            if (matches.length === 0) {
-                return;
-            }
+    for (const { kind, label, icon } of KINDS) {
+        const list = byKind.get(kind);
+        if (!list) {
+            continue;
         }
-
-        const open = searching || (database.isBrowsable && expanded.has(id));
+        const fid = folderId(db, kind);
+        const folderOpen = searching || expanded.has(fid);
         rows.push({
-            id,
-            parent,
-            depth: d,
-            label: db,
-            icon: "database",
-            muted: !database.isBrowsable,
-            expandable: database.isBrowsable && !searching,
-            expanded: open,
-            href: database.isBrowsable ? dbHref : undefined,
+            id: fid,
+            parent: null,
+            depth: 0,
+            label,
+            icon,
+            count: list.length,
+            expandable: !searching,
+            expanded: folderOpen,
+            href: `${dbHref}/${kind}`,
         });
-        if (!open) {
-            return;
+        if (!folderOpen) {
+            continue;
         }
 
-        if (!inventory || inventory.status === "loading") {
-            rows.push({ id: `${id}${SEP}loading`, parent: id, depth: d + 1, label: "Reading…", note: "loading", expandable: false, expanded: false });
-            return;
-        }
-        if (inventory.status === "error") {
+        const pushObject = (entry: TreeEntry, parent: string, depth: number, text: string) => {
             rows.push({
-                id: `${id}${SEP}error`,
-                parent: id,
-                depth: d + 1,
-                label: `${inventory.error} Click to try again.`,
-                note: "error",
-                retryKey: namesKey(alias, db),
+                id: objectId(db, kind, entry.schema, entry.name),
+                parent,
+                depth,
+                label: text,
+                icon,
                 expandable: false,
                 expanded: false,
+                href: `${dbHref}/${kind}/${encodeURIComponent(entry.schema)}/${encodeURIComponent(entry.name)}`,
             });
-            return;
+        };
+
+        if (!grouped) {
+            for (const entry of list) {
+                pushObject(entry, fid, 1, `${entry.schema}.${entry.name}`);
+            }
+            continue;
         }
 
-        const entries = matches ?? inventory.value;
-        if (entries.length === 0) {
-            // model, msdb and many a new database hold nothing of their own. Saying so beats an
-            // open node with nothing under it.
-            rows.push({ id: `${id}${SEP}empty`, parent: id, depth: d + 1, label: "No objects.", note: "empty", expandable: false, expanded: false });
-            return;
-        }
-        const byKind = new Map<string, TreeEntry[]>();
-        for (const entry of entries) {
-            const list = byKind.get(entry.kind);
-            if (list) {
-                list.push(entry);
-            } else {
-                byKind.set(entry.kind, [entry]);
+        // The inventory arrives sorted by kind, schema and name, so a schema's objects are
+        // already next to each other.
+        for (let i = 0; i < list.length; ) {
+            const schema = list[i].schema;
+            let end = i;
+            while (end < list.length && list[end].schema === schema) {
+                end++;
             }
-        }
-
-        for (const { kind, label, icon } of KINDS) {
-            const list = byKind.get(kind);
-            if (!list) {
-                continue;
-            }
-            const fid = folderId(db, kind);
-            const folderOpen = searching || expanded.has(fid);
+            const sid = schemaId(db, kind, schema);
+            const schemaOpen = searching || expanded.has(sid);
             rows.push({
-                id: fid,
-                parent: id,
-                depth: d + 1,
-                label,
-                count: list.length,
+                id: sid,
+                parent: fid,
+                depth: 1,
+                label: schema,
+                icon: "schema",
+                count: end - i,
                 expandable: !searching,
-                expanded: folderOpen,
-                href: `${dbHref}/${kind}`,
+                expanded: schemaOpen,
+                // Only tables have a page per schema.
+                href: kind === "tables" ? `${dbHref}/tables/${encodeURIComponent(schema)}` : undefined,
             });
-            if (!folderOpen) {
-                continue;
-            }
-
-            const pushObject = (entry: TreeEntry, parent: string, depth: number, text: string) => {
-                rows.push({
-                    id: objectId(db, kind, entry.schema, entry.name),
-                    parent,
-                    depth,
-                    label: text,
-                    icon,
-                    expandable: false,
-                    expanded: false,
-                    href: `${dbHref}/${kind}/${encodeURIComponent(entry.schema)}/${encodeURIComponent(entry.name)}`,
-                });
-            };
-
-            if (!grouped) {
-                for (const entry of list) {
-                    pushObject(entry, fid, d + 2, `${entry.schema}.${entry.name}`);
+            if (schemaOpen) {
+                for (let j = i; j < end; j++) {
+                    pushObject(list[j], sid, 2, list[j].name);
                 }
-                continue;
             }
-
-            // The inventory arrives sorted by kind, schema and name, so a schema's objects are
-            // already next to each other.
-            for (let i = 0; i < list.length; ) {
-                const schema = list[i].schema;
-                let end = i;
-                while (end < list.length && list[end].schema === schema) {
-                    end++;
-                }
-                const sid = schemaId(db, kind, schema);
-                const schemaOpen = searching || expanded.has(sid);
-                rows.push({
-                    id: sid,
-                    parent: fid,
-                    depth: d + 2,
-                    label: schema,
-                    icon: "schema",
-                    count: end - i,
-                    expandable: !searching,
-                    expanded: schemaOpen,
-                    // Only tables have a page per schema.
-                    href: kind === "tables" ? `${dbHref}/tables/${encodeURIComponent(schema)}` : undefined,
-                });
-                if (schemaOpen) {
-                    for (let j = i; j < end; j++) {
-                        pushObject(list[j], sid, d + 3, list[j].name);
-                    }
-                }
-                i = end;
-            }
-        }
-    };
-
-    for (const database of userDatabases) {
-        pushDatabase(rows, database, 0, null);
-    }
-
-    // The engine's own databases are hidden unless asked for. Shown, they come last under a
-    // heading of their own, out of the way of the databases people came for.
-    if (systemDatabases.length === 0) {
-        return rows;
-    }
-    if (!showSystem) {
-        if (!searching) {
-            rows.push({
-                id: "hint:system",
-                parent: null,
-                depth: 0,
-                label: `${systemDatabases.length} system ${systemDatabases.length === 1 ? "database" : "databases"} hidden`,
-                note: "system",
-                expandable: false,
-                expanded: false,
-            });
-        }
-        return rows;
-    }
-    const below: Row[] = [];
-    for (const database of systemDatabases) {
-        pushDatabase(below, database, 0, null);
-    }
-    // While searching the heading is there only when something under it matches.
-    if (below.length > 0) {
-        rows.push({ id: "section:system", parent: null, depth: 0, label: "System", note: "section", expandable: false, expanded: false });
-        for (const row of below) {
-            rows.push(row.parent === null && row.icon === "database" ? { ...row, muted: true } : row);
+            i = end;
         }
     }
     return rows;
+}
+
+// ---------------------------------------------------------------- recent databases
+
+// The last databases opened on each server, newest first: the pickers offer them before the
+// long list. This browser's convenience, like the width below.
+const RECENT_KEY = "sqlbrowser.recentDatabases";
+const RECENT_LIMIT = 3;
+
+function loadRecent(): Record<string, string[]> {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "{}");
+        return parsed && typeof parsed === "object" ? (parsed as Record<string, string[]>) : {};
+    } catch {
+        return {};
+    }
+}
+
+function recentDatabases(alias: string): string[] {
+    const list = loadRecent()[alias];
+    return Array.isArray(list) ? list : [];
+}
+
+function rememberDatabase(alias: string, db: string): void {
+    const next = [db, ...recentDatabases(alias).filter((name) => name !== db)].slice(0, RECENT_LIMIT);
+    try {
+        localStorage.setItem(RECENT_KEY, JSON.stringify({ ...loadRecent(), [alias]: next }));
+    } catch {
+        // Storage is off: the pickers simply offer no recent databases.
+    }
 }
 
 // ---------------------------------------------------------------- width and visibility
@@ -419,20 +371,25 @@ export function ObjectTree({ alias }: { alias: string }) {
 
     const place = useMemo(() => locate(pathname), [pathname]);
     const current = currentId(place, grouped);
+    const [connectionsWanted, setConnectionsWanted] = useState(false);
+    // Asked for when the picker first opens. Adding a connection happens on a page without this
+    // tree, so coming back from it mounts a new one that asks again.
+    const connections = useApi(() => api.connections(), [], connectionsWanted);
 
     // The page on the right moved: open the way to it. Done while rendering, not in an effect,
     // so the tree never draws one frame with the path still closed.
     const server = read<{ server: { product: string }; databases: DatabaseInfo[] }>(serverKey(alias));
     const databases = server?.status === "ready" ? server.value.databases : NO_DATABASES;
     const product = server?.status === "ready" ? server.value.server.product : "";
+    const system = SYSTEM_DATABASES[product] ?? NO_SYSTEM_DATABASES;
+    const isSystem = (database: DatabaseInfo) => system.has(database.name.toLowerCase());
+    const selected = databases.find((d) => d.name === place.db);
     // A link straight into a system database shows them even while the setting hides them: the
-    // page on the right always has its node in the tree.
+    // picker always has the database you are in.
     const showSystemSetting = useSetting("tree.showSystemDatabases");
-    const inSystem = place.db !== undefined && (SYSTEM_DATABASES[product]?.has(place.db.toLowerCase()) ?? false);
+    const inSystem = place.db !== undefined && system.has(place.db.toLowerCase());
     const showSystem = showSystemSetting || inSystem;
-    // The product is part of the key: which folder a database sits in is known only once the
-    // server has answered, and the way to it is opened again then.
-    const revealKey = `${grouped}${SEP}${product}${SEP}${current}`;
+    const revealKey = `${grouped}${SEP}${current}`;
     const [revealed, setRevealed] = useState<string | null>(null);
     if (revealed !== revealKey) {
         setRevealed(revealKey);
@@ -444,23 +401,29 @@ export function ObjectTree({ alias }: { alias: string }) {
 
     const filter = search.trim().toLowerCase();
 
-    // Read whatever the open nodes need. Nothing here sets state before a request settles.
+    // Read what is on screen. Nothing here sets state before a request settles. Keyed on `settled`
+    // too: a retry or a refresh empties the cache and bumps it, and this reads the entry again.
+    const unreadable = selected !== undefined && !selected.isBrowsable;
     useEffect(() => {
         ensure(serverKey(alias), () => api.server(alias), bump);
-        for (const id of expanded) {
-            const [what, db] = id.split(SEP);
-            if (what === "db") {
-                ensure(namesKey(alias, db), () => api.names(alias, db), bump);
-            }
+        if (place.db && !unreadable) {
+            const db = place.db;
+            ensure(namesKey(alias, db), () => api.names(alias, db), bump);
         }
-    }, [alias, expanded]);
+    }, [alias, place.db, unreadable, settled]);
+
+    useEffect(() => {
+        if (place.db) {
+            rememberDatabase(alias, place.db);
+        }
+    }, [alias, place.db]);
 
     // The cache is read while rendering, and every request that settles bumps `settled`, so the
     // rows are rebuilt exactly when something they show has arrived.
     const rows = useMemo(
-        () => buildRows({ alias, product, databases, expanded, grouped, filter, showSystem }),
+        () => (place.db ? buildRows({ alias, db: place.db, database: selected, expanded, grouped, filter }) : []),
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [alias, product, databases, expanded, grouped, filter, showSystem, settled],
+        [alias, place.db, selected, expanded, grouped, filter, settled],
     );
 
     const focusIndex = Math.max(0, rows.findIndex((r) => r.id === (focused ?? current)));
@@ -486,18 +449,6 @@ export function ObjectTree({ alias }: { alias: string }) {
     const retry = (key: string) => {
         cache.delete(key);
         bump();
-        setExpanded((previous) => new Set(previous));
-    };
-
-    // Searching covers the databases that have been read. This reads the rest.
-    const readAll = () => {
-        const system = SYSTEM_DATABASES[product] ?? new Set<string>();
-        for (const d of databases) {
-            if (d.isBrowsable && (showSystem || !system.has(d.name.toLowerCase()))) {
-                ensure(namesKey(alias, d.name), () => api.names(alias, d.name), bump);
-            }
-        }
-        bump();
     };
 
     const refresh = () => {
@@ -506,17 +457,12 @@ export function ObjectTree({ alias }: { alias: string }) {
                 cache.delete(key);
             }
         }
-        setExpanded((previous) => new Set(previous));
         bump();
     };
 
     const activate = (row: Row) => {
         if (row.note === "error" && row.retryKey) {
             retry(row.retryKey);
-        } else if (row.note === "hint") {
-            readAll();
-        } else if (row.note === "system") {
-            setSetting("tree.showSystemDatabases", true);
         } else if (row.href) {
             navigate(row.href);
         } else if (row.expandable) {
@@ -535,6 +481,13 @@ export function ObjectTree({ alias }: { alias: string }) {
         observer.observe(el);
         return () => observer.disconnect();
     }, [prefs.hidden]);
+
+    // Another database is another list: it starts at its top, not at the last one's scroll.
+    useLayoutEffect(() => {
+        if (list.current) {
+            list.current.scrollTop = 0;
+        }
+    }, [place.db]);
 
     // Under the breadcrumb bar, down to the bottom of the window. The bar wraps on a narrow
     // window, so its height is measured.
@@ -692,6 +645,90 @@ export function ObjectTree({ alias }: { alias: string }) {
         );
     }
 
+    // ---- the pickers
+
+    const base = `/app/${encodeURIComponent(alias)}`;
+
+    // Moving to another database keeps the kind of page you are on: from a table to that
+    // database's table list, since the same table there would exist only by chance.
+    const databaseHref = (name: string) =>
+        `${base}/${encodeURIComponent(name)}${place.section ? `/${encodeURIComponent(place.section)}` : ""}`;
+
+    const databaseItem = (database: DatabaseInfo, prefix: string): ComboItem => {
+        const here = database.name === place.db;
+        return {
+            key: `${prefix}${SEP}${database.name}`,
+            label: database.name,
+            icon: "database",
+            meta: formatMb(database.dataMb),
+            current: here,
+            disabled: !database.isBrowsable,
+            href: here ? undefined : databaseHref(database.name),
+        };
+    };
+
+    const userDatabases = databases.filter((d) => !isSystem(d));
+    const systemDatabases = databases.filter(isSystem);
+
+    const databaseSections = (query: string): ComboSection[] => {
+        const systemSection: ComboSection[] =
+            systemDatabases.length === 0
+                ? []
+                : showSystem
+                  ? [{
+                        key: "system",
+                        title: "System",
+                        items: systemDatabases.map((d) => databaseItem(d, "system")),
+                        link: showSystemSetting ? { label: "hide", run: () => setSetting("tree.showSystemDatabases", false) } : undefined,
+                    }]
+                  : [{
+                        key: "system",
+                        title: `System · ${systemDatabases.length} ${systemDatabases.length === 1 ? "database" : "databases"}`,
+                        items: [],
+                        link: { label: "show", run: () => setSetting("tree.showSystemDatabases", true) },
+                    }];
+
+        // Hidden system databases are not searched either: what is not shown cannot be a match.
+        const listed = showSystem ? databases : userDatabases;
+        if (query) {
+            const items = listed.filter((d) => d.name.toLowerCase().includes(query)).map((d) => databaseItem(d, "match"));
+            return [{ key: "matches", items }, ...(showSystem ? [] : systemSection)];
+        }
+
+        const recent = recentDatabases(alias).flatMap((name) => listed.filter((d) => d.name === name));
+        return [
+            ...(recent.length > 0 ? [{ key: "recent", title: "Recent", items: recent.map((d) => databaseItem(d, "recent")) }] : []),
+            { key: "all", title: recent.length > 0 ? "All databases" : undefined, items: userDatabases.map((d) => databaseItem(d, "all")) },
+            ...systemSection,
+        ];
+    };
+
+    const serverSections = (): ComboSection[] => {
+        let items: ComboItem[];
+        if (connections.data) {
+            items = connections.data.map((c) => ({
+                key: c.alias,
+                label: c.alias,
+                icon: "server",
+                badge: c.provider === "postgres" ? "PostgreSQL" : "SQL Server",
+                current: c.alias === alias,
+                href: c.alias === alias ? undefined : `/app/${encodeURIComponent(c.alias)}`,
+            }));
+        } else {
+            items = [{ key: "state", label: connections.error ?? "Reading…", disabled: true }];
+        }
+        return [
+            { key: "servers", items },
+            {
+                key: "manage",
+                items: [
+                    { key: "new", label: "+ New connection…", action: true, href: "/app/_connections/new" },
+                    { key: "manage", label: "Manage connections", action: true, href: "/app" },
+                ],
+            },
+        ];
+    };
+
     // ---- what is drawn
 
     const first = Math.max(0, Math.floor(scrollTop / ROW) - OVERSCAN);
@@ -701,20 +738,41 @@ export function ObjectTree({ alias }: { alias: string }) {
     return (
         <aside className="otree" ref={aside} style={{ width: prefs.width }}>
             <div className="otree-head">
-                <div className="otree-title">
-                    <Icon name="server" size={14} />
-                    <span className="mono">{alias}</span>
-                    {server?.status === "ready" && <span className="muted">{databases.length} databases</span>}
-                    <button type="button" className="otree-icon-button" title="Read the tree again" onClick={refresh}>
-                        ↻
-                    </button>
-                </div>
-                <div className="otree-filter">
+                <Combo
+                    label="Server"
+                    icon="server"
+                    value={alias}
+                    placeholder=""
+                    plain
+                    meta={server?.status === "ready" ? `${product} · ${databases.length} db` : undefined}
+                    sections={serverSections}
+                    emptyText="No connections."
+                    onOpen={() => setConnectionsWanted(true)}
+                />
+                <Combo
+                    label="Database"
+                    icon="database"
+                    value={place.db ?? null}
+                    placeholder="Select a database…"
+                    meta={selected ? formatMb(selected.dataMb) : undefined}
+                    searchPlaceholder={`Filter ${databases.length} databases…`}
+                    sections={databaseSections}
+                    emptyText={
+                        server?.status === "error"
+                            ? server.error
+                            : server?.status === "ready"
+                              ? "No database matches."
+                              : "Reading the server…"
+                    }
+                    keysHint
+                />
+                <div className={place.db ? "otree-filter" : "otree-filter off"}>
                     <Icon name="search" size={13} />
                     <input
                         ref={filterBox}
                         type="search"
-                        placeholder="Filter objects…"
+                        placeholder={place.db ? `Filter ${place.db}…` : "Filter objects…"}
+                        disabled={!place.db}
                         value={search}
                         onChange={(e) => {
                             setSearch(e.target.value);
@@ -741,7 +799,7 @@ export function ObjectTree({ alias }: { alias: string }) {
                     />
                     {!search && <kbd>/</kbd>}
                 </div>
-                <div className="otree-mode" role="group" aria-label="Grouping">
+                <div className={place.db ? "otree-mode" : "otree-mode off"} role="group" aria-label="Grouping">
                     <button type="button" className={grouped ? "" : "on"} onClick={() => setSetting("tree.groupBySchema", false)}>
                         flat
                     </button>
@@ -761,10 +819,14 @@ export function ObjectTree({ alias }: { alias: string }) {
                 onKeyDown={onListKey}
             >
                 {server?.status === "error" && <div className="otree-note error">{server.error}</div>}
-                {(!server || server.status === "loading") && <div className="otree-note">Reading the server…</div>}
-                {server?.status === "ready" && rows.length === 0 && (
-                    <div className="otree-note">{filter ? "Nothing matches." : "No databases."}</div>
+                {!place.db && server?.status === "ready" && (
+                    <NoDatabase
+                        base={base}
+                        recent={recentDatabases(alias).flatMap((name) => databases.filter((d) => d.name === name && d.isBrowsable))}
+                        largest={[...userDatabases].filter((d) => d.isBrowsable).sort((a, b) => b.dataMb - a.dataMb).slice(0, LARGEST_DATABASES)}
+                    />
                 )}
+                {place.db && filter && rows.length === 0 && <div className="otree-note">Nothing matches.</div>}
                 <div style={{ height: rows.length * ROW, position: "relative" }}>
                     {rows.slice(first, last).map((row, i) => {
                         const index = first + i;
@@ -799,19 +861,6 @@ export function ObjectTree({ alias }: { alias: string }) {
                                 </span>
                                 {row.icon && <Icon name={row.icon} size={14} />}
                                 <span className="label">{row.label}</span>
-                                {row.note === "system" && <span className="action">show</span>}
-                                {row.note === "section" && showSystemSetting && (
-                                    <button
-                                        type="button"
-                                        className="action"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setSetting("tree.showSystemDatabases", false);
-                                        }}
-                                    >
-                                        hide
-                                    </button>
-                                )}
                                 {row.count !== undefined && <span className="count">{row.count.toLocaleString("en-US")}</span>}
                             </>
                         );
@@ -857,6 +906,9 @@ export function ObjectTree({ alias }: { alias: string }) {
                         ? `${place.db}: ${footerDb.value.length.toLocaleString("en-US")} objects · ${footerDb.ms} ms`
                         : ""}
                 </span>
+                <button type="button" className="link-button" title="Read the server and this database again" onClick={refresh}>
+                    ↻ refresh
+                </button>
                 <button type="button" className="link-button" onClick={() => updatePrefs({ ...prefs, hidden: true })}>
                     « hide
                 </button>
@@ -870,5 +922,33 @@ export function ObjectTree({ alias }: { alias: string }) {
                 title="Drag to resize"
             />
         </aside>
+    );
+}
+
+// On the server's own page no database is selected yet. Rather than an empty panel, the likely
+// next steps: where you were last, and where the space is.
+function NoDatabase({ base, recent, largest }: { base: string; recent: DatabaseInfo[]; largest: DatabaseInfo[] }) {
+    const group = (title: string, list: DatabaseInfo[]) =>
+        list.length > 0 && (
+            <div className="otree-pick">
+                <div className="otree-pick-title">{title}</div>
+                {list.map((d) => (
+                    <Link key={d.name} className="otree-pick-item" to={`${base}/${encodeURIComponent(d.name)}`} title={d.name}>
+                        <Icon name="database" size={14} />
+                        <span className="label">{d.name}</span>
+                        <span className="count">{formatMb(d.dataMb)}</span>
+                    </Link>
+                ))}
+            </div>
+        );
+    return (
+        <>
+            <div className="otree-empty">
+                <b>No database selected</b>
+                Pick one above to see its objects.
+            </div>
+            {group("Recent", recent)}
+            {group("Largest", largest)}
+        </>
     );
 }

@@ -100,6 +100,22 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
         }
     }, [share]);
 
+    // The shortcut handler is attached once; a ref keeps it reading the current text without
+    // re-binding the listener on every keystroke.
+    const textRef = useRef(text);
+    textRef.current = text;
+
+    // As in SSMS: with text selected, Execute runs the selection alone; with nothing selected,
+    // the whole editor. Only whether there IS a selection is state, for the button's label; the
+    // text itself is read when Execute is pressed.
+    const selection = useRef("");
+    const [hasSelection, setHasSelection] = useState(false);
+    const onSelection = useCallback((selected: string) => {
+        selection.current = selected;
+        setHasSelection(selected.trim() !== "");
+    }, []);
+    const runnable = () => (selection.current.trim() !== "" ? selection.current : textRef.current);
+
     // The shortcuts are the ones a SQL Server user already has in their fingers. F5 has to be
     // taken off the browser, which would otherwise reload the page and lose the result entirely.
     //
@@ -111,7 +127,7 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
             const execute = e.key === "F5" || (e.altKey && e.code === "KeyX");
             if (execute) {
                 e.preventDefault();
-                onExecute(textRef.current);
+                onExecute(runnable());
                 return;
             }
             if (e.key === "Escape" && running) {
@@ -122,11 +138,6 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
     }, [onExecute, onCancel, running]);
-
-    // The shortcut handler is attached once; a ref keeps it reading the current text without
-    // re-binding the listener on every keystroke.
-    const textRef = useRef(text);
-    textRef.current = text;
 
     const [shared, setShared] = useState<ShareState>({ kind: "idle" });
     // A link made from an older version of the text would be a quiet lie, so editing clears it.
@@ -154,9 +165,14 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
     return (
         <div className="workbench" ref={frame} style={height ? { height } : undefined}>
             <div className="qtoolbar">
-                <button type="button" className="tool run" onClick={() => onExecute(text)} title="Execute (Alt+X, F5)">
+                <button
+                    type="button"
+                    className="tool run"
+                    onClick={() => onExecute(runnable())}
+                    title={hasSelection ? "Execute the selected text only (Alt+X, F5)" : "Execute (Alt+X, F5)"}
+                >
                     <Icon name="play" size={14} />
-                    Execute
+                    {hasSelection ? "Execute selection" : "Execute"}
                 </button>
                 <button
                     type="button"
@@ -204,7 +220,8 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
                         value={text}
                         readOnly={false}
                         onChange={onEdit}
-                        onExecute={() => onExecute(textRef.current)}
+                        onExecute={() => onExecute(runnable())}
+                        onSelection={onSelection}
                     />
                 </Suspense>
             </div>

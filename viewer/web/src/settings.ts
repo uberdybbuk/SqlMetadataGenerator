@@ -186,7 +186,7 @@ export const SETTINGS = [
         section: "Object Tree",
         title: "Show System Databases",
         description:
-            "List master, model, msdb and tempdb (postgres and the templates on PostgreSQL) at the foot of the tree, under a heading of their own. Hidden, a line at the foot says how many there are and shows them with one click.",
+            "List master, model, msdb and tempdb (postgres and the templates on PostgreSQL) at the foot of the tree's database picker, under a heading of their own. Hidden, that heading says how many there are and shows them with one click.",
         kind: "boolean",
         default: false,
     },

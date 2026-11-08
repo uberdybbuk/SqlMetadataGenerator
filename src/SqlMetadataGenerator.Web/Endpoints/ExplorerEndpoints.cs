@@ -688,7 +688,12 @@ internal static class ExplorerEndpoints
     // The pivot spec as it arrives. Strings rather than enums on the wire, parsed here against the
     // closed sets, so an unknown aggregate is a 400 with a readable message instead of a binder
     // failure the user cannot act on.
-    public sealed record PivotFieldRequest(string? Column, string? Grain);
+    public sealed record PivotFieldRequest(string? Column, string? Grain, PivotSortRequest? Sort, PivotValueFilterRequest? Filter);
+
+    // Measure: an index into Values; left out, the groups are ordered by their labels.
+    public sealed record PivotSortRequest(int? Measure, bool? Descending);
+
+    public sealed record PivotValueFilterRequest(int? Measure, string? Op, decimal? Value);
 
     public sealed record PivotValueRequest(string? Agg, string? Column);
 
@@ -722,7 +727,23 @@ internal static class ExplorerEndpoints
         private static List<PivotField> Fields(List<PivotFieldRequest>? fields, string role) =>
             (fields ?? []).Select(f => new PivotField(
                 f.Column ?? throw new InvalidOperationException($"A {role} field needs a column."),
-                ParseGrain(f.Grain))).ToList();
+                ParseGrain(f.Grain),
+                f.Sort is null ? null : new PivotSort(f.Sort.Measure, f.Sort.Descending ?? false),
+                f.Filter is null ? null : new PivotValueFilter(
+                    f.Filter.Measure ?? throw new InvalidOperationException($"The value filter on '{f.Column}' needs a value to compare."),
+                    ParseOperator(f.Filter.Op),
+                    f.Filter.Value ?? throw new InvalidOperationException($"The value filter on '{f.Column}' needs a number.")))).ToList();
+
+        private static CompareOp ParseOperator(string? op) => op?.Trim().ToLowerInvariant() switch
+        {
+            "gt" or ">" => CompareOp.Greater,
+            "ge" or ">=" => CompareOp.GreaterOrEqual,
+            "lt" or "<" => CompareOp.Less,
+            "le" or "<=" => CompareOp.LessOrEqual,
+            "eq" or "=" => CompareOp.Equal,
+            "ne" or "<>" or "!=" => CompareOp.NotEqual,
+            _ => throw new InvalidOperationException($"Unknown comparison '{op}'. Use gt, ge, lt, le, eq or ne."),
+        };
 
         private static DateGrain ParseGrain(string? grain) => grain?.Trim().ToLowerInvariant() switch
         {

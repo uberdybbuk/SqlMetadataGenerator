@@ -1,4 +1,5 @@
-import type { PivotAgg, PivotGrain, PivotResult, PivotRowField, PivotValueField } from "../api";
+import type { PivotAgg, PivotGrain, PivotResult, PivotValueField } from "../api";
+import { measureKey, type LayoutField } from "./layout";
 
 // Folds the server's answer into Excel's matrix.
 //
@@ -27,8 +28,8 @@ export interface RowNode {
 }
 
 export interface Matrix {
-    rowFields: PivotRowField[];
-    columnFields: PivotRowField[];
+    rowFields: LayoutField[];
+    columnFields: LayoutField[];
     measures: { name: string; typeName: string; agg: PivotAgg }[];
     heads: ColumnHead[];
     // The grand total; its children are the first row field's groups.
@@ -45,8 +46,8 @@ export const keyOf = (path: Cell[]) => JSON.stringify(path);
 
 export function toMatrix(
     result: PivotResult,
-    rowFields: PivotRowField[],
-    columnFields: PivotRowField[],
+    rowFields: LayoutField[],
+    columnFields: LayoutField[],
     values: PivotValueField[],
 ): Matrix {
     const r = result.rowFieldCount;
@@ -94,7 +95,11 @@ export function toMatrix(
         node.values.set(colKey, row.slice(r + c, r + c + m));
     }
 
-    sortTree(root);
+    // A group is ordered by its own total: a row group by its value in the grand total column, a
+    // column group by its value on the grand total row.
+    const grandColumn = keyOf([]);
+    sortTree(root, 0, rowFields, values, (node, m) => node.values.get(grandColumn)?.[m] ?? null);
+    const byColumn = (path: Cell[], m: number) => root.values.get(keyOf(path))?.[m] ?? null;
 
     return {
         rowFields,
@@ -104,7 +109,9 @@ export function toMatrix(
             typeName: result.columns[r + c + i]?.typeName ?? "",
             agg: value.agg,
         })),
-        heads: orderHeads([...columnPaths.values()], c),
+        heads: orderHeads([...columnPaths.values()], c, (level, a, b) =>
+            compareBy(columnFields[level], values, a[level], b[level], (m) => [byColumn(a, m), byColumn(b, m)]),
+        ),
         root,
         leafRows,
         cells: result.rows.length,
@@ -128,14 +135,45 @@ export function compareCells(a: Cell, b: Cell): number {
     return String(a).localeCompare(String(b), "en", { numeric: true });
 }
 
-function sortTree(node: RowNode): void {
-    node.children.sort((a, b) => compareCells(a.path[a.path.length - 1], b.path[b.path.length - 1]));
-    node.children.forEach(sortTree);
+// Two groups of one field, in the order the field asks for: by label, or by a measure, either way
+// round. Blanks stay last whichever way, as Excel keeps them. Without a sort, labels ascending.
+function compareBy(
+    field: LayoutField | undefined,
+    values: PivotValueField[],
+    labelA: Cell,
+    labelB: Cell,
+    measureOf: (m: number) => [Cell, Cell],
+): number {
+    const desc = field?.sortDesc === true;
+    let a = labelA;
+    let b = labelB;
+    if (field?.sortBy) {
+        const m = values.findIndex((v) => measureKey(v) === field.sortBy);
+        if (m >= 0) {
+            [a, b] = measureOf(m);
+        }
+    }
+    const order = a === null || b === null ? compareCells(a, b) : desc ? -compareCells(a, b) : compareCells(a, b);
+    // Equal measures fall back to the labels, so the order never depends on the server's.
+    return order !== 0 || (a === labelA && b === labelB) ? order : compareCells(labelA, labelB);
+}
+
+function sortTree(
+    node: RowNode,
+    level: number,
+    fields: LayoutField[],
+    values: PivotValueField[],
+    valueOf: (node: RowNode, m: number) => Cell,
+): void {
+    node.children.sort((a, b) =>
+        compareBy(fields[level], values, a.path[level], b.path[level], (m) => [valueOf(a, m), valueOf(b, m)]),
+    );
+    node.children.forEach((child) => sortTree(child, level + 1, fields, values, valueOf));
 }
 
 // Leaves in label order; with more than one column field, each outer group's subtotal right after
 // its members; the grand total last. That is the order Excel lays a column area out in.
-function orderHeads(paths: Cell[][], depth: number): ColumnHead[] {
+function orderHeads(paths: Cell[][], depth: number, compare: (level: number, a: Cell[], b: Cell[]) => number): ColumnHead[] {
     if (depth === 0) {
         return [{ key: keyOf([]), path: [], kind: "grand" }];
     }
@@ -150,7 +188,7 @@ function orderHeads(paths: Cell[][], depth: number): ColumnHead[] {
                     .filter((p) => p.length > level && keyOf(p.slice(0, level)) === keyOf(prefix))
                     .map((p) => [keyOf(p.slice(0, level + 1)), p.slice(0, level + 1)] as const),
             ).values(),
-        ].sort((a, b) => compareCells(a[level], b[level]));
+        ].sort((a, b) => compare(level, a, b));
 
         for (const child of children) {
             if (child.length === depth) {
@@ -188,7 +226,7 @@ export function visibleRows(root: RowNode, collapsed: Set<string>): RowNode[] {
 
 // How a group's value reads in a header. A date rolled up to a period is shown as the period, not
 // as the first day the server used to stand for it.
-export function formatLabel(value: Cell, field: PivotRowField | undefined): string {
+export function formatLabel(value: Cell, field: LayoutField | undefined): string {
     if (value === null) {
         return "(null)";
     }

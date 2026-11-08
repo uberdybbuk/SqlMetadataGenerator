@@ -15,7 +15,16 @@ import { useFillHeight } from "../useFillHeight";
 
 const SqlEditor = lazy(() => import("../SqlEditor"));
 
+// Keyed by the table. Moving from one table to another (from the object tree, say) keeps this
+// route mounted, and everything held here belonged to the previous table: a query run there
+// stayed on screen in place of the new table's rows, and the detail tab stayed open. A new
+// table starts as a fresh page, on its data.
 export function TableDetailPage() {
+    const { alias = "", db = "", schema = "", name = "" } = useParams();
+    return <TableDetail key={`${alias}/${db}/${schema}/${name}`} />;
+}
+
+function TableDetail() {
     const { alias = "", db = "", schema = "", name = "" } = useParams();
     // Whoever clicks a table wants to see the DATA first; the column list is the second question.
     const [tab, setTab] = useState<"data" | "detail" | "script">("data");

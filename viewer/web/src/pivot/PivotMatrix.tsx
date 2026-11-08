@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 
-import type { PivotRowField } from "../api";
-
+import type { LayoutField } from "./layout";
 import { ADDITIVE, formatLabel, formatMeasure, keyOf, type Cell, type ColumnHead, type Matrix, type RowNode } from "./matrix";
 
 // Excel's compact layout: one label column, a group's subtotal on its own line with its members
@@ -13,9 +12,12 @@ interface PivotMatrixProps {
     rows: RowNode[];
     collapsed: Set<string>;
     onToggle: (key: string) => void;
+    // The measure the row groups are ordered by, shown as an arrow on its header.
+    sortedBy: { measure: number; desc: boolean } | null;
+    onSort: (measure: number) => void;
 }
 
-export function PivotMatrix({ matrix, rows, collapsed, onToggle }: PivotMatrixProps) {
+export function PivotMatrix({ matrix, rows, collapsed, onToggle, sortedBy, onSort }: PivotMatrixProps) {
     const { rowFields, columnFields, measures, heads, root } = matrix;
     const c = columnFields.length;
     const m = measures.length;
@@ -30,6 +32,25 @@ export function PivotMatrix({ matrix, rows, collapsed, onToggle }: PivotMatrixPr
     const rowCaption = rowFields.map((f) => fieldName(f)).join(" › ");
     const columnCaption = columnFields.map((f) => fieldName(f)).join(" › ");
     const headerRows = crossTab ? c + (m > 1 ? 1 : 0) : 1;
+
+    // A measure's header that sorts the rows by it. Only the grand total's headers do: the rows
+    // are ordered by their totals, not by one column of a cross-tab.
+    const sortHeader = (i: number, label: ReactNode, className?: string, extra?: { colSpan?: number; rowSpan?: number }) => {
+        const on = sortedBy?.measure === i;
+        return (
+            <th
+                key={`sort#${i}`}
+                className={[className, "sortable"].filter(Boolean).join(" ")}
+                {...extra}
+                onClick={() => onSort(i)}
+                title="Sort the rows by this"
+                aria-sort={on ? (sortedBy!.desc ? "descending" : "ascending") : undefined}
+            >
+                {label}
+                {on && <span className="sort-arrow">{sortedBy!.desc ? " ▼" : " ▲"}</span>}
+            </th>
+        );
+    };
 
     const valueCells = (node: RowNode, total: boolean): ReactNode[] =>
         heads.flatMap((head) => {
@@ -72,17 +93,21 @@ export function PivotMatrix({ matrix, rows, collapsed, onToggle }: PivotMatrixPr
                                             <span>{rowCaption}</span>
                                         </th>
                                     )}
-                                    {headerBand(heads, level, c, m, columnFields)}
+                                    {headerBand(heads, level, c, m, columnFields, m === 1 ? (label, extra) => sortHeader(0, label, "tot", extra) : undefined)}
                                 </tr>
                             ))}
                             {m > 1 && (
                                 <tr>
                                     {heads.flatMap((head) =>
-                                        measures.map((measure, i) => (
-                                            <th key={`${head.key}#${i}`} className={head.kind === "leaf" ? undefined : "tot"}>
-                                                {measure.name}
-                                            </th>
-                                        )),
+                                        measures.map((measure, i) =>
+                                            head.kind === "grand" ? (
+                                                sortHeader(i, measure.name, "tot")
+                                            ) : (
+                                                <th key={`${head.key}#${i}`} className={head.kind === "leaf" ? undefined : "tot"}>
+                                                    {measure.name}
+                                                </th>
+                                            ),
+                                        ),
                                     )}
                                 </tr>
                             )}
@@ -91,7 +116,7 @@ export function PivotMatrix({ matrix, rows, collapsed, onToggle }: PivotMatrixPr
                         <tr>
                             <th className="corner">{rowCaption}</th>
                             {measures.flatMap((measure, i) => [
-                                <th key={i}>{measure.name}</th>,
+                                sortHeader(i, measure.name),
                                 ...(withShare(i) ? [<th key={`${i}%`}>% of total</th>] : []),
                             ])}
                         </tr>
@@ -136,14 +161,22 @@ export function PivotMatrix({ matrix, rows, collapsed, onToggle }: PivotMatrixPr
     );
 }
 
-function fieldName(field: PivotRowField): string {
+function fieldName(field: LayoutField): string {
     return field.grain && field.grain !== "none" ? `${field.column} (${field.grain})` : field.column;
 }
 
 // One row of the column header band. A group spans its members and its own subtotal; a subtotal
 // starts at the level below its group and runs to the bottom of the band; the grand total spans
 // the whole band.
-function headerBand(heads: ColumnHead[], level: number, depth: number, measures: number, fields: PivotRowField[]) {
+function headerBand(
+    heads: ColumnHead[],
+    level: number,
+    depth: number,
+    measures: number,
+    fields: LayoutField[],
+    // Draws the grand total's header when it is the sort control for the single measure.
+    grandHeader?: (label: string, extra: { colSpan: number; rowSpan: number }) => ReactNode,
+) {
     const cells: ReactNode[] = [];
     let i = 0;
     while (i < heads.length) {
@@ -154,6 +187,11 @@ function headerBand(heads: ColumnHead[], level: number, depth: number, measures:
         }
         if (head.path.length === level) {
             const label = level === 0 ? "Total" : `${formatLabel(head.path[level - 1], fields[level - 1])} Total`;
+            if (level === 0 && grandHeader) {
+                cells.push(grandHeader(label, { colSpan: measures, rowSpan: depth - level }));
+                i++;
+                continue;
+            }
             cells.push(
                 <th key={head.key} className="tot" colSpan={measures} rowSpan={depth - level}>
                     {label}

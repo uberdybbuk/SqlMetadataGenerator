@@ -6,9 +6,10 @@ import { useApi } from "../useApi";
 import { setSetting, useSetting } from "../settings";
 import { FieldPane } from "./FieldPane";
 import { FilterBar, type ValueList } from "./FilterBar";
-import { EMPTY_LAYOUT, toSpec, type Layout } from "./layout";
+import { EMPTY_LAYOUT, describeField, measureKey, toSpec, type Layout, type LayoutField } from "./layout";
 import { formatLabel, toMatrix, toTsv, visibleRows, type RowNode } from "./matrix";
 import { PivotMatrix } from "./PivotMatrix";
+import { fitToColumns, recall, remember } from "./remembered";
 
 const SqlEditor = lazy(() => import("../SqlEditor"));
 
@@ -26,12 +27,17 @@ const VALUE_LIST_LIMIT = 200;
 
 // The panel unmounts whenever another tab is picked, and an analysis that is gone when you come
 // back to it is one you cannot work with. So the layout AND its result are kept per table for the
-// life of the page. The result is kept rather than recomputed on return: re-running would put a
+// life of the page. The layout alone also goes to the browser's storage (remembered.ts), so a
+// reload brings the areas back, though not the result. The result is kept rather than recomputed on return: re-running would put a
 // whole-table aggregate behind a tab click, which is what the POST endpoint exists to avoid.
 interface Ran {
     // The spec the result answers, as sent. Compared with the current one to tell a result that
     // still matches the areas from one the areas have since moved away from.
     key: string;
+    // The same without the sorts. A complete result is re-ordered on screen at once, so a sort
+    // alone does not make it out of date; a capped one is, since the sort decides which groups
+    // the server kept.
+    unsortedKey: string;
     layout: Layout;
     result: PivotResult;
 }
@@ -55,8 +61,11 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
     const navigate = useNavigate();
 
     const key = [alias, db, schema, name].join("\u0000");
-    const [initial] = useState(() => kept.get(key));
-    const [layout, setLayout] = useState<Layout>(initial?.layout ?? EMPTY_LAYOUT);
+    const [initial] = useState<Partial<Kept> | undefined>(() => kept.get(key) ?? recall(key));
+    const [storedLayout, setLayout] = useState<Layout>(initial?.layout ?? EMPTY_LAYOUT);
+    // Every change goes through setLayout with a copy of this one, so a field dropped here for a
+    // missing column is dropped from the state too at the next edit.
+    const layout = useMemo(() => fitToColumns(storedLayout, columns), [storedLayout, columns]);
     const [where, setWhere] = useState(initial?.where ?? "");
     const [ran, setRan] = useState<Ran | null>(initial?.ran ?? null);
     const [error, setError] = useState<string | null>(initial?.error ?? null);
@@ -70,8 +79,15 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
         kept.set(key, { layout, where, ran, error, showSql, collapsed: [...collapsed] });
     }, [key, layout, where, ran, error, showSql, collapsed]);
 
+    useEffect(() => {
+        const empty = where.trim() === "" && JSON.stringify(layout) === JSON.stringify(EMPTY_LAYOUT);
+        remember(key, { layout, where, showSql }, empty);
+    }, [key, layout, where, showSql]);
+
     const spec = useMemo(() => toSpec(layout, where, limit), [layout, where, limit]);
     const specKey = JSON.stringify(spec);
+    const unsortedKey = JSON.stringify(toSpec(layout, where, limit, false));
+    const upToDate = (r: Ran | null) => r !== null && (r.result.capped ? r.key === specKey : r.unsortedKey === unsortedKey);
     const runBlocker =
         layout.rows.length === 0
             ? "Put at least one field in Rows."
@@ -104,12 +120,13 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
         const controller = new AbortController();
         runController.current = controller;
         const sentKey = specKey;
+        const sentUnsorted = unsortedKey;
         const sentLayout = layout;
         setRunning(true);
         setError(null);
         try {
             const result = await api.pivot(alias, db, schema, name, spec, controller.signal);
-            settle({ ran: { key: sentKey, layout: sentLayout, result }, error: null });
+            settle({ ran: { key: sentKey, unsortedKey: sentUnsorted, layout: sentLayout, result }, error: null });
         } catch (err) {
             if (!controller.signal.aborted) {
                 settle({ error: err instanceof Error ? err.message : String(err) });
@@ -119,7 +136,7 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
                 setRunning(false);
             }
         }
-    }, [alias, db, schema, name, spec, specKey, layout, runBlocker, settle]);
+    }, [alias, db, schema, name, spec, specKey, unsortedKey, layout, runBlocker, settle]);
 
     // The statement is shown while the areas are still being filled, before anything has run:
     // composing it costs the server nothing, and it is what the matrix will be computed from.
@@ -147,12 +164,13 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
     // Run on every change: after a pause, so dragging three fields in a row runs once, not three
     // times, and typing a WHERE does not fire a query per keystroke.
     useEffect(() => {
-        if (!autoRun || runBlocker || ran?.key === specKey) {
+        if (!autoRun || runBlocker || upToDate(ran)) {
             return;
         }
         const timer = window.setTimeout(() => void run(), 700);
         return () => window.clearTimeout(timer);
-    }, [autoRun, runBlocker, ran?.key, specKey, run]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [autoRun, runBlocker, ran, specKey, unsortedKey, run]);
 
     useEffect(() => () => runController.current?.abort(), []);
 
@@ -188,10 +206,18 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
         [alias, db, schema, name],
     );
 
-    const matrix = useMemo(
-        () => (ran ? toMatrix(ran.result, ran.layout.rows, ran.layout.columns, ran.layout.values) : null),
-        [ran],
-    );
+    // The result's fields with the CURRENT sorts, so picking a sort re-orders the matrix at once
+    // instead of waiting for a run. A field that has moved since keeps the sort it ran with.
+    const matrix = useMemo(() => {
+        if (!ran) {
+            return null;
+        }
+        const resorted = (ranFields: LayoutField[], now: LayoutField[]) =>
+            ranFields.map((f, i) =>
+                now[i]?.column === f.column && now[i]?.grain === f.grain ? { ...f, sortBy: now[i].sortBy, sortDesc: now[i].sortDesc } : f,
+            );
+        return toMatrix(ran.result, resorted(ran.layout.rows, layout.rows), resorted(ran.layout.columns, layout.columns), ran.layout.values);
+    }, [ran, layout.rows, layout.columns]);
     const rows = useMemo(() => (matrix ? visibleRows(matrix.root, collapsed) : []), [matrix, collapsed]);
     const groupKeys = useMemo(() => {
         const keys: string[] = [];
@@ -208,7 +234,38 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
         return keys;
     }, [matrix]);
 
-    const stale = ran !== null && ran.key !== specKey;
+    const stale = ran !== null && !upToDate(ran);
+
+    // Clicking a measure's header sorts every row field by it: largest first, then smallest
+    // first, then back to the labels. What the header shows is the innermost field's sort.
+    const innermost = layout.rows[layout.rows.length - 1];
+    const headerSort = (measure: number) => {
+        const value = ran?.layout.values[measure];
+        if (!value || !layout.values.some((v) => measureKey(v) === measureKey(value))) {
+            return;
+        }
+        const key = measureKey(value);
+        const next: Pick<LayoutField, "sortBy" | "sortDesc"> =
+            innermost?.sortBy !== key
+                ? { sortBy: key, sortDesc: true }
+                : innermost.sortDesc
+                  ? { sortBy: key, sortDesc: undefined }
+                  : { sortBy: undefined, sortDesc: undefined };
+        setLayout({ ...layout, rows: layout.rows.map((f) => ({ ...f, ...next })) });
+    };
+    const sortedBy = (() => {
+        const value = ran?.layout.values.findIndex((v) => innermost?.sortBy !== undefined && measureKey(v) === innermost.sortBy);
+        return value !== undefined && value >= 0 ? { measure: value, desc: innermost?.sortDesc === true } : null;
+    })();
+
+    // The value filters in force, as chips above the matrix: a filter that hides groups should
+    // never be something you can only find by opening the right field's menu.
+    const valueFilters = (["rows", "columns"] as const).flatMap((area) =>
+        layout[area].flatMap((field, index) => {
+            const text = field.keep ? describeField({ column: field.column, keep: field.keep }, layout.values) : "";
+            return text ? [{ area, index, field, text }] : [];
+        }),
+    );
     const current = preview?.key === specKey ? preview : null;
     const sqlShown = ran && !stale ? ran.result.sql : (current?.sql ?? null);
     const sqlError = ran && !stale ? null : (current?.error ?? null);
@@ -257,6 +314,31 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
                         }
                         onRemove={(i) => setLayout({ ...layout, filters: layout.filters.filter((_, j) => j !== i) })}
                     />
+                    {valueFilters.length > 0 && (
+                        <div className="pfilterbar">
+                            <span className="plabel">Value filter</span>
+                            {valueFilters.map(({ area, index, field, text }) => (
+                                <span key={`${area}:${index}`} className="pchip-wrap">
+                                    <span className="pchip active mono">
+                                        {field.column}: {text}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        className="pchip-x"
+                                        aria-label={`Remove the value filter on ${field.column}`}
+                                        onClick={() =>
+                                            setLayout({
+                                                ...layout,
+                                                [area]: layout[area].map((f, j) => (j === index ? { ...f, keep: undefined } : f)),
+                                            })
+                                        }
+                                    >
+                                        ×
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                    )}
                     <label className="pwhere">
                         <span className="plabel">Where</span>
                         <input
@@ -294,10 +376,19 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
                                 </button>
                             </div>
                         )}
+                        {matrix.leafRows === 0 && (
+                            <div className="warn-note pcapped">
+                                {valueFilters.length > 0
+                                    ? "No group passes the value filter. Loosen it, or remove it with its × above."
+                                    : "No rows match, so there is nothing to group."}
+                            </div>
+                        )}
                         <PivotMatrix
                             matrix={matrix}
                             rows={rows}
                             collapsed={collapsed}
+                            sortedBy={sortedBy}
+                            onSort={headerSort}
                             onToggle={(nodeKey) => {
                                 const next = new Set(collapsed);
                                 if (next.has(nodeKey)) {

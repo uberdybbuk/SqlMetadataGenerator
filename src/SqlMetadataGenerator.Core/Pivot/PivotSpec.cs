@@ -22,7 +22,29 @@ public enum Aggregate
     Max,
 }
 
-public sealed record PivotField(string Column, DateGrain Grain = DateGrain.None);
+// How a field's groups are ordered within their parent group. Measure is an index into the
+// spec's Values; null orders by the group's own label.
+public sealed record PivotSort(int? Measure, bool Descending);
+
+public enum CompareOp
+{
+    Greater,
+    GreaterOrEqual,
+    Less,
+    LessOrEqual,
+    Equal,
+    NotEqual,
+}
+
+// Excel's value filter: keep a field's groups whose measure passes the comparison. Measure is an
+// index into the spec's Values, and has to be a number.
+public sealed record PivotValueFilter(int Measure, CompareOp Op, decimal Value);
+
+public sealed record PivotField(
+    string Column,
+    DateGrain Grain = DateGrain.None,
+    PivotSort? Sort = null,
+    PivotValueFilter? Filter = null);
 
 // Column is null for Count, which counts rows rather than values.
 public sealed record PivotMeasure(Aggregate Aggregate, string? Column = null);

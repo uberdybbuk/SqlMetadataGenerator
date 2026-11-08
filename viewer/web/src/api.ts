@@ -272,9 +272,15 @@ export interface PreviewResult {
 export type PivotGrain = "none" | "year" | "quarter" | "month" | "day";
 export type PivotAgg = "count" | "countDistinct" | "sum" | "avg" | "min" | "max";
 
+export type PivotOp = "gt" | "ge" | "lt" | "le" | "eq" | "ne";
+
+// How a field's groups are ordered within their parent, and which of them are kept. Measure is an
+// index into the spec's values; a sort without one orders by the groups' labels.
 export interface PivotRowField {
     column: string;
     grain?: PivotGrain;
+    sort?: { measure?: number; descending: boolean };
+    filter?: { measure: number; op: PivotOp; value: number };
 }
 
 export interface PivotValueField {

@@ -1,10 +1,12 @@
-import { useMemo, useRef, useState, type DragEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
 
 import type { ColumnSummary, PivotAgg, PivotGrain } from "../api";
 import { isNumericType } from "../cell";
 import { Icon } from "../Icon";
+import { FieldMenu } from "./FieldMenu";
 import {
     AGGREGATES,
+    describeField,
     filterSummary,
     measureLabel,
     move,
@@ -53,7 +55,41 @@ interface FieldPaneProps {
 export function FieldPane({ columns, layout, onLayout, running, runBlocker, onRun, autoRun, onAutoRun }: FieldPaneProps) {
     const [search, setSearch] = useState("");
     const [hot, setHot] = useState<Area | null>(null);
+    // The Rows or Columns field whose menu is open, and where its pill is on screen.
+    const [menu, setMenu] = useState<{ area: "rows" | "columns"; index: number; anchor: DOMRect } | null>(null);
     const dragged = useRef<Dragged | null>(null);
+    const pane = useRef<HTMLElement>(null);
+
+    // Down to the window's foot at every scroll position. The pane starts below the matrix's
+    // toolbar and sticks under the breadcrumb once the page scrolls, so the room it has changes
+    // as the page moves; it is measured on every scroll rather than once. The column list takes
+    // whatever the areas below it leave.
+    useLayoutEffect(() => {
+        const el = pane.current;
+        const crumbs = document.querySelector<HTMLElement>(".crumbs");
+        if (!el) {
+            return;
+        }
+        const fit = () => {
+            const stuck = (crumbs?.offsetHeight ?? 0) + 12;
+            el.style.setProperty("--pfields-top", `${stuck}px`);
+            const top = Math.max(stuck, el.getBoundingClientRect().top);
+            // 24 is the shell's bottom padding, as useFillHeight leaves it.
+            el.style.height = `${Math.max(360, window.innerHeight - top - 24)}px`;
+        };
+        fit();
+        window.addEventListener("scroll", fit, { passive: true });
+        window.addEventListener("resize", fit);
+        const observer = new ResizeObserver(fit);
+        if (crumbs) {
+            observer.observe(crumbs);
+        }
+        return () => {
+            window.removeEventListener("scroll", fit);
+            window.removeEventListener("resize", fit);
+            observer.disconnect();
+        };
+    }, []);
 
     const byName = useMemo(() => new Map(columns.map((c) => [c.name, c])), [columns]);
     const used = usedColumns(layout);
@@ -105,10 +141,10 @@ export function FieldPane({ columns, layout, onLayout, running, runBlocker, onRu
         event.dataTransfer.setData("text/plain", payload.column ?? "Count");
     };
 
-    const pill = (area: Area, index: number, column: string | null, body: React.ReactNode) => (
+    const pill = (area: Area, index: number, column: string | null, body: React.ReactNode, on = false) => (
         <span
             key={`${area}:${index}:${column}`}
-            className={area === "filters" ? "ppill filter" : "ppill"}
+            className={area === "filters" || on ? "ppill filter" : "ppill"}
             data-index={index}
             draggable
             onDragStart={(e) => startDrag(e, { column, from: { area, index } })}
@@ -125,7 +161,7 @@ export function FieldPane({ columns, layout, onLayout, running, runBlocker, onRu
     );
 
     return (
-        <aside className="pfields">
+        <aside className="pfields" ref={pane}>
             <div className="plabel">Fields</div>
             <input
                 type="search"
@@ -191,10 +227,14 @@ export function FieldPane({ columns, layout, onLayout, running, runBlocker, onRu
                                     )),
                                 )}
                             {(area === "rows" || area === "columns") &&
-                                layout[area].map((f, i) =>
-                                    pill(area, i, f.column, (
+                                layout[area].map((f, i) => {
+                                    const described = describeField(f, layout.values);
+                                    return pill(
+                                        area,
+                                        i,
+                                        f.column,
                                         <>
-                                            <span className="ptext">{f.column}</span>
+                                            <span className="ptext" title={f.column}>{f.column}</span>
                                             {f.grain && f.grain !== "none" && (
                                                 <select
                                                     value={f.grain}
@@ -215,9 +255,22 @@ export function FieldPane({ columns, layout, onLayout, running, runBlocker, onRu
                                                     ))}
                                                 </select>
                                             )}
-                                        </>
-                                    )),
-                                )}
+                                            <button
+                                                type="button"
+                                                className="pmenu-open"
+                                                aria-label={`Sort and filter ${f.column}`}
+                                                title="Sort and filter"
+                                                onClick={(e) =>
+                                                    setMenu({ area, index: i, anchor: e.currentTarget.closest(".ppill")!.getBoundingClientRect() })
+                                                }
+                                            >
+                                                ▾
+                                            </button>
+                                            {described && <span className="pdesc">{described}</span>}
+                                        </>,
+                                        described !== "",
+                                    );
+                                })}
                             {area === "values" &&
                                 layout.values.map((v, i) => {
                                     const column = v.column ? byName.get(v.column) : undefined;
@@ -275,6 +328,20 @@ export function FieldPane({ columns, layout, onLayout, running, runBlocker, onRu
                 </label>
             </div>
             {runBlocker && <div className="pblocker">{runBlocker}</div>}
+            {menu && layout[menu.area][menu.index] && (
+                <FieldMenu
+                    key={`${menu.area}:${menu.index}`}
+                    field={layout[menu.area][menu.index]}
+                    values={layout.values}
+                    columns={columns}
+                    anchor={menu.anchor}
+                    onClose={() => setMenu(null)}
+                    onApply={(next) => {
+                        onLayout({ ...layout, [menu.area]: layout[menu.area].map((f, j) => (j === menu.index ? next : f)) });
+                        setMenu(null);
+                    }}
+                />
+            )}
         </aside>
     );
 }

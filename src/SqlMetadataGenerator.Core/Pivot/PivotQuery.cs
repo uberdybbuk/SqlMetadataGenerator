@@ -80,15 +80,7 @@ public static class PivotQuery
 
         int limit = Math.Clamp(spec.Limit, 1, spec.Columns.Count > 0 ? MaxCells : MaxLimit);
 
-        var sql = new StringBuilder();
-        sql.Append("SELECT ");
-        if (provider == DatabaseProvider.SqlServer)
-        {
-            sql.Append(CultureInfo.InvariantCulture, $"TOP {limit} ");
-        }
-        sql.AppendLine();
-        sql.AppendLine("    " + string.Join(",\n    ", selects));
-        sql.AppendLine($"FROM {Qualify(provider, shape.Schema, shape.Name)}");
+        string table = Qualify(provider, shape.Schema, shape.Name);
 
         var conditions = new List<string>();
         if (!string.IsNullOrWhiteSpace(spec.Where))
@@ -102,6 +94,58 @@ public static class PivotQuery
                 conditions.Add(condition);
             }
         }
+
+        // Value filters. Each one is its own GROUP BY ... HAVING over the same rows, down to the
+        // filtered field's level, and the pivot keeps only the rows whose group passed. Filtering
+        // the ROWS rather than the result is what keeps the totals honest: the grand total then
+        // covers exactly the groups on screen, whichever measure is shown, Excel's behaviour. A
+        // HAVING on the pivot itself would also be applied to every total row, and the grand total
+        // would go on counting the groups it had dropped.
+        var keeps = new List<string>();
+        var kept = new List<string>();
+        string baseWhere = conditions.Count > 0 ? $"\n    WHERE {string.Join("\n      AND ", conditions)}" : "";
+        foreach (var (fields, by) in new[] { (spec.Rows, rowBy), (spec.Columns, columnBy) })
+        {
+            for (int i = 0; i < fields.Count; i++)
+            {
+                if (fields[i].Filter is not { } valueFilter)
+                {
+                    continue;
+                }
+                var measure = MeasureAt(spec, valueFilter.Measure, fields[i].Column);
+                if (!IsNumericMeasure(columns, measure))
+                {
+                    throw new InvalidOperationException($"{Header(measure)} is not a number, so '{fields[i].Column}' cannot be filtered by it.");
+                }
+
+                string name = $"__keep{keeps.Count}";
+                var keys = by.Take(i + 1).ToList();
+                var keyColumns = keys.Select((k, j) => $"{k} AS __k{j}");
+                keeps.Add(
+                    $"{name} AS (\n    SELECT {string.Join(", ", keyColumns)}\n    FROM {table}{baseWhere}\n"
+                    + $"    GROUP BY {string.Join(", ", keys)}\n"
+                    + $"    HAVING {MeasureExpression(provider, columns, measure)} {Operator(valueFilter.Op)} {valueFilter.Value.ToString(CultureInfo.InvariantCulture)}\n)");
+                // NULL is a group like any other in a pivot, so a NULL key has to find its own
+                // group too; = alone never matches it.
+                var matches = keys.Select((k, j) => $"({name}.__k{j} = {k} OR ({name}.__k{j} IS NULL AND {k} IS NULL))");
+                kept.Add($"EXISTS (SELECT 1 FROM {name} WHERE {string.Join(" AND ", matches)})");
+            }
+        }
+        conditions.AddRange(kept);
+
+        var sql = new StringBuilder();
+        if (keeps.Count > 0)
+        {
+            sql.AppendLine("WITH " + string.Join(",\n", keeps));
+        }
+        sql.Append("SELECT ");
+        if (provider == DatabaseProvider.SqlServer)
+        {
+            sql.Append(CultureInfo.InvariantCulture, $"TOP {limit} ");
+        }
+        sql.AppendLine();
+        sql.AppendLine("    " + string.Join(",\n    ", selects));
+        sql.AppendLine($"FROM {table}");
         if (conditions.Count > 0)
         {
             sql.AppendLine($"WHERE {string.Join("\n  AND ", conditions)}");
@@ -141,6 +185,46 @@ public static class PivotQuery
             foreach (string expression in groupBy)
             {
                 order.Add($"GROUPING({expression}) DESC");
+            }
+        }
+        // Then each field's own sort, outermost first. The screen orders the groups itself; this
+        // decides which groups survive the row cap, so "smallest first" keeps the smallest.
+        foreach (var (fields, by, other) in new[] { (spec.Rows, rowBy, columnBy), (spec.Columns, columnBy, rowBy) })
+        {
+            for (int i = 0; i < fields.Count; i++)
+            {
+                if (fields[i].Sort is not { } sort)
+                {
+                    continue;
+                }
+                string direction = sort.Descending ? "DESC" : "ASC";
+                if (sort.Measure is not { } index)
+                {
+                    order.Add($"{by[i]} {direction}");
+                    continue;
+                }
+
+                string value = MeasureExpression(provider, columns, MeasureAt(spec, index, fields[i].Column));
+                if (!spec.Totals)
+                {
+                    order.Add($"{value} {direction}");
+                    continue;
+                }
+                // A group is ordered by its own total, which sits on the result row for exactly its
+                // level: its fields grouped, the next one rolled up, the other axis rolled up
+                // entirely. The window carries that number to every row inside the group.
+                var exact = new List<string> { $"GROUPING({by[i]}) = 0" };
+                if (i + 1 < by.Count)
+                {
+                    exact.Add($"GROUPING({by[i + 1]}) = 1");
+                }
+                if (other.Count > 0)
+                {
+                    exact.Add($"GROUPING({other[0]}) = 1");
+                }
+                order.Add(
+                    $"MAX(CASE WHEN {string.Join(" AND ", exact)} THEN {value} END) "
+                    + $"OVER (PARTITION BY {string.Join(", ", by.Take(i + 1))}) {direction}");
             }
         }
         order.Add($"{MeasureExpression(provider, columns, spec.Values[0])} DESC");
@@ -242,6 +326,30 @@ public static class PivotQuery
         string escaped = value.Replace("'", "''");
         return type is "varchar" or "char" or "text" ? $"'{escaped}'" : $"N'{escaped}'";
     }
+
+    private static PivotMeasure MeasureAt(PivotSpec spec, int index, string field) =>
+        index >= 0 && index < spec.Values.Count
+            ? spec.Values[index]
+            : throw new InvalidOperationException($"'{field}' refers to value {index + 1}, and there are {spec.Values.Count}.");
+
+    // Whether a measure comes back as a number a value filter can compare. MIN and MAX keep their
+    // column's type, which can be text or a date.
+    private static bool IsNumericMeasure(Dictionary<string, ColumnSummary> columns, PivotMeasure measure) =>
+        measure.Aggregate switch
+        {
+            Aggregate.Count or Aggregate.CountDistinct or Aggregate.Sum or Aggregate.Avg => true,
+            _ => measure.Column is not null && IsSummable(Resolve(columns, measure.Column).TypeName),
+        };
+
+    private static string Operator(CompareOp op) => op switch
+    {
+        CompareOp.Greater => ">",
+        CompareOp.GreaterOrEqual => ">=",
+        CompareOp.Less => "<",
+        CompareOp.LessOrEqual => "<=",
+        CompareOp.Equal => "=",
+        _ => "<>",
+    };
 
     private static ColumnSummary Resolve(Dictionary<string, ColumnSummary> columns, string name) =>
         columns.TryGetValue(name, out var column)
