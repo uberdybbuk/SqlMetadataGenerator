@@ -1,7 +1,7 @@
 import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { api, type ScriptRequest, type ScriptResult } from "../api";
-import { useApi } from "../useApi";
+import { api, type ScriptRequest, type ScriptResult, type TableStats } from "../api";
+import { useApi, type AsyncState } from "../useApi";
 import { useFillHeight } from "../useFillHeight";
 import { Icon, type IconName } from "../Icon";
 import { useSetting } from "../settings";
@@ -59,13 +59,15 @@ interface ScriptingPanelProps {
     // your set because you glanced at the treemap is one nobody trusts to leave.
     selection: Selection;
     onSelection: (next: Selection) => void;
-}
-
-export function ScriptingPanel({ alias, db, selection, onSelection }: ScriptingPanelProps) {
-    const inventory = useApi(() => api.scriptable(alias, db), [alias, db]);
     // Row counts, so a table's size is known BEFORE "all rows" is chosen rather than after the
     // download starts. Approximate (sys.partitions), which is the right precision for a warning.
-    const stats = useApi(() => api.tables(alias, db), [alias, db]);
+    // The page's own read, handed down: on a large database it is a slow query, and opening
+    // scripting while the overview's is still running must not send a second one.
+    stats: AsyncState<TableStats[]>;
+}
+
+export function ScriptingPanel({ alias, db, selection, onSelection, stats }: ScriptingPanelProps) {
+    const inventory = useApi(() => api.scriptable(alias, db), [alias, db]);
 
     // Ticked on the left but not yet moved. Its own rule set over the same engine, so ticking a
     // filtered page of results is one entry rather than three hundred.

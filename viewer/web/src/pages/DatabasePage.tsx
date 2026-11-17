@@ -188,6 +188,7 @@ export function DatabasePage() {
                     db={db}
                     selection={selection}
                     onSelection={setSelection}
+                    stats={tables}
                 />
             )}
 

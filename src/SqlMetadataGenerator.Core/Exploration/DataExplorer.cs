@@ -37,7 +37,12 @@ public sealed class DataExplorer(string connectionString) : IDataExplorer
         // Joining sys.partitions straight to sys.allocation_units multiplies the partition row by
         // the number of allocation units (IN_ROW + LOB + ROW_OVERFLOW), so SUM(p.rows) is
         // multiplied too — a table with a LOB column reported three times its real row count.
+        //
         // The allocation join has two branches: type 1/3 match on hobt_id, type 2 on partition_id.
+        // They are two equality joins under UNION ALL, not one join with an OR. With the OR the
+        // optimizer cannot hash or merge, and compares every partition with every allocation unit:
+        // on a database of 5,600 tables that ran past the 30-second timeout. The branches cover
+        // different allocation unit types, so nothing is counted twice.
         const string sql = """
             SELECT
                 s.name,
@@ -54,14 +59,21 @@ public sealed class DataExplorer(string connectionString) : IDataExplorer
                 GROUP BY p.object_id
             ) r ON r.object_id = t.object_id
             LEFT JOIN (
-                SELECT p.object_id,
-                       SUM(au.total_pages) * 8 AS reserved_kb,
-                       SUM(au.used_pages) * 8 AS used_kb
-                FROM sys.partitions p
-                JOIN sys.allocation_units au
-                       ON (au.type IN (1, 3) AND au.container_id = p.hobt_id)
-                       OR (au.type = 2 AND au.container_id = p.partition_id)
-                GROUP BY p.object_id
+                SELECT u.object_id,
+                       SUM(u.total_pages) * 8 AS reserved_kb,
+                       SUM(u.used_pages) * 8 AS used_kb
+                FROM (
+                    SELECT p.object_id, au.total_pages, au.used_pages
+                    FROM sys.partitions p
+                    JOIN sys.allocation_units au ON au.container_id = p.hobt_id
+                    WHERE au.type IN (1, 3)
+                    UNION ALL
+                    SELECT p.object_id, au.total_pages, au.used_pages
+                    FROM sys.partitions p
+                    JOIN sys.allocation_units au ON au.container_id = p.partition_id
+                    WHERE au.type = 2
+                ) u
+                GROUP BY u.object_id
             ) a ON a.object_id = t.object_id
             WHERE t.is_ms_shipped = 0 AND t.type = 'U'
             ORDER BY s.name, t.name;
