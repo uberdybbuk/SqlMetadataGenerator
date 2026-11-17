@@ -57,7 +57,7 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
     const [share, setShare] = useState(readShare);
     // The pane reaches the bottom of the window whatever sits above it. Shared with the scripting
     // panel, which needs exactly the same measurement.
-    const { frame, height } = useFillHeight();
+    const { frame, element: frameElement, height } = useFillHeight();
 
     // The editor pane, measured during a drag. The share sizes THIS element, and it does not
     // start at the top of the frame — the toolbar is above it. Measuring from the frame instead
@@ -66,7 +66,7 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
 
     const startDrag = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
         event.preventDefault();
-        const el = frame.current;
+        const el = frameElement;
         const pane = editorPane.current;
         if (!el || !pane) {
             return;
@@ -88,7 +88,7 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
         document.addEventListener("mousemove", onMove);
         document.addEventListener("mouseup", onUp);
         document.body.classList.add("row-resizing");
-    }, []);
+    }, [frameElement]);
 
     // Remembered per browser: a split is a working preference, and having to drag it back on every
     // table would make the handle a chore rather than a convenience.
