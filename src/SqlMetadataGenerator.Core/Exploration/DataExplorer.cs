@@ -30,72 +30,86 @@ public sealed class DataExplorer(string connectionString) : IDataExplorer
         return conn;
     }
 
-    // The single query behind the treemap and the table grid. No scan; the numbers are approximate.
+    // The statistics behind the treemap and the table grid. No scan; the numbers are approximate.
     public async Task<List<TableStats>> ReadTableStatsAsync(CancellationToken ct = default)
     {
-        // CAREFUL: the row count and the size come from SEPARATE sub-queries.
+        // Three statements in one round trip, joined here rather than in SQL. Written as one
+        // query (the tables with the two aggregates LEFT JOINed to them), it ran past the
+        // 30-second timeout on a database of 5,600 tables and 55,000 procedures, while each part
+        // finished in about a second on the same server. Over catalog views the optimizer has
+        // no useful row estimates, and the combined plan can repeat an aggregate for every table.
+        // Apart, each statement is a scan and a GROUP BY that has no plan to get wrong.
+        //
+        // CAREFUL: the row count and the size come from SEPARATE statements.
         // Joining sys.partitions straight to sys.allocation_units multiplies the partition row by
         // the number of allocation units (IN_ROW + LOB + ROW_OVERFLOW), so SUM(p.rows) is
         // multiplied too — a table with a LOB column reported three times its real row count.
         //
         // The allocation join has two branches: type 1/3 match on hobt_id, type 2 on partition_id.
         // They are two equality joins under UNION ALL, not one join with an OR. With the OR the
-        // optimizer cannot hash or merge, and compares every partition with every allocation unit:
-        // on a database of 5,600 tables that ran past the 30-second timeout. The branches cover
-        // different allocation unit types, so nothing is counted twice.
+        // optimizer cannot hash or merge, and compares every partition with every allocation unit.
+        // The branches cover different allocation unit types, so nothing is counted twice.
         const string sql = """
-            SELECT
-                s.name,
-                t.name,
-                ISNULL(r.row_count, 0),
-                ISNULL(a.reserved_kb, 0),
-                ISNULL(a.used_kb, 0)
+            SELECT t.object_id, s.name, t.name
             FROM sys.tables t
             JOIN sys.schemas s ON t.schema_id = s.schema_id
-            LEFT JOIN (
-                SELECT p.object_id, SUM(p.rows) AS row_count
-                FROM sys.partitions p
-                WHERE p.index_id IN (0, 1)
-                GROUP BY p.object_id
-            ) r ON r.object_id = t.object_id
-            LEFT JOIN (
-                SELECT u.object_id,
-                       SUM(u.total_pages) * 8 AS reserved_kb,
-                       SUM(u.used_pages) * 8 AS used_kb
-                FROM (
-                    SELECT p.object_id, au.total_pages, au.used_pages
-                    FROM sys.partitions p
-                    JOIN sys.allocation_units au ON au.container_id = p.hobt_id
-                    WHERE au.type IN (1, 3)
-                    UNION ALL
-                    SELECT p.object_id, au.total_pages, au.used_pages
-                    FROM sys.partitions p
-                    JOIN sys.allocation_units au ON au.container_id = p.partition_id
-                    WHERE au.type = 2
-                ) u
-                GROUP BY u.object_id
-            ) a ON a.object_id = t.object_id
             WHERE t.is_ms_shipped = 0 AND t.type = 'U'
             ORDER BY s.name, t.name;
+
+            SELECT p.object_id, SUM(p.rows)
+            FROM sys.partitions p
+            WHERE p.index_id IN (0, 1)
+            GROUP BY p.object_id;
+
+            SELECT u.object_id, SUM(u.total_pages) * 8, SUM(u.used_pages) * 8
+            FROM (
+                SELECT p.object_id, au.total_pages, au.used_pages
+                FROM sys.partitions p
+                JOIN sys.allocation_units au ON au.container_id = p.hobt_id
+                WHERE au.type IN (1, 3)
+                UNION ALL
+                SELECT p.object_id, au.total_pages, au.used_pages
+                FROM sys.partitions p
+                JOIN sys.allocation_units au ON au.container_id = p.partition_id
+                WHERE au.type = 2
+            ) u
+            GROUP BY u.object_id;
             """;
 
-        var list = new List<TableStats>();
+        var tables = new List<(int Id, string Schema, string Name)>();
+        var rows = new Dictionary<int, long>();
+        var sizes = new Dictionary<int, (long Reserved, long Used)>();
+
         await using var conn = await OpenAsync(ct);
         await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            list.Add(new TableStats
-            {
-                Schema = reader.GetString(0),
-                Name = reader.GetString(1),
-                RowCount = reader.GetInt64(2),
-                ReservedKb = reader.GetInt64(3),
-                UsedKb = reader.GetInt64(4),
-            });
+            tables.Add((reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
         }
 
-        return list;
+        await reader.NextResultAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows[reader.GetInt32(0)] = reader.GetInt64(1);
+        }
+
+        await reader.NextResultAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            sizes[reader.GetInt32(0)] = (reader.GetInt64(1), reader.GetInt64(2));
+        }
+
+        return tables
+            .Select(t => new TableStats
+            {
+                Schema = t.Schema,
+                Name = t.Name,
+                RowCount = rows.GetValueOrDefault(t.Id),
+                ReservedKb = sizes.GetValueOrDefault(t.Id).Reserved,
+                UsedKb = sizes.GetValueOrDefault(t.Id).Used,
+            })
+            .ToList();
     }
 
     // The counters on the database dashboard. The type names match the ObjectFilter.ValidTypes vocabulary.
