@@ -1315,13 +1315,17 @@ tr.norows td.empty-note {
     font-size: 12px;
 }
 
+/* The box sits in the middle of its column both ways. The table hands spare width to every
+   column, so a box placed at the left edge drifts off-centre as the pane widens. */
 .setgrid .tick {
     width: 13px;
-    padding-right: 0;
+    padding-left: 7px;
+    padding-right: 7px;
 }
 
 .setgrid td.tick .tri {
     display: block;
+    margin: 0 auto;
 }
 
 .setgrid th {
