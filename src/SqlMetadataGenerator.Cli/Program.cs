@@ -98,7 +98,10 @@ internal static class Program
     // Reads the database metadata (incrementally) and generates the script files.
     private static async Task<int> RunGenerateAsync(CommandLineOptions options, string connectionString)
     {
-        var reader = new MetadataReader(connectionString);
+        // Set once the progress display exists. Every measured read reports here, from whichever
+        // thread finished it.
+        Action<string, TimeSpan>? onRead = null;
+        var reader = new MetadataReader(connectionString, (what, elapsed) => onRead?.Invoke(what, elapsed));
         var writer = new OutputWriter(options.OutputRoot, options.Server, options.Database);
         Console.WriteLine($"Çıktı dizini: {Path.GetFullPath(writer.DatabaseRoot)}");
 
@@ -142,15 +145,40 @@ internal static class Program
                 new TaskDescriptionColumn(),
                 new ProgressBarColumn(),
                 new PercentageColumn(),
+                new ElapsedTimeColumn(),
                 new RemainingTimeColumn())
             .StartAsync(async ctx =>
             {
                 // ---- Read phase (parallel) ----
-                var tblMetaTask = ctx.AddTask("[green]Tablo metadatası[/]", maxValue: 7);
+                var tblMetaTask = ctx.AddTask("[green]Tablo metadatası[/]", maxValue: MetadataReader.TableReads.Count);
                 if (!filter.IncludesType("tables"))
                 {
                     tblMetaTask.Value = tblMetaTask.MaxValue;
                 }
+
+                // The bar alone stands still while one slow query runs, so its line names the
+                // queries still running. With no timeout that is how a long wait reads as work.
+                var pending = new HashSet<string>(MetadataReader.TableReads);
+                void ShowPending()
+                {
+                    tblMetaTask.Description = pending.Count == 0
+                        ? "[green]Tablo metadatası[/]"
+                        : $"[green]Tablo metadatası[/] [grey](bekleniyor: {string.Join(", ", pending)})[/]";
+                }
+                if (filter.IncludesType("tables"))
+                {
+                    ShowPending();
+                }
+                onRead = (what, _) =>
+                {
+                    lock (pending)
+                    {
+                        if (pending.Remove(what))
+                        {
+                            ShowPending();
+                        }
+                    }
+                };
 
                 int batchCount = MetadataReader.BatchCount(changed.Count);
                 var modDefTask = ctx.AddTask("[green]Modül tanımları[/]", maxValue: Math.Max(batchCount, 1));

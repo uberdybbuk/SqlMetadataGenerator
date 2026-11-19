@@ -61,6 +61,10 @@ public sealed class CommandLineOptions
             TrustServerCertificate = TrustServerCertificate,
             Encrypt = Encrypt,
             ApplicationName = "SqlMetadataGenerator",
+            // No command timeout. A catalog read over tens of thousands of objects can take
+            // minutes, and the progress display already shows the run is alive and what it is
+            // waiting on. Cutting it off at 30 s only throws away the work done so far.
+            CommandTimeout = 0,
         };
 
         switch (AuthMode)

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Data.SqlClient;
 using SqlMetadataGenerator.Model;
 
@@ -9,14 +10,16 @@ namespace SqlMetadataGenerator;
 // Concurrency: every read opens its own connection (SqlConnection is not thread-safe), so
 // independent queries can run at the same time. Module definitions (view/sp/function/trigger) are
 // fetched in parallel, in batches keyed by object_id, instead of as one huge result set.
-public sealed class MetadataReader(string connectionString) : ICatalogReader
+//
+// timed: told the name and duration of every read that goes through Measure. A script over
+// thousands of tables runs a dozen catalog reads at once, and the log is where the slow one shows.
+public sealed class MetadataReader(string connectionString, Action<string, TimeSpan>? timed = null) : ICatalogReader
 {
     private const int ModuleBatchSize = 1000;
-    private readonly string _connectionString = connectionString;
 
     private async Task<SqlConnection> OpenConnectionAsync(CancellationToken ct)
     {
-        var conn = new SqlConnection(_connectionString);
+        var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
         return conn;
     }
@@ -31,25 +34,50 @@ public sealed class MetadataReader(string connectionString) : ICatalogReader
         return result is null or DBNull ? null : (string)result;
     }
 
+    // Says how long a named read took, and names it when it times out. "Execution Timeout Expired"
+    // alone does not say which of a dozen reads running at once was the slow one.
+    public async Task<T> Measure<T>(string what, Task<T> task)
+    {
+        var clock = Stopwatch.StartNew();
+        try
+        {
+            T result = await task;
+            timed?.Invoke(what, clock.Elapsed);
+            return result;
+        }
+        catch (SqlException ex) when (ex.Number == -2)
+        {
+            timed?.Invoke(what + " (timed out)", clock.Elapsed);
+            throw new CatalogTimeoutException(what, clock.Elapsed, ex);
+        }
+    }
+
+    // The names ReadTablesAsync measures its seven queries under, so a caller can show which are
+    // still running.
+    public static readonly IReadOnlyList<string> TableReads =
+    [
+        "table names", "table columns", "primary keys", "unique constraints", "indexes", "check constraints", "foreign keys",
+    ];
+
     // Reads table metadata. When progress is supplied it reports 1 per finished sub-query (7 in total).
     public async Task<List<TableInfo>> ReadTablesAsync(IProgress<int>? progress = null, CancellationToken ct = default)
     {
         // Report progress whenever a sub-query finishes.
-        async Task<T> Tracked<T>(Task<T> task)
+        async Task<T> Tracked<T>(string what, Task<T> task)
         {
-            T result = await task;
+            T result = await Measure(what, task);
             progress?.Report(1);
             return result;
         }
 
         // Run the independent metadata queries at the same time (each opens its own connection).
-        var namesTask = Tracked(ReadTableNamesAsync(ct));
-        var columnsTask = Tracked(ReadColumnsAsync(ct));
-        var pkTask = Tracked(ReadPrimaryKeysAsync(ct));
-        var uniqueTask = Tracked(ReadUniqueConstraintsAsync(ct));
-        var indexTask = Tracked(ReadIndexesAsync(ct));
-        var checkTask = Tracked(ReadCheckConstraintsAsync(ct));
-        var fkTask = Tracked(ReadForeignKeysAsync(ct));
+        var namesTask = Tracked(TableReads[0], ReadTableNamesAsync(ct));
+        var columnsTask = Tracked(TableReads[1], ReadColumnsAsync(ct));
+        var pkTask = Tracked(TableReads[2], ReadPrimaryKeysAsync(ct));
+        var uniqueTask = Tracked(TableReads[3], ReadUniqueConstraintsAsync(ct));
+        var indexTask = Tracked(TableReads[4], ReadIndexesAsync(ct));
+        var checkTask = Tracked(TableReads[5], ReadCheckConstraintsAsync(ct));
+        var fkTask = Tracked(TableReads[6], ReadForeignKeysAsync(ct));
         await Task.WhenAll(namesTask, columnsTask, pkTask, uniqueTask, indexTask, checkTask, fkTask);
 
         var names = await namesTask;
@@ -630,7 +658,7 @@ public sealed class MetadataReader(string connectionString) : ICatalogReader
             ct,
             async (i, token) =>
             {
-                byBatch[i] = await ReadDefinitionsForBatchAsync(batches[i], token);
+                byBatch[i] = await Measure($"module definitions {i + 1}/{batches.Count}", ReadDefinitionsForBatchAsync(batches[i], token));
                 progress?.Report(1);
             });
 

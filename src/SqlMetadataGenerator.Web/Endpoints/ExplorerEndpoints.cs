@@ -401,7 +401,7 @@ internal static class ExplorerEndpoints
         // POST because the selection is a list, not an address: seventeen schema-qualified names do
         // not belong in a URL, and generating a script is not something a link should do on its own.
         api.MapPost("/servers/{alias}/databases/{db}/script",
-            (string alias, string db, ScriptRequest body, ConnectionRegistry registry, CancellationToken ct) =>
+            (string alias, string db, ScriptRequest body, ConnectionRegistry registry, ILoggerFactory loggers, CancellationToken ct) =>
             WithDatabase(alias, db, registry, async scope =>
             {
                 if (RequireSqlServer(scope) is { } unsupported)
@@ -415,7 +415,7 @@ internal static class ExplorerEndpoints
                     return BadRequest(error!);
                 }
 
-                var reader = new MetadataReader(scope.ConnectionString);
+                var reader = new MetadataReader(scope.ConnectionString, ScriptTimings(loggers, alias, db));
                 var format = body.ToScriptFormat(await reader.ReadDatabaseCollationAsync(ct));
                 var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, scope.ConnectionString, format, ct);
 
@@ -434,7 +434,7 @@ internal static class ExplorerEndpoints
 
         // The same bundle as files, in the layout the generator writes to disk, zipped.
         api.MapPost("/servers/{alias}/databases/{db}/script/files",
-            (string alias, string db, ScriptRequest body, ConnectionRegistry registry, CancellationToken ct) =>
+            (string alias, string db, ScriptRequest body, ConnectionRegistry registry, ILoggerFactory loggers, CancellationToken ct) =>
             WithDatabase(alias, db, registry, async scope =>
             {
                 if (RequireSqlServer(scope) is { } unsupported)
@@ -448,7 +448,8 @@ internal static class ExplorerEndpoints
                     return BadRequest(error!);
                 }
 
-                var reader = new MetadataReader(scope.ConnectionString);
+                var timings = ScriptTimings(loggers, alias, db);
+                var reader = new MetadataReader(scope.ConnectionString, timings);
                 var format = body.ToScriptFormat(await reader.ReadDatabaseCollationAsync(ct));
                 var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, scope.ConnectionString, format, ct);
 
@@ -463,7 +464,9 @@ internal static class ExplorerEndpoints
                 }
 
                 // 7-Zip at -mx=9 when the host has it, a zip when it does not. See ScriptArchive.
+                var clock = System.Diagnostics.Stopwatch.StartNew();
                 var package = await ScriptArchive.PackAsync(files, ct);
+                timings($"packing {files.Count} files into {package.Bytes.Length / 1024:N0} KB with {package.Method}", clock.Elapsed);
                 string stamp = DateTime.Now.ToString("yyyyMMdd-HHmm");
                 return Results.File(package.Bytes, package.ContentType, $"{db}-{stamp}{package.Extension}");
             }));
@@ -793,6 +796,15 @@ internal static class ExplorerEndpoints
     // slice. "none" never reaches here — a table with no rows wanted is simply not in this list.
     public sealed record DataSelection(string Schema, string Name, string? Where, int? Top);
 
+    // Every catalog read behind a script, with how long it took, in the API's console. On a database
+    // of thousands of objects one of them can run past the timeout, and this is how to tell which.
+    private static Action<string, TimeSpan> ScriptTimings(ILoggerFactory loggers, string alias, string db)
+    {
+        var log = loggers.CreateLogger("Scripting");
+        return (what, elapsed) =>
+            log.LogInformation("{Alias}/{Database}: {What} took {Seconds:0.0} s", alias, db, what, elapsed.TotalSeconds);
+    }
+
     // Turns SQL errors into a 400: when the WHERE the user typed is wrong they need to see it
     // with the error message — a 500 page is no help.
     private static async Task<IResult> Guarded(Func<Task<IResult>> action)
@@ -804,6 +816,10 @@ internal static class ExplorerEndpoints
         catch (InvalidOperationException ex)
         {
             return Results.Problem(title: "Connection configuration", detail: ex.Message, statusCode: 400);
+        }
+        catch (CatalogTimeoutException ex)
+        {
+            return Results.Problem(title: "Timeout", detail: ex.Message, statusCode: 504);
         }
         catch (SqlException ex)
         {
