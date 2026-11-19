@@ -212,6 +212,10 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
         return names;
     }
 
+    // Four statements in one round trip, joined in code, rather than one statement with three
+    // LEFT JOINs. Over catalog views the optimizer has no useful row estimates, and on a database
+    // of 5,600 tables the joined form ran for minutes while each part on its own is one scan.
+    // The same lesson as DataExplorer.ReadTableStatsAsync.
     private async Task<Dictionary<int, List<ColumnInfo>>> ReadColumnsAsync(CancellationToken ct)
     {
         const string sql = """
@@ -226,41 +230,105 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
                 c.scale,
                 c.is_nullable,
                 c.is_identity,
-                ic.seed_value,
-                ic.increment_value,
-                cc.definition AS computed_definition,
-                dc.name AS default_name,
-                dc.definition AS default_definition,
+                c.default_object_id,
                 c.collation_name
             FROM sys.columns c
             JOIN sys.objects o ON c.object_id = o.object_id
             JOIN sys.types ty ON c.user_type_id = ty.user_type_id
-            LEFT JOIN sys.identity_columns ic ON c.object_id = ic.object_id AND c.column_id = ic.column_id
-            LEFT JOIN sys.computed_columns cc ON c.object_id = cc.object_id AND c.column_id = cc.column_id
-            LEFT JOIN sys.default_constraints dc ON c.default_object_id = dc.object_id
             WHERE o.is_ms_shipped = 0 AND o.type = 'U'
             ORDER BY c.object_id, c.column_id;
+
+            SELECT object_id, column_id, seed_value, increment_value FROM sys.identity_columns;
+
+            SELECT object_id, column_id, definition FROM sys.computed_columns;
+
+            SELECT object_id, name, definition FROM sys.default_constraints;
             """;
 
-        var map = new Dictionary<int, List<ColumnInfo>>();
+        var rows = new List<(int ObjectId, int DefaultId, ColumnInfo Column)>();
+        var identities = new Dictionary<(int, int), (long? Seed, long? Increment)>();
+        var computed = new Dictionary<(int, int), string?>();
+        var defaults = new Dictionary<int, (string Name, string? Definition)>();
+
         await using var conn = await OpenConnectionAsync(ct);
         await using var cmd = ReadOnlyCommand.Create(conn, sql);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            int objectId = reader.GetInt32(0);
+            rows.Add((reader.GetInt32(0), reader.GetInt32(10), new ColumnInfo
+            {
+                Name = reader.GetString(1),
+                ColumnId = reader.GetInt32(2),
+                TypeName = reader.GetString(3),
+                IsUserDefinedType = reader.GetBoolean(4),
+                MaxLength = reader.GetInt16(5),
+                Precision = reader.GetByte(6),
+                Scale = reader.GetByte(7),
+                IsNullable = reader.GetBoolean(8),
+                IsIdentity = reader.GetBoolean(9),
+                CollationName = reader.IsDBNull(11) ? null : reader.GetString(11),
+            }));
+        }
+
+        await reader.NextResultAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            identities[(reader.GetInt32(0), reader.GetInt32(1))] = (
+                reader.IsDBNull(2) ? null : Convert.ToInt64(reader.GetValue(2)),
+                reader.IsDBNull(3) ? null : Convert.ToInt64(reader.GetValue(3)));
+        }
+
+        await reader.NextResultAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            computed[(reader.GetInt32(0), reader.GetInt32(1))] = reader.IsDBNull(2) ? null : reader.GetString(2);
+        }
+
+        await reader.NextResultAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            defaults[reader.GetInt32(0)] = (reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2));
+        }
+
+        var map = new Dictionary<int, List<ColumnInfo>>();
+        foreach (var (objectId, defaultId, column) in rows)
+        {
+            var key = (objectId, column.ColumnId);
+            var identity = identities.GetValueOrDefault(key);
+            // A computed column whose definition cannot be read counts as not computed, as the
+            // LEFT JOIN did: there is nothing to script for it.
+            string? definition = computed.GetValueOrDefault(key);
+            bool hasDefault = defaults.TryGetValue(defaultId, out var dflt);
+
             if (!map.TryGetValue(objectId, out var list))
             {
                 list = [];
                 map[objectId] = list;
             }
-            list.Add(MapColumn(reader));
+            list.Add(new ColumnInfo
+            {
+                Name = column.Name,
+                ColumnId = column.ColumnId,
+                TypeName = column.TypeName,
+                IsUserDefinedType = column.IsUserDefinedType,
+                MaxLength = column.MaxLength,
+                Precision = column.Precision,
+                Scale = column.Scale,
+                IsNullable = column.IsNullable,
+                IsIdentity = column.IsIdentity,
+                IdentitySeed = identity.Seed,
+                IdentityIncrement = identity.Increment,
+                ComputedDefinition = definition,
+                IsComputed = definition is not null,
+                DefaultConstraintName = hasDefault ? dflt.Name : null,
+                DefaultDefinition = hasDefault ? dflt.Definition : null,
+                CollationName = column.CollationName,
+            });
         }
-
         return map;
     }
 
-    // Expects the same SELECT order as ReadColumnsAsync and the table type column query (1..15).
+    // Expects the SELECT order of the table type column query (1..15).
     private static ColumnInfo MapColumn(SqlDataReader reader) => new()
     {
         Name = reader.GetString(1),
