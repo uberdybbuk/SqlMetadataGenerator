@@ -899,7 +899,7 @@ public sealed class MetadataReader(string connectionString) : ICatalogReader
                 MaxValue = Variant(reader.GetValue(6)),
                 IsCycling = reader.GetBoolean(7),
                 IsCached = reader.GetBoolean(8),
-                CacheSize = reader.IsDBNull(9) ? null : reader.GetInt64(9),
+                CacheSize = reader.IsDBNull(9) ? null : reader.GetInt32(9),
             });
         }
 
