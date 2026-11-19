@@ -77,6 +77,13 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
     const [search, setSearch] = useState("");
     const [focus, setFocus] = useState<number | null>(null);
 
+    // The set's own filter and ticks. Plain ids rather than a rule set: they only ever feed one
+    // Remove, which rebuilds the selection's rules from what is left.
+    const [chosenKind, setChosenKind] = useState<string>("");
+    const [chosenSearch, setChosenSearch] = useState("");
+    const [ticked, setTicked] = useState<Set<string>>(() => new Set());
+    const [tickAnchor, setTickAnchor] = useState<number | null>(null);
+
     const [rowsMode, setRowsMode] = useState<Record<string, Rows>>({});
     const [wheres, setWheres] = useState<Record<string, string>>({});
     // The row cap, per table. Absent means no TOP. It rides with the WHERE rather than being its
@@ -155,14 +162,7 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
     const needle = search.trim().toLowerCase();
     const visible = useMemo(
         () =>
-            sorted.filter(
-                (o) =>
-                    (!kind || o.kind === kind) &&
-                    (!needle ||
-                        o.name.toLowerCase().includes(needle) ||
-                        o.schema.toLowerCase().includes(needle) ||
-                        (o.schema + "." + o.name).toLowerCase().includes(needle)),
-            ),
+            sorted.filter((o) => (!kind || o.kind === kind) && matches(o, needle)),
         [sorted, kind, needle],
     );
 
@@ -187,6 +187,20 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
 
     const modeOf = useCallback((id: string): Rows => rowsMode[id] ?? "none", [rowsMode]);
     const withData = targets.filter((o) => modeOf(idOf(o)) !== "none").length;
+
+    const chosenKinds = useMemo(() => {
+        const present = new Set(targets.map((o) => o.kind));
+        return kinds.filter((k) => present.has(k));
+    }, [targets, kinds]);
+
+    const chosenNeedle = chosenSearch.trim().toLowerCase();
+    const chosenVisible = useMemo(
+        () => targets.filter((o) => (!chosenKind || o.kind === chosenKind) && matches(o, chosenNeedle)),
+        [targets, chosenKind, chosenNeedle],
+    );
+
+    // Ticks on objects that have since left the set count for nothing.
+    const tickedObjects = useMemo(() => targets.filter((o) => ticked.has(idOf(o))), [targets, ticked]);
 
     useEffect(() => {
         if (focus === null || !list.current) {
@@ -237,6 +251,76 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
         );
         setActive((current) => (current === idOf(o) ? null : current));
     }, []);
+
+    // Shift extends from the last box clicked, taking that box's state, as on the left. Its
+    // identity changes with every click, which re-renders the shown rows. They are capped at
+    // RENDER_CAP, so that is cheap.
+    const tick = useCallback((index: number, shift: boolean) => {
+        const rows = chosenVisible;
+        const anchor = tickAnchor;
+        setTicked((current) => {
+            const next = new Set(current);
+            if (shift && anchor !== null && rows[anchor]) {
+                const on = current.has(idOf(rows[anchor]));
+                const [from, to] = [anchor, index].sort((a, b) => a - b);
+                for (const o of rows.slice(from, to + 1)) {
+                    if (on) {
+                        next.add(idOf(o));
+                    } else {
+                        next.delete(idOf(o));
+                    }
+                }
+                return next;
+            }
+            const id = idOf(rows[index]);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+            return next;
+        });
+        if (!shift) {
+            setTickAnchor(index);
+        }
+    }, [chosenVisible, tickAnchor]);
+
+    // A shift range is counted in rows of the filtered list, so a new filter starts a new range.
+    const filterChosen = (next: { search?: string; kind?: string }) => {
+        if (next.search !== undefined) {
+            setChosenSearch(next.search);
+        }
+        if (next.kind !== undefined) {
+            setChosenKind(next.kind);
+        }
+        setTickAnchor(null);
+    };
+
+    const removeTicked = useCallback(() => {
+        if (tickedObjects.length === 0) {
+            return;
+        }
+        const gone = new Set(tickedObjects.map(idOf));
+        onSelection(bulk(objects, inSet, tickedObjects, "deselect"));
+        setTicked(new Set());
+        setTickAnchor(null);
+        setActive((current) => (current !== null && gone.has(current) ? null : current));
+    }, [tickedObjects, objects, inSet, onSelection]);
+
+    const tickBulk = (action: "select" | "invert") => {
+        setTicked((current) => {
+            const next = new Set(current);
+            for (const o of chosenVisible) {
+                const id = idOf(o);
+                if (action === "select" || !next.has(id)) {
+                    next.add(id);
+                } else {
+                    next.delete(id);
+                }
+            }
+            return next;
+        });
+    };
 
     const chooseMode = useCallback((id: string, next: Rows) => {
         setRowsMode((c) => ({ ...c, [id]: next }));
@@ -501,35 +585,15 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                     <div className="shuttle">
                         {/* ---- 1. choose ---- */}
                         <div className="spane source">
-                            <div className="pane-head">
-                                <div className="searchrow">
-                                    <input
-                                        type="search"
-                                        className="search"
-                                        placeholder="Search…"
-                                        value={search}
-                                        onChange={(e) => setSearch(e.target.value)}
-                                    />
-                                    <span className="ratio">
-                                        {visible.length} / {objects.length}
-                                    </span>
-                                </div>
-                                <div className="kinds">
-                                    <button className="chip" aria-pressed={kind === ""} onClick={() => setKind("")}>
-                                        All
-                                    </button>
-                                    {kinds.map((k) => (
-                                        <button
-                                            key={k}
-                                            className="chip"
-                                            aria-pressed={kind === k}
-                                            onClick={() => setKind(kind === k ? "" : k)}
-                                        >
-                                            {KIND_LABEL[k] ?? k}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
+                            <FilterHead
+                                search={search}
+                                onSearch={setSearch}
+                                shown={visible.length}
+                                total={objects.length}
+                                kinds={kinds}
+                                kind={kind}
+                                onKind={setKind}
+                            />
 
                             <div className="picker-rows" role="listbox" tabIndex={0} ref={list} onKeyDown={onKeyDown}>
                                 {visible.slice(0, RENDER_CAP).map((o, index) => {
@@ -618,52 +682,112 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                                     onClick={() => {
                                         onSelection(EMPTY);
                                         setActive(null);
+                                        setTicked(new Set());
                                     }}
                                 >
                                     Clear
                                 </button>
                             </div>
 
-                            <div className="picker-rows">
+                            {targets.length > 0 && (
+                                <FilterHead
+                                    search={chosenSearch}
+                                    onSearch={(search) => filterChosen({ search })}
+                                    shown={chosenVisible.length}
+                                    total={targets.length}
+                                    kinds={chosenKinds}
+                                    kind={chosenKind}
+                                    onKind={(kind) => filterChosen({ kind })}
+                                />
+                            )}
+
+                            <div className="picker-rows set-rows">
                                 {targets.length === 0 ? (
                                     <div className="panel-empty">
                                         <b>Nothing chosen yet</b>
                                         <span>Tick objects on the left, then Move.</span>
                                     </div>
                                 ) : (
-                                    <table className="setgrid">
-                                        <thead>
-                                            <tr>
-                                                <th className="num">#</th>
-                                                <th>Object</th>
-                                                <th>Kind</th>
-                                                <th>Rows</th>
-                                                <th className="num">Count</th>
-                                                <th />
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {targets.map((o, index) => {
-                                                const id = idOf(o);
-                                                return (
-                                                    <SetRow
-                                                        key={id}
-                                                        object={o}
-                                                        id={id}
-                                                        index={index}
-                                                        mode={modeOf(id)}
-                                                        count={countLabel(modeOf(id), id, counted, rowCounts, tops)}
-                                                        active={active === id}
-                                                        onPick={setActive}
-                                                        onMode={chooseMode}
-                                                        onRemove={remove}
-                                                    />
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
+                                    <>
+                                        <table className="setgrid">
+                                            <thead>
+                                                <tr>
+                                                    <th className="tick" />
+                                                    <th className="num">#</th>
+                                                    <th>Object</th>
+                                                    <th>Kind</th>
+                                                    <th>Rows</th>
+                                                    <th className="num">Count</th>
+                                                    <th />
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {chosenVisible.slice(0, RENDER_CAP).map((o, index) => {
+                                                    const id = idOf(o);
+                                                    return (
+                                                        <SetRow
+                                                            key={id}
+                                                            object={o}
+                                                            id={id}
+                                                            index={index}
+                                                            mode={modeOf(id)}
+                                                            count={countLabel(modeOf(id), id, counted, rowCounts, tops)}
+                                                            active={active === id}
+                                                            ticked={ticked.has(id)}
+                                                            onPick={setActive}
+                                                            onMode={chooseMode}
+                                                            onTick={tick}
+                                                            onRemove={remove}
+                                                        />
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                        {chosenVisible.length > RENDER_CAP && (
+                                            <div className="state">
+                                                Showing the first {RENDER_CAP} of {chosenVisible.length}. The buttons below
+                                                act on all of them.
+                                            </div>
+                                        )}
+                                        {chosenVisible.length === 0 && <div className="state">Nothing matches.</div>}
+                                    </>
                                 )}
                             </div>
+
+                            {targets.length > 0 && (
+                                <div className="picker-foot">
+                                    <button
+                                        className="tool run move"
+                                        disabled={tickedObjects.length === 0}
+                                        onClick={removeTicked}
+                                        title="Take everything ticked out of the script set"
+                                    >
+                                        « Remove {tickedObjects.length > 0 ? tickedObjects.length : ""}
+                                    </button>
+                                    <span className="grow" />
+                                    <button
+                                        className="tool"
+                                        disabled={chosenVisible.length === 0}
+                                        onClick={() => tickBulk("select")}
+                                    >
+                                        All {chosenVisible.length}
+                                    </button>
+                                    <button
+                                        className="tool"
+                                        disabled={tickedObjects.length === 0}
+                                        onClick={() => setTicked(new Set())}
+                                    >
+                                        None
+                                    </button>
+                                    <button
+                                        className="tool"
+                                        disabled={chosenVisible.length === 0}
+                                        onClick={() => tickBulk("invert")}
+                                    >
+                                        Invert
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -784,8 +908,10 @@ interface SetRowProps {
     mode: Rows;
     count: string;
     active: boolean;
+    ticked: boolean;
     onPick: (id: string) => void;
     onMode: (id: string, next: Rows) => void;
+    onTick: (index: number, shift: boolean) => void;
     onRemove: (o: ScriptableObject) => void;
 }
 
@@ -796,13 +922,27 @@ const SetRow = memo(function SetRow({
     mode,
     count,
     active,
+    ticked,
     onPick,
     onMode,
+    onTick,
     onRemove,
 }: SetRowProps) {
     const table = object.kind === "tables";
     return (
         <tr className={active ? "active" : undefined} onClick={() => onPick(id)}>
+            <td className="tick">
+                <span
+                    role="checkbox"
+                    aria-checked={ticked}
+                    aria-label={`Tick ${object.schema}.${object.name}`}
+                    className="tri"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onTick(index, e.shiftKey);
+                    }}
+                />
+            </td>
             <td className="num muted">{index + 1}</td>
             <td className="mono">
                 {object.schema}.{object.name}
@@ -882,4 +1022,52 @@ function countLabel(
 function filenameFrom(headers: Headers): string | null {
     const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(headers.get("content-disposition") ?? "");
     return match ? decodeURIComponent(match[1]) : null;
+}
+
+function matches(o: ScriptableObject, needle: string): boolean {
+    if (!needle) {
+        return true;
+    }
+    return (o.schema + "." + o.name).toLowerCase().includes(needle);
+}
+
+interface FilterHeadProps {
+    search: string;
+    onSearch: (next: string) => void;
+    shown: number;
+    total: number;
+    kinds: string[];
+    kind: string;
+    onKind: (next: string) => void;
+}
+
+// The search box and type chips over a list. Both panes have one, so a set of thousands can be
+// narrowed down the same way the inventory is.
+function FilterHead({ search, onSearch, shown, total, kinds, kind, onKind }: FilterHeadProps) {
+    return (
+        <div className="pane-head">
+            <div className="searchrow">
+                <input
+                    type="search"
+                    className="search"
+                    placeholder="Search…"
+                    value={search}
+                    onChange={(e) => onSearch(e.target.value)}
+                />
+                <span className="ratio">
+                    {shown} / {total}
+                </span>
+            </div>
+            <div className="kinds">
+                <button className="chip" aria-pressed={kind === ""} onClick={() => onKind("")}>
+                    All
+                </button>
+                {kinds.map((k) => (
+                    <button key={k} className="chip" aria-pressed={kind === k} onClick={() => onKind(kind === k ? "" : k)}>
+                        {KIND_LABEL[k] ?? k}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
 }

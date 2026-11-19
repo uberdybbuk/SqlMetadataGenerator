@@ -1299,10 +1299,29 @@ tr.norows td.empty-note {
 }
 
 /* ---- the script set ---- */
+
+/* No top padding: the header sticks to the top of the padding box, and the rows scrolled up
+   showed through the gap above it. */
+.set-rows {
+    padding-top: 0;
+}
+
+/* Separate borders, not collapsed: with collapsed borders a sticky header's bottom line belongs
+   to the table and scrolls away with the rows. */
 .setgrid {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 12px;
+}
+
+.setgrid .tick {
+    width: 13px;
+    padding-right: 0;
+}
+
+.setgrid td.tick .tri {
+    display: block;
 }
 
 .setgrid th {
