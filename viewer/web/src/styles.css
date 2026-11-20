@@ -1401,6 +1401,114 @@ tr.norows td.empty-note {
     color: #fff;
 }
 
+/* The scripting toolbar carries more than the query one. When the window is too narrow for all of
+   it, the bar wraps onto a second line. A button never breaks its own label in two. */
+.scripting .qtoolbar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+}
+
+.scripting .qtoolbar .step,
+.scripting .qtoolbar .tool {
+    white-space: nowrap;
+}
+
+.scripting .qtoolbar .actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
+
+/* The toolbar's DDL + data / data only switch: the same control as a row's all / query, at the
+   toolbar's text size. */
+.outseg button {
+    font-size: 12px;
+    padding: 2px 11px;
+    white-space: nowrap;
+}
+
+/* A row that produces nothing in data only. Dimmed rather than hidden: it is still in the set and
+   comes back with DDL + data. The rows switch stays at full strength, because choosing rows is how
+   a table gets back in. */
+.setgrid tbody tr.idle td {
+    opacity: 0.42;
+}
+
+.setgrid tbody tr.idle td.keep {
+    opacity: 1;
+}
+
+.idle-tag {
+    font-size: 10px;
+    font-style: italic;
+    color: var(--muted);
+}
+
+/* ---- the pasted list ---- */
+.pastebox {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--head);
+    flex: 0 0 auto;
+}
+
+.pastebox textarea {
+    width: 100%;
+    height: 72px;
+    resize: vertical;
+    font: 12px/1.45 var(--mono);
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+}
+
+.pastebox .bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.listnote {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    flex: 0 0 auto;
+}
+
+.listnote > .grow {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.listnote .ok {
+    color: var(--ok, #1a7f37);
+}
+
+.listnote .bad {
+    color: var(--warn);
+    overflow-wrap: anywhere;
+}
+
+.listnote .mono {
+    font-size: 11px;
+}
+
+.listnote .addbtn {
+    visibility: visible;
+}
+
 
 .addbtn {
     flex: 0 0 auto;

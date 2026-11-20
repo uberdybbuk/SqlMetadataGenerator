@@ -6,6 +6,7 @@ import { useFillHeight } from "../useFillHeight";
 import { Icon, type IconName } from "../Icon";
 import { useSetting } from "../settings";
 import { EMPTY, apply, bulk, idOf, resolve, type ScriptableObject, type Selection, type Target } from "./selection";
+import { matchPastedList, type PasteOutcome } from "./pasteList";
 
 const SqlEditor = lazy(() => import("../SqlEditor"));
 
@@ -51,6 +52,14 @@ const KIND_LABEL: Record<string, string> = {
 // clicking the lit one turns it off again.
 type Rows = "none" | "all" | "query";
 const ROW_MODES: Rows[] = ["all", "query"];
+
+// What the script carries. "data" leaves every definition out and keeps only the rows: the
+// target already has the tables, and what is wanted is their contents.
+type Output = "both" | "data";
+const OUTPUTS: [Output, string][] = [
+    ["both", "DDL + data"],
+    ["data", "data only"],
+];
 
 interface ScriptingPanelProps {
     alias: string;
@@ -98,6 +107,12 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
         emitSetOptions: false,
         groupColumns: true,
     });
+    const [output, setOutput] = useState<Output>("both");
+
+    // The pasted list. Open is the box being shown, outcome is what the last Tick found.
+    const [pasteOpen, setPasteOpen] = useState(false);
+    const [pasteText, setPasteText] = useState("");
+    const [pasteOutcome, setPasteOutcome] = useState<PasteOutcome | null>(null);
 
     const [step, setStep] = useState<1 | 3>(1);
     const [result, setResult] = useState<ScriptResult | null>(null);
@@ -187,6 +202,17 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
 
     const modeOf = useCallback((id: string): Rows => rowsMode[id] ?? "none", [rowsMode]);
     const withData = targets.filter((o) => modeOf(idOf(o)) !== "none").length;
+    const dataOnly = output === "data";
+
+    // Ticks what the pasted list names, on top of whatever is ticked already. An object already
+    // in the set counts as found and stays where it is.
+    const tickPasted = () => {
+        const outcome = matchPastedList(pasteText, objects);
+        const fresh = outcome.found.filter((o) => !inSet.has(idOf(o)));
+        setStaged(bulk(objects, stagedIds, fresh, "select"));
+        setPasteOutcome(outcome);
+        setPasteOpen(false);
+    };
 
     const chosenKinds = useMemo(() => {
         const present = new Set(targets.map((o) => o.kind));
@@ -435,7 +461,9 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
     );
 
     const request = (): ScriptRequest => ({
-        objects: targets.map((o) => ({ kind: o.kind, schema: o.schema, name: o.name })),
+        // Data only sends no definitions at all. The server takes rows for a table that is not
+        // among the objects, which is exactly this case.
+        objects: dataOnly ? [] : targets.map((o) => ({ kind: o.kind, schema: o.schema, name: o.name })),
         data: targets
             .filter((o) => o.kind === "tables" && modeOf(idOf(o)) !== "none")
             .map((o) => {
@@ -492,7 +520,8 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
         return <div className="error">{inventory.error}</div>;
     }
 
-    const blocked = targets.length === 0 || unbounded.length > 0;
+    // In data only, a set with no rows chosen anywhere would script nothing.
+    const blocked = targets.length === 0 || unbounded.length > 0 || (dataOnly && withData === 0);
 
     return (
         <div className="scripting" ref={frame} style={height ? { height } : undefined}>
@@ -511,6 +540,20 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                     <button className="step" aria-current={step === 3} disabled={!result} onClick={() => setStep(3)}>
                         <b>3</b> Script
                     </button>
+                </span>
+                <span className="tool-sep" />
+                <span className="seg outseg" role="radiogroup" aria-label="Script output">
+                    {OUTPUTS.map(([value, label]) => (
+                        <button
+                            key={value}
+                            role="radio"
+                            aria-checked={output === value}
+                            className={output === value ? "on" : undefined}
+                            onClick={() => setOutput(value)}
+                        >
+                            {label}
+                        </button>
+                    ))}
                 </span>
                 <span className="grow" />
                 <label className="opt">
@@ -537,14 +580,18 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                     />
                     group columns
                 </label>
-                <span className="tool-sep" />
-                <button className="tool" onClick={download} disabled={blocked || busy !== ""}>
-                    {busy === "files" ? "Packing…" : "Download as files"}
-                </button>
-                <button className="tool run" onClick={generate} disabled={blocked || busy !== ""}>
-                    <Icon name="play" size={14} />
-                    {busy === "script" ? "Scripting…" : "Generate"}
-                </button>
+                {/* One group, so a narrow window moves both actions to the next line together
+                    instead of leaving Generate there on its own. */}
+                <span className="actions">
+                    <span className="tool-sep" />
+                    <button className="tool" onClick={download} disabled={blocked || busy !== ""}>
+                        {busy === "files" ? "Packing…" : "Download as files"}
+                    </button>
+                    <button className="tool run" onClick={generate} disabled={blocked || busy !== ""}>
+                        <Icon name="play" size={14} />
+                        {busy === "script" ? "Scripting…" : "Generate"}
+                    </button>
+                </span>
             </div>
 
             {error && <div className="error">{error}</div>}
@@ -594,6 +641,61 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                                 kind={kind}
                                 onKind={setKind}
                             />
+
+                            {pasteOpen && (
+                                <div className="pastebox">
+                                    <textarea
+                                        className="mono"
+                                        autoFocus
+                                        spellCheck={false}
+                                        placeholder="dbo.Countries; dbo.Currencies; sales.Orders"
+                                        value={pasteText}
+                                        onChange={(e) => setPasteText(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                                                e.preventDefault();
+                                                tickPasted();
+                                            } else if (e.key === "Escape") {
+                                                setPasteOpen(false);
+                                            }
+                                        }}
+                                    />
+                                    <div className="bar">
+                                        <span className="muted">; or a new line between names. Schema optional.</span>
+                                        <span className="grow" />
+                                        <button className="tool" onClick={() => setPasteOpen(false)}>
+                                            Cancel
+                                        </button>
+                                        <button className="tool run" disabled={!pasteText.trim()} onClick={tickPasted}>
+                                            Tick
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {pasteOutcome && !pasteOpen && (
+                                <div className="listnote">
+                                    <span className="grow">
+                                        <span className="ok">
+                                            {pasteOutcome.found.length} of {pasteOutcome.names.length} ticked
+                                        </span>
+                                        {pasteOutcome.notFound.length > 0 && (
+                                            <span className="bad">
+                                                not found: <span className="mono">{pasteOutcome.notFound.join(", ")}</span>
+                                            </span>
+                                        )}
+                                        {pasteOutcome.ambiguous.length > 0 && (
+                                            <span className="bad">
+                                                in more than one schema, not ticked:{" "}
+                                                <span className="mono">{pasteOutcome.ambiguous.join(", ")}</span>
+                                            </span>
+                                        )}
+                                    </span>
+                                    <button className="addbtn" title="Dismiss" onClick={() => setPasteOutcome(null)}>
+                                        ×
+                                    </button>
+                                </div>
+                            )}
 
                             <div className="picker-rows" role="listbox" tabIndex={0} ref={list} onKeyDown={onKeyDown}>
                                 {visible.slice(0, RENDER_CAP).map((o, index) => {
@@ -646,6 +748,14 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                                 >
                                     Move {stagedObjects.length > 0 ? stagedObjects.length : ""} »
                                 </button>
+                                <button
+                                    className="tool"
+                                    aria-pressed={pasteOpen}
+                                    onClick={() => setPasteOpen((open) => !open)}
+                                    title="Tick objects by name: paste a list separated by ; or new lines"
+                                >
+                                    Paste list…
+                                </button>
                                 <span className="grow" />
                                 <button
                                     className="tool"
@@ -674,7 +784,9 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                                 <span className="pcount">{targets.length}</span>
                                 <span className="grow" />
                                 <span className="muted">
-                                    {targets.length - withData} ddl · {withData} data
+                                    {dataOnly
+                                        ? `data only · ${withData} ${withData === 1 ? "table" : "tables"} scripted`
+                                        : `${targets.length - withData} ddl · ${withData} data`}
                                 </span>
                                 <button
                                     className="tool"
@@ -732,6 +844,7 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                                                             index={index}
                                                             mode={modeOf(id)}
                                                             count={countLabel(modeOf(id), id, counted, rowCounts, tops)}
+                                                            idle={idleReason(o, modeOf(id), dataOnly)}
                                                             active={active === id}
                                                             ticked={ticked.has(id)}
                                                             onPick={setActive}
@@ -907,6 +1020,8 @@ interface SetRowProps {
     index: number;
     mode: Rows;
     count: string;
+    // Set when the object produces nothing in the current output, with the reason to show.
+    idle: string | null;
     active: boolean;
     ticked: boolean;
     onPick: (id: string) => void;
@@ -921,6 +1036,7 @@ const SetRow = memo(function SetRow({
     index,
     mode,
     count,
+    idle,
     active,
     ticked,
     onPick,
@@ -929,8 +1045,9 @@ const SetRow = memo(function SetRow({
     onRemove,
 }: SetRowProps) {
     const table = object.kind === "tables";
+    const classes = [active ? "active" : "", idle ? "idle" : ""].filter(Boolean).join(" ");
     return (
-        <tr className={active ? "active" : undefined} onClick={() => onPick(id)}>
+        <tr className={classes || undefined} onClick={() => onPick(id)}>
             <td className="tick">
                 <span
                     role="checkbox"
@@ -948,7 +1065,7 @@ const SetRow = memo(function SetRow({
                 {object.schema}.{object.name}
             </td>
             <td className="muted">{KIND_LABEL[object.kind] ?? object.kind}</td>
-            <td>
+            <td className="keep">
                 {table ? (
                     <span className="seg">
                         {ROW_MODES.map((m) => (
@@ -970,7 +1087,7 @@ const SetRow = memo(function SetRow({
                     <span className="muted">—</span>
                 )}
             </td>
-            <td className="num">{count}</td>
+            <td className="num">{idle ? <span className="idle-tag">{idle}</span> : count}</td>
             <td>
                 <button
                     className="addbtn back"
@@ -1016,6 +1133,19 @@ function countLabel(
             }
             return estimate !== undefined ? "~" + estimate.toLocaleString("en-US") : "—";
     }
+}
+
+// Why a row of the set produces nothing, or null when it does. Only data only leaves rows out:
+// with definitions in the script every object in the set is in it.
+function idleReason(o: ScriptableObject, mode: Rows, dataOnly: boolean): string | null {
+    if (!dataOnly) {
+        return null;
+    }
+    // Short on purpose: the tag sits in the COUNT column and must not widen it.
+    if (o.kind !== "tables") {
+        return "skipped";
+    }
+    return mode === "none" ? "no rows" : null;
 }
 
 // Content-Disposition carries the name the server chose, extension included.
