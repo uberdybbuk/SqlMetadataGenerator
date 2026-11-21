@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using Microsoft.Data.SqlClient;
 using Spectre.Console;
 using SqlMetadataGenerator.Model;
@@ -98,6 +101,7 @@ internal static class Program
     // Reads the database metadata (incrementally) and generates the script files.
     private static async Task<int> RunGenerateAsync(CommandLineOptions options, string connectionString)
     {
+        var clock = Stopwatch.StartNew();
         // Set once the progress display exists. Every measured read reports here, from whichever
         // thread finished it.
         Action<string, TimeSpan>? onRead = null;
@@ -136,6 +140,7 @@ internal static class Program
         List<RoutineInfo> modules = [];
         List<SynonymInfo> synonyms = [];
         string? dbCollation = null;
+        ScriptHeader.Source? source = null;
         var newSnapshot = new Snapshot();
 
         await AnsiConsole.Progress()
@@ -191,7 +196,8 @@ internal static class Program
                 var modProgress = new Progress<int>(_ => modDefTask.Increment(1));
 
                 // With a type-level exclusion the matching query never runs at all.
-                var collationTask = reader.ReadDatabaseCollationAsync();
+                // The collation the scripters need, with what _script-info.txt says about the source.
+                var sourceTask = reader.ReadScriptSourceAsync();
                 var schemasTask = filter.IncludesType("schemas") ? reader.ReadSchemasAsync() : Task.FromResult(new List<SchemaInfo>());
                 var userTypesTask = filter.IncludesType("types") ? reader.ReadUserDefinedTypesAsync() : Task.FromResult(new List<UserDefinedTypeInfo>());
                 var tableTypesTask = filter.IncludesType("types") ? reader.ReadTableTypesAsync() : Task.FromResult(new List<TableTypeInfo>());
@@ -199,9 +205,10 @@ internal static class Program
                 var synonymsTask = filter.IncludesType("synonyms") ? reader.ReadSynonymsAsync() : Task.FromResult(new List<SynonymInfo>());
                 var tablesTask = filter.IncludesType("tables") ? reader.ReadTablesAsync(tblProgress) : Task.FromResult(new List<TableInfo>());
                 var modulesTask = reader.ReadModuleDefinitionsAsync(changed, modProgress);
-                await Task.WhenAll(collationTask, schemasTask, userTypesTask, tableTypesTask, sequencesTask, synonymsTask, tablesTask, modulesTask);
+                await Task.WhenAll(sourceTask, schemasTask, userTypesTask, tableTypesTask, sequencesTask, synonymsTask, tablesTask, modulesTask);
 
-                dbCollation = await collationTask;
+                source = await sourceTask;
+                dbCollation = source.Collation;
                 // Apply the schema- and name-level exclusions.
                 schemas = (await schemasTask).Where(s => filter.IncludesObject(s.Name, s.Name)).ToList();
                 userTypes = (await userTypesTask).Where(t => filter.IncludesObject(t.Name.Schema, t.Name.Name)).ToList();
@@ -311,7 +318,68 @@ internal static class Program
 
         SnapshotStore.Save(writer.DatabaseRoot, newSnapshot);
 
+        if (source is not null)
+        {
+            string infoPath = await WriteScriptInfoAsync(
+                options, writer, source, schemas.Count, userTypes.Count, tableTypes.Count, sequences.Count, tables.Count,
+                synonyms.Count, moduleHeaders, changed.Count, oldSnapshot.Objects.Count == 0, clock.Elapsed);
+            Console.WriteLine($"Bilgi dosyası: {infoPath}");
+        }
+
         Console.WriteLine("Tamamlandı.");
         return 0;
+    }
+
+    // Where the folder came from and when, in a file of its own beside the scripts. Not on top of
+    // each script: the date changes with every run, and a folder compared in git would then differ
+    // in every file. The deploy reads *.sql only, so this file never reaches a target database.
+    //
+    // The counts are of what the folder holds, not of what this run wrote: an incremental run
+    // reads only the modules that changed, and the others are still there from earlier runs.
+    private static async Task<string> WriteScriptInfoAsync(
+        CommandLineOptions options,
+        OutputWriter writer,
+        ScriptHeader.Source source,
+        int schemas,
+        int userTypes,
+        int tableTypes,
+        int sequences,
+        int tables,
+        int synonyms,
+        IReadOnlyList<ModuleHeader> modules,
+        int reread,
+        bool firstRun,
+        TimeSpan took)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["schemas"] = schemas,
+            ["dataTypes"] = userTypes,
+            ["tableTypes"] = tableTypes,
+            ["sequences"] = sequences,
+            ["tables"] = tables,
+            ["synonyms"] = synonyms,
+        };
+        foreach (var group in modules.GroupBy(m => m.Kind, StringComparer.OrdinalIgnoreCase))
+        {
+            counts[group.Key] = group.Count();
+        }
+
+        string refresh = options.FullRefresh || firstRun
+            ? "full"
+            : string.Format(CultureInfo.InvariantCulture, "incremental, {0:N0} of {1:N0} modules re-read", reread, modules.Count);
+
+        string header = ScriptHeader.Write(
+            options.Server,
+            source,
+            counts,
+            options.ToScriptFormat(source.Collation),
+            "DDL only · " + refresh,
+            DateTimeOffset.Now,
+            took);
+
+        string path = Path.Combine(writer.DatabaseRoot, "_script-info.txt");
+        await File.WriteAllTextAsync(path, header, new UTF8Encoding(false));
+        return path;
     }
 }

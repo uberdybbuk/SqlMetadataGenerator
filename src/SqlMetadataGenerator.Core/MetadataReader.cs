@@ -3,6 +3,7 @@ using Microsoft.Data.SqlClient;
 using SqlMetadataGenerator.Model;
 
 using SqlMetadataGenerator.Providers;
+using SqlMetadataGenerator.Scripting;
 
 namespace SqlMetadataGenerator;
 
@@ -32,6 +33,37 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
         await using var cmd = ReadOnlyCommand.Create(conn, sql);
         var result = await cmd.ExecuteScalarAsync(ct);
         return result is null or DBNull ? null : (string)result;
+    }
+
+    // The collation together with what a script's header says about its source: the server's
+    // version and edition, and the database's compatibility level. One round trip, in place of
+    // the collation read alone.
+    public async Task<ScriptHeader.Source> ReadScriptSourceAsync(CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT
+                CONVERT(nvarchar(64),  SERVERPROPERTY('ProductVersion')),
+                CONVERT(nvarchar(128), SERVERPROPERTY('Edition')),
+                CONVERT(int,           SERVERPROPERTY('EngineEdition')),
+                CONVERT(nvarchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation')),
+                (SELECT CONVERT(int, compatibility_level) FROM sys.databases WHERE database_id = DB_ID()),
+                DB_NAME();
+            """;
+        await using var conn = await OpenConnectionAsync(ct);
+        await using var cmd = ReadOnlyCommand.Create(conn, sql);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            throw new InvalidOperationException("Could not read the server and database properties.");
+        }
+
+        return new ScriptHeader.Source(
+            ProductVersion: reader.IsDBNull(0) ? "?" : reader.GetString(0),
+            Edition: reader.IsDBNull(1) ? "" : reader.GetString(1),
+            EngineEdition: reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+            Collation: reader.IsDBNull(3) ? null : reader.GetString(3),
+            CompatibilityLevel: reader.IsDBNull(4) ? null : reader.GetInt32(4),
+            Database: reader.IsDBNull(5) ? "" : reader.GetString(5));
     }
 
     // Says how long a named read took, and names it when it times out. "Execution Timeout Expired"

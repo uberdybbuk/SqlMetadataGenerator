@@ -423,6 +423,10 @@ internal static class ExplorerEndpoints
                 bool asFiles = string.Equals(body.Output, "files", StringComparison.OrdinalIgnoreCase);
                 var keep = TimeSpan.FromMinutes(Math.Clamp(body.KeepMinutes ?? 10, 1, MaxKeepMinutes));
                 string connectionString = scope.ConnectionString;
+                // The address, not the alias: the header is read by people who do not have this
+                // connection list.
+                string server = registry.Find(alias)?.Server ?? alias;
+                bool dataOnly = wanted.Count == 0 && data.Count > 0;
                 var timings = ScriptTimings(loggers, alias, db);
 
                 var job = jobs.Start(keep, async (job, ct) =>
@@ -432,11 +436,13 @@ internal static class ExplorerEndpoints
                     job.Progress.AddLast(last, asFiles ? "Packing files" : "Writing the script");
 
                     var reader = new MetadataReader(connectionString, timings);
-                    var format = body.ToScriptFormat(await reader.ReadDatabaseCollationAsync(ct));
+                    var source = await reader.ReadScriptSourceAsync(ct);
+                    var format = body.ToScriptFormat(source.Collation);
                     var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, connectionString, format, job.Progress, ct);
 
                     job.Progress.Start(last);
                     string stamp = DateTime.Now.ToString("yyyyMMdd-HHmm");
+                    string header = ScriptHeader.Write(server, source, bundle, format, dataOnly, DateTimeOffset.Now, job.Clock.Elapsed);
                     string basePath = jobs.PathFor(job);
 
                     if (asFiles)
@@ -444,6 +450,9 @@ internal static class ExplorerEndpoints
                         var files = bundle.Items
                             .Select(item => (Path: ScriptBundle.FilePath(item), Content: item.Sql.TrimEnd() + "\n"))
                             .ToList();
+                        // In a file of its own rather than on top of every script: the date changes
+                        // with each run, and a folder compared in git would differ in every file.
+                        files.Insert(0, ("_script-info.txt", header));
                         if (bundle.Missing.Count > 0)
                         {
                             files.Add(("_missing.txt",
@@ -461,7 +470,7 @@ internal static class ExplorerEndpoints
                             package.Bytes.Length, null, bundle.Items.Count, bundle.Missing, bundle.CycleTables);
                     }
 
-                    string sql = ScriptBundle.ToSingleScript(bundle, format);
+                    string sql = header + "\n" + ScriptBundle.ToSingleScript(bundle, format);
                     string path = basePath + ".sql";
                     // No byte order mark: SSMS and sqlcmd read UTF-8 without one, and a BOM in front
                     // of the first statement is one more thing for a diff to show.
