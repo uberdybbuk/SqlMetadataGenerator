@@ -1445,6 +1445,148 @@ tr.norows td.empty-note {
     color: var(--muted);
 }
 
+/* ---- a long script job: where it is, and what came out ---- */
+.job {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    flex: 0 0 auto;
+}
+
+.job-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+}
+
+.job-head b {
+    font-size: 14px;
+}
+
+.job .bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--head);
+    overflow: hidden;
+}
+
+.job .bar > i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--accent);
+    transition: width 0.3s ease;
+}
+
+/* Icon, title, count, time. A running phase with a count gets a second row with its own bar. */
+.phases {
+    display: grid;
+    grid-template-columns: 18px 1fr auto 64px;
+    column-gap: 10px;
+    row-gap: 5px;
+    align-items: center;
+    font-size: 12px;
+}
+
+.phases .ic {
+    text-align: center;
+}
+
+.phases .ic.done,
+.job-foot .ok {
+    color: var(--ok, #1a7f37);
+}
+
+.phases .ic.waiting,
+.phases .lbl.waiting {
+    color: var(--muted);
+}
+
+.phases .num,
+.phases .t {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.phases .sub {
+    grid-column: 2 / 5;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+}
+
+.phases .sub .bar {
+    flex: 1 1 auto;
+}
+
+.spin {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--accent-soft);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.bigdone {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.bigdone-title {
+    font-size: 14px;
+}
+
+.bigdone .facts {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.bigdone .facts b {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.icon-dl {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    border-radius: 8px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 18px;
+}
+
+.bigdone a.tool {
+    text-decoration: none;
+}
+
+.job-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+
 /* ---- the pasted list ---- */
 .pastebox {
     display: flex;

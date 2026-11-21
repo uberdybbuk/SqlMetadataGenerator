@@ -144,16 +144,48 @@ export interface ScriptRequest {
     upperCaseKeywords?: boolean;
     emitSetOptions?: boolean;
     groupColumns?: boolean;
+    // One .sql, or the folder layout as an archive.
+    output?: "script" | "files";
+    // How long the server keeps the finished output for downloading again.
+    keepMinutes?: number;
 }
 
-export interface ScriptResult {
-    sql: string;
+// A script job's output, once it is done. The script itself stays on the server until it is
+// asked for: shown in the editor when it is small, downloaded when it is not.
+export interface ScriptJobResult {
+    // "script" is one .sql, "files" the generator's folder layout packed into an archive.
+    kind: "script" | "files";
+    fileName: string;
+    bytes: number;
+    // Only for a script.
+    lines: number | null;
     scripted: number;
     // Asked for, but gone from the catalog since the inventory was read.
     missing: string[];
     // Non-empty when the chosen tables reference each other in a cycle: no insert order satisfies
     // them, so the script brackets the load with NOCHECK/CHECK.
     cycleTables: string[];
+}
+
+export interface ScriptJobPhase {
+    key: string;
+    title: string;
+    state: "waiting" | "running" | "done";
+    done: number;
+    // Null for a phase with nothing to count.
+    total: number | null;
+    unit: string | null;
+    detail: string | null;
+    seconds: number;
+}
+
+export interface ScriptJobStatus {
+    id: string;
+    state: "running" | "done" | "failed" | "cancelled";
+    seconds: number;
+    phases: ScriptJobPhase[];
+    error: string | null;
+    result: ScriptJobResult | null;
 }
 
 // One row of an object list. The dashboard counters and this list share a catalog query, so a
@@ -416,6 +448,9 @@ async function problemText(response: Response): Promise<string> {
 
 const seg = (value: string) => encodeURIComponent(value);
 
+const scriptJobUrl = (id: string, download: boolean) =>
+    `/api/script-jobs/${seg(id)}/content${download ? "?download=true" : ""}`;
+
 export const api = {
     connections: () => get<ConnectionSummary[]>("/api/servers"),
 
@@ -472,28 +507,28 @@ export const api = {
     scriptable: (alias: string, db: string) =>
         get<ScriptableInventory>(`/api/servers/${seg(alias)}/databases/${seg(db)}/scriptable`),
 
-    // Scripts the chosen objects into one statement, sections in dependency order.
-    script: (alias: string, db: string, body: ScriptRequest, signal?: AbortSignal) =>
-        post<ScriptResult>(`/api/servers/${seg(alias)}/databases/${seg(db)}/script`, body, signal),
+    // Starts a script job. The answer is only its id: the job runs on, and scriptJob says where
+    // it is.
+    startScriptJob: (alias: string, db: string, body: ScriptRequest) =>
+        post<{ id: string }>(`/api/servers/${seg(alias)}/databases/${seg(db)}/script-jobs`, body),
 
-    // The same bundle as an archive, in the generator's folder layout. The FORMAT is the server's
-    // call (7-Zip where the host has it, zip otherwise), so the headers come back with the bytes —
-    // the caller needs Content-Disposition to name the download correctly.
-    scriptFiles: async (
-        alias: string,
-        db: string,
-        body: ScriptRequest,
-    ): Promise<{ blob: Blob; headers: Headers }> => {
-        const response = await fetch(`/api/servers/${seg(alias)}/databases/${seg(db)}/script/files`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(body),
-        });
+    scriptJob: (id: string, signal?: AbortSignal) => get<ScriptJobStatus>(`/api/script-jobs/${seg(id)}`, signal),
+
+    // The finished script as text, for the editor.
+    scriptJobText: async (id: string, signal?: AbortSignal): Promise<string> => {
+        const response = await fetch(scriptJobUrl(id, false), { signal });
         if (!response.ok) {
             throw new Error(await problemText(response));
         }
-        return { blob: await response.blob(), headers: response.headers };
+        return response.text();
     },
+
+    // Where the browser downloads the output from, under the file name the server chose. A link,
+    // not a fetch: a hundred megabyte script goes to disk without passing through the page.
+    scriptJobDownloadUrl: (id: string) => scriptJobUrl(id, true),
+
+    // Cancels a running job, or throws a finished one's output away.
+    deleteScriptJob: (id: string) => send("DELETE", `/api/script-jobs/${seg(id)}`),
 
     // "Validate & count": checks the WHERE syntactically and returns how many rows match. The
     // scripting inspector uses it to turn an estimate into a fact before anyone scripts the table.

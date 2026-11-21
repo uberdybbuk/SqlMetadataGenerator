@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Globalization;
 using Microsoft.Data.SqlClient;
 using SqlMetadataGenerator.Connections;
 using SqlMetadataGenerator.Diagram;
@@ -396,85 +397,157 @@ internal static class ExplorerEndpoints
                 });
             }));
 
-        // Scripts the chosen objects into ONE statement, sections in dependency order.
+        // Starts a script job and answers with its id at once. The job runs on, and the page asks
+        // where it is through /script-jobs/{id} until it is done.
         //
         // POST because the selection is a list, not an address: seventeen schema-qualified names do
         // not belong in a URL, and generating a script is not something a link should do on its own.
-        api.MapPost("/servers/{alias}/databases/{db}/script",
-            (string alias, string db, ScriptRequest body, ConnectionRegistry registry, ILoggerFactory loggers, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async scope =>
+        //
+        // Output "script" writes ONE .sql, sections in dependency order. Output "files" writes the
+        // generator's folder layout, packed (7-Zip at -mx=9 when the host has it, a zip otherwise).
+        api.MapPost("/servers/{alias}/databases/{db}/script-jobs",
+            (string alias, string db, ScriptRequest body, ConnectionRegistry registry, ScriptJobs jobs, ILoggerFactory loggers) =>
+            WithDatabase(alias, db, registry, scope =>
             {
                 if (RequireSqlServer(scope) is { } unsupported)
                 {
-                    return unsupported;
+                    return Task.FromResult(unsupported);
                 }
 
                 if (!TryReadSelection(body, out var wanted, out string? error)
                     || !TryReadData(body, out var data, out error))
                 {
-                    return BadRequest(error!);
+                    return Task.FromResult(BadRequest(error!));
                 }
 
-                var reader = new MetadataReader(scope.ConnectionString, ScriptTimings(loggers, alias, db));
-                var format = body.ToScriptFormat(await reader.ReadDatabaseCollationAsync(ct));
-                var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, scope.ConnectionString, format, ct);
-
-                return Results.Ok(new
-                {
-                    Sql = ScriptBundle.ToSingleScript(bundle, format),
-                    Scripted = bundle.Items.Count,
-                    // What was asked for and is no longer there. The panel's inventory can be
-                    // minutes old, and a dropped object has to be said out loud.
-                    bundle.Missing,
-                    // Non-empty when the chosen tables reference each other in a cycle: the script
-                    // brackets the load with NOCHECK/CHECK, and the panel says so.
-                    CycleTables = bundle.CycleTables,
-                });
-            }));
-
-        // The same bundle as files, in the layout the generator writes to disk, zipped.
-        api.MapPost("/servers/{alias}/databases/{db}/script/files",
-            (string alias, string db, ScriptRequest body, ConnectionRegistry registry, ILoggerFactory loggers, CancellationToken ct) =>
-            WithDatabase(alias, db, registry, async scope =>
-            {
-                if (RequireSqlServer(scope) is { } unsupported)
-                {
-                    return unsupported;
-                }
-
-                if (!TryReadSelection(body, out var wanted, out string? error)
-                    || !TryReadData(body, out var data, out error))
-                {
-                    return BadRequest(error!);
-                }
-
+                bool asFiles = string.Equals(body.Output, "files", StringComparison.OrdinalIgnoreCase);
+                var keep = TimeSpan.FromMinutes(Math.Clamp(body.KeepMinutes ?? 10, 1, MaxKeepMinutes));
+                string connectionString = scope.ConnectionString;
                 var timings = ScriptTimings(loggers, alias, db);
-                var reader = new MetadataReader(scope.ConnectionString, timings);
-                var format = body.ToScriptFormat(await reader.ReadDatabaseCollationAsync(ct));
-                var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, scope.ConnectionString, format, ct);
 
-                var files = bundle.Items
-                    .Select(item => (Path: ScriptBundle.FilePath(item), Content: item.Sql.TrimEnd() + "\n"))
-                    .ToList();
-
-                if (bundle.Missing.Count > 0)
+                var job = jobs.Start(keep, async (job, ct) =>
                 {
-                    files.Add(("_missing.txt",
-                        "Asked for, but no longer in the catalog:\n\n" + string.Join("\n", bundle.Missing) + "\n"));
-                }
+                    // Shown from the start, though they come last: the person sees the whole job.
+                    string last = asFiles ? "packing" : "output";
+                    job.Progress.AddLast(last, asFiles ? "Packing files" : "Writing the script");
 
-                // 7-Zip at -mx=9 when the host has it, a zip when it does not. See ScriptArchive.
-                var clock = System.Diagnostics.Stopwatch.StartNew();
-                var package = await ScriptArchive.PackAsync(files, ct);
-                timings($"packing {files.Count} files into {package.Bytes.Length / 1024:N0} KB with {package.Method}", clock.Elapsed);
-                string stamp = DateTime.Now.ToString("yyyyMMdd-HHmm");
-                return Results.File(package.Bytes, package.ContentType, $"{db}-{stamp}{package.Extension}");
+                    var reader = new MetadataReader(connectionString, timings);
+                    var format = body.ToScriptFormat(await reader.ReadDatabaseCollationAsync(ct));
+                    var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, connectionString, format, job.Progress, ct);
+
+                    job.Progress.Start(last);
+                    string stamp = DateTime.Now.ToString("yyyyMMdd-HHmm");
+                    string basePath = jobs.PathFor(job);
+
+                    if (asFiles)
+                    {
+                        var files = bundle.Items
+                            .Select(item => (Path: ScriptBundle.FilePath(item), Content: item.Sql.TrimEnd() + "\n"))
+                            .ToList();
+                        if (bundle.Missing.Count > 0)
+                        {
+                            files.Add(("_missing.txt",
+                                "Asked for, but no longer in the catalog:\n\n" + string.Join("\n", bundle.Missing) + "\n"));
+                        }
+
+                        var clock = System.Diagnostics.Stopwatch.StartNew();
+                        var package = await ScriptArchive.PackAsync(files, ct);
+                        timings($"packing {files.Count} files into {package.Bytes.Length / 1024:N0} KB with {package.Method}", clock.Elapsed);
+
+                        string archive = basePath + package.Extension;
+                        await File.WriteAllBytesAsync(archive, package.Bytes, ct);
+                        job.Progress.Finish(last, files.Count.ToString("N0", CultureInfo.InvariantCulture) + " files");
+                        return new ScriptJobs.Output("files", archive, $"{db}-{stamp}{package.Extension}", package.ContentType,
+                            package.Bytes.Length, null, bundle.Items.Count, bundle.Missing, bundle.CycleTables);
+                    }
+
+                    string sql = ScriptBundle.ToSingleScript(bundle, format);
+                    string path = basePath + ".sql";
+                    // No byte order mark: SSMS and sqlcmd read UTF-8 without one, and a BOM in front
+                    // of the first statement is one more thing for a diff to show.
+                    await File.WriteAllTextAsync(path, sql, new System.Text.UTF8Encoding(false), ct);
+                    long lines = sql.Length == 0 ? 0 : sql.Count(c => c == '\n') + (sql.EndsWith('\n') ? 0 : 1);
+                    job.Progress.Finish(last, lines.ToString("N0", CultureInfo.InvariantCulture) + (lines == 1 ? " line" : " lines"));
+                    return new ScriptJobs.Output("script", path, $"{db}-{stamp}.sql", "text/plain; charset=utf-8",
+                        new FileInfo(path).Length, lines, bundle.Items.Count, bundle.Missing, bundle.CycleTables);
+                });
+
+                return Task.FromResult(Results.Ok(new { job.Id }));
             }));
+
+        // Where a job is. Asking is also what keeps it alive: a job nobody asks about is cancelled.
+        api.MapGet("/script-jobs/{id}", (string id, ScriptJobs jobs) =>
+        {
+            var job = jobs.Find(id);
+            if (job is null)
+            {
+                return NotFound("This script job is no longer kept. Generate it again.");
+            }
+
+            var result = job.Result;
+            return Results.Ok(new
+            {
+                job.Id,
+                State = job.State.ToString().ToLowerInvariant(),
+                Seconds = job.Clock.Elapsed.TotalSeconds,
+                Phases = job.Progress.Snapshot().Select(p => new
+                {
+                    p.Key,
+                    p.Title,
+                    State = p.State.ToString().ToLowerInvariant(),
+                    p.Done,
+                    p.Total,
+                    p.Unit,
+                    p.Detail,
+                    p.Seconds,
+                }),
+                job.Error,
+                Result = result is null
+                    ? null
+                    : new
+                    {
+                        result.Kind,
+                        result.FileName,
+                        result.Bytes,
+                        result.Lines,
+                        result.Scripted,
+                        // What was asked for and is no longer there. The panel's inventory can be
+                        // minutes old, and a dropped object has to be said out loud.
+                        result.Missing,
+                        // Non-empty when the chosen tables reference each other in a cycle: the
+                        // script brackets the load with NOCHECK/CHECK, and the panel says so.
+                        result.CycleTables,
+                    },
+            });
+        });
+
+        // The finished output. With download=true it comes as an attachment under its file name,
+        // which the browser saves by itself. Without, it is the script as text, for the editor.
+        api.MapGet("/script-jobs/{id}/content", (string id, bool? download, ScriptJobs jobs) =>
+        {
+            var job = jobs.Find(id);
+            if (job?.Result is not { } result || !File.Exists(result.Path))
+            {
+                return NotFound("This script is no longer kept. Generate it again.");
+            }
+
+            return download == true
+                ? Results.File(result.Path, result.ContentType, result.FileName)
+                : Results.File(result.Path, result.ContentType);
+        });
+
+        // Cancels a running job, or throws a finished one's output away.
+        api.MapDelete("/script-jobs/{id}", (string id, ScriptJobs jobs) =>
+            jobs.Remove(id) ? Results.NoContent() : NotFound("No such script job."));
     }
 
     // The selection as it arrives from the picker. Capped so a malformed or hostile body cannot
     // ask for an unbounded read; the cap is far above any real database's object count.
     private const int MaxSelectedObjects = 20000;
+
+    // The longest a finished script is kept. The setting asks for minutes; a day of hundred
+    // megabyte files in the temp folder is not what anyone meant.
+    private const int MaxKeepMinutes = 120;
 
     // The row selections, with their WHERE clauses checked by the same guard the preview uses.
     // A WHERE is the one part of this request that becomes SQL text, so it never goes unchecked.
@@ -779,7 +852,11 @@ internal static class ExplorerEndpoints
         List<DataSelection>? Data,
         bool? UpperCaseKeywords,
         bool? EmitSetOptions,
-        bool? GroupColumns)
+        bool? GroupColumns,
+        // "script" (the default) or "files".
+        string? Output,
+        // How long the finished output is kept for downloading again, from the page's setting.
+        int? KeepMinutes)
     {
         public ScriptFormat ToScriptFormat(string? collation) => new()
         {

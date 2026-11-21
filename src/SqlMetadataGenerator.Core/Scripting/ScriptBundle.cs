@@ -1,3 +1,4 @@
+using System.Globalization;
 using SqlMetadataGenerator.Model;
 
 namespace SqlMetadataGenerator.Scripting;
@@ -57,20 +58,33 @@ public static class ScriptBundle
         ScriptFormat format,
         CancellationToken ct = default)
     {
-        return await BuildAsync(reader, wanted, [], null, format, ct);
+        return await BuildAsync(reader, wanted, [], null, format, null, ct);
     }
+
+    // The phases BuildAsync reports, by key. A caller adding phases of its own after these (writing
+    // the output, packing it) can tell them apart.
+    public const string CatalogPhase = "catalog";
+    public const string TablesPhase = "tables";
+    public const string HeadersPhase = "headers";
+    public const string DefinitionsPhase = "definitions";
+    public const string WritingPhase = "writing";
+    public const string RowsPhase = "rows";
 
     // data: the tables whose ROWS were asked for, each with its own optional WHERE. Kept separate
     // from the objects list because scripting forty tables' DDL and three tables' rows is the
     // normal case, and one setting covering both would force two passes to get it.
     //
     // connectionString is only needed when data was asked for; that is what the rows are read over.
+    //
+    // progress: told where the build is. Only the phases this selection needs are added, so a
+    // selection of three views never shows a table read it does not make.
     public static async Task<Result> BuildAsync(
         MetadataReader reader,
         IReadOnlyCollection<ScriptableObject> wanted,
         IReadOnlyCollection<DataScripter.Request> data,
         string? connectionString,
         ScriptFormat format,
+        ScriptProgress? progress,
         CancellationToken ct = default)
     {
         var byKind = wanted
@@ -94,31 +108,98 @@ public static class ScriptBundle
         bool Chose(string kind, string schema, string name) =>
             chosen.TryGetValue(kind, out var set) && set.Contains($"{schema}.{name}");
 
+        bool wantsModules = KindOrder.Any(k => IsModuleKind(k) && Wants(k));
+
+        // Declared up front, in the order they are shown. The first three run side by side.
+        progress?.Add(CatalogPhase, "Reading the catalog");
+        if (wantsTableMetadata)
+        {
+            progress?.Add(TablesPhase, "Reading tables");
+        }
+        if (wantsModules)
+        {
+            progress?.Add(HeadersPhase, "Reading module headers");
+            progress?.Add(DefinitionsPhase, "Reading module definitions");
+        }
+        if (wanted.Count > 0)
+        {
+            progress?.Add(WritingPhase, "Writing definitions");
+        }
+        if (data.Count > 0)
+        {
+            progress?.Add(RowsPhase, "Reading rows");
+        }
+
+        // A read that counts towards a phase, and the phase finished once all of its reads are.
+        async Task<T> Step<T>(string phase, Task<T> task)
+        {
+            T result = await task;
+            progress?.Advance(phase);
+            return result;
+        }
+
+        async Task FinishWhen(string phase, Func<string?> detail, params Task[] tasks)
+        {
+            await Task.WhenAll(tasks);
+            progress?.Finish(phase, detail());
+        }
+
+        // "1 table", "5,612 tables". Every unit here is a plain plural in s.
+        static string Count(long n, string unit) =>
+            n.ToString("N0", CultureInfo.InvariantCulture) + " " + (n == 1 ? unit.TrimEnd('s') : unit);
+
         // Only the kinds that were asked for are read. Everything else resolves to an empty list
         // without a round trip.
         // Always read: the preamble needs the owner of every schema the selection turns out to
         // touch, and that is not known until the objects have been resolved. One light query.
-        var schemasTask = reader.Measure("schemas", reader.ReadSchemasAsync(ct));
-        var dataTypesTask = Wants("dataTypes") ? reader.Measure("data types", reader.ReadUserDefinedTypesAsync(ct)) : Empty<UserDefinedTypeInfo>();
-        var tableTypesTask = Wants("tableTypes") ? reader.Measure("table types", reader.ReadTableTypesAsync(ct)) : Empty<TableTypeInfo>();
-        var sequencesTask = Wants("sequences") ? reader.Measure("sequences", reader.ReadSequencesAsync(ct)) : Empty<SequenceInfo>();
-        var synonymsTask = Wants("synonyms") ? reader.Measure("synonyms", reader.ReadSynonymsAsync(ct)) : Empty<SynonymInfo>();
-        // Each of the table read's seven queries is measured on its own, inside.
-        var tablesTask = wantsTableMetadata ? reader.ReadTablesAsync(null, ct) : Empty<TableInfo>();
+        int catalogReads = 1 + new[] { "dataTypes", "tableTypes", "sequences", "synonyms" }.Count(Wants);
+        progress?.Start(CatalogPhase, catalogReads, "reads");
+        var schemasTask = Step(CatalogPhase, reader.Measure("schemas", reader.ReadSchemasAsync(ct)));
+        var dataTypesTask = Wants("dataTypes") ? Step(CatalogPhase, reader.Measure("data types", reader.ReadUserDefinedTypesAsync(ct))) : Empty<UserDefinedTypeInfo>();
+        var tableTypesTask = Wants("tableTypes") ? Step(CatalogPhase, reader.Measure("table types", reader.ReadTableTypesAsync(ct))) : Empty<TableTypeInfo>();
+        var sequencesTask = Wants("sequences") ? Step(CatalogPhase, reader.Measure("sequences", reader.ReadSequencesAsync(ct))) : Empty<SequenceInfo>();
+        var synonymsTask = Wants("synonyms") ? Step(CatalogPhase, reader.Measure("synonyms", reader.ReadSynonymsAsync(ct))) : Empty<SynonymInfo>();
+        var catalogDone = FinishWhen(CatalogPhase, () => null, schemasTask, dataTypesTask, tableTypesTask, sequencesTask, synonymsTask);
 
-        bool wantsModules = KindOrder.Any(k => IsModuleKind(k) && Wants(k));
+        // Each of the table read's seven queries is measured on its own, inside, and counted here.
+        if (wantsTableMetadata)
+        {
+            progress?.Start(TablesPhase, MetadataReader.TableReads.Count, "queries");
+        }
+        var tablesTask = wantsTableMetadata
+            ? reader.ReadTablesAsync(progress?.Counter(TablesPhase), ct)
+            : Empty<TableInfo>();
+        var tablesDone = wantsTableMetadata
+            ? FinishWhen(TablesPhase, () => Count(tablesTask.Result.Count, "tables"), tablesTask)
+            : Task.CompletedTask;
+
+        if (wantsModules)
+        {
+            progress?.Start(HeadersPhase);
+        }
         var headersTask = wantsModules ? reader.Measure("module headers", reader.ReadModuleHeadersAsync(ct)) : Empty<ModuleHeader>();
+        var headersDone = wantsModules
+            ? FinishWhen(HeadersPhase, () => Count(headersTask.Result.Count, "modules"), headersTask)
+            : Task.CompletedTask;
 
-        await Task.WhenAll(schemasTask, dataTypesTask, tableTypesTask, sequencesTask, synonymsTask, tablesTask, headersTask);
+        await Task.WhenAll(catalogDone, tablesDone, headersDone);
 
         // The definitions are fetched only for the modules that were actually ticked; the headers
         // above are the cheap read that says which object_ids those are.
         var wantedHeaders = (await headersTask)
             .Where(h => Chose(h.Kind, h.Name.Schema, h.Name.Name))
             .ToList();
+        if (wantsModules)
+        {
+            progress?.Start(DefinitionsPhase, MetadataReader.BatchCount(wantedHeaders.Count), "batches");
+        }
         var modules = wantedHeaders.Count > 0
-            ? await reader.ReadModuleDefinitionsAsync(wantedHeaders, null, ct)
+            ? await reader.ReadModuleDefinitionsAsync(wantedHeaders, progress?.Counter(DefinitionsPhase), ct)
             : [];
+        if (wantsModules)
+        {
+            progress?.Finish(DefinitionsPhase, Count(modules.Count, "modules"));
+        }
 
         // A module's kind is not on RoutineInfo, so it is carried over from the header that asked
         // for it. Keyed on the identity, because that is what both sides agree on.
@@ -136,6 +217,15 @@ public static class ScriptBundle
         {
             items.Add(new Item(kind, schema, name, folder, sql));
             found.Add($"{kind}\0{schema}.{name}");
+            if (kind != DataKind)
+            {
+                progress?.Advance(WritingPhase);
+            }
+        }
+
+        if (wanted.Count > 0)
+        {
+            progress?.Start(WritingPhase, wanted.Count, "objects");
         }
 
         foreach (string kind in KindOrder)
@@ -197,6 +287,11 @@ public static class ScriptBundle
             }
         }
 
+        if (wanted.Count > 0)
+        {
+            progress?.Finish(WritingPhase, Count(items.Count, "objects"));
+        }
+
         // Rows go after every CREATE in the bundle: an INSERT needs its table to exist.
         if (data.Count > 0)
         {
@@ -221,18 +316,31 @@ public static class ScriptBundle
             // Parent tables first. A cycle among the chosen tables means no order works, so the
             // load gets bracketed by NOCHECK/CHECK instead — reported so the caller can say why.
             var (ordered, hasCycle) = DataScripter.SortByDependency(chosenTables);
+            progress?.Start(RowsPhase, ordered.Count, "tables");
+            long rowsTotal = 0;
             foreach (var table in ordered)
             {
                 var ask = requestByTable[$"{table.Name.Schema}.{table.Name.Name}"];
+                string tableName = $"{table.Name.Schema}.{table.Name.Name}";
+                progress?.Describe(RowsPhase, tableName);
+                int rowsHere = 0;
                 string sql = await DataScripter.ScriptAsync(
                     connectionString ?? throw new InvalidOperationException("No connection for reading rows."),
                     table,
                     ask.Where,
                     ask.Top,
                     format,
-                    ct);
+                    ct,
+                    rows =>
+                    {
+                        rowsHere = rows;
+                        progress?.Describe(RowsPhase, $"{tableName} · {Count(rows, "rows")}");
+                    });
+                rowsTotal += rowsHere;
+                progress?.Advance(RowsPhase);
                 Add(DataKind, table.Name.Schema, table.Name.Name, Folders[DataKind], sql);
             }
+            progress?.Finish(RowsPhase, Count(rowsTotal, "rows"));
 
             if (hasCycle)
             {

@@ -36,6 +36,11 @@ public static class DataScripter
     // T-SQL allows at most 1000 rows in one VALUES clause.
     private const int RowsPerStatement = 1000;
 
+    // How often the row count is reported while a table is read. By time, not by rows: a table of
+    // wide log rows reads at eighty a second, and a count that moves every thousand rows sat at
+    // zero for the first twelve seconds.
+    private const int ReportEveryMs = 500;
+
     // Top: how many rows, when the caller asked for a capped slice rather than everything or a
     // filtered set. Null means no cap. Where and Top can be combined — "the first 100 that match".
     public sealed record Request(string Schema, string Name, string? Where, int? Top = null);
@@ -54,7 +59,10 @@ public static class DataScripter
         string? where,
         int? top,
         ScriptFormat fmt,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        // Told how many rows have been read so far, every ReportEveryMs and once at the end.
+        // A table of eighty thousand rows takes long enough that a caller wants to show it moving.
+        Action<int>? rowsRead = null)
     {
         var columns = table.Columns
             .Where(c => IsInsertable(c.TypeName, c.IsComputed))
@@ -93,6 +101,7 @@ public static class DataScripter
             await using var reader = await cmd.ExecuteReaderAsync(ct);
 
             var cells = new string[columns.Count];
+            long lastReport = Environment.TickCount64;
             while (await reader.ReadAsync(ct))
             {
                 if (rows.Count == MaxRows)
@@ -107,8 +116,14 @@ public static class DataScripter
                     cells[i] = Literal(reader.IsDBNull(i) ? null : reader.GetValue(i), columns[i], table.Name);
                 }
                 rows.Add(string.Join(", ", cells));
+                if (rowsRead is not null && Environment.TickCount64 - lastReport >= ReportEveryMs)
+                {
+                    rowsRead(rows.Count);
+                    lastReport = Environment.TickCount64;
+                }
             }
         }
+        rowsRead?.Invoke(rows.Count);
 
         var text = new StringBuilder();
         text.Append("-- ").Append(table.Name.Schema).Append('.').Append(table.Name.Name)

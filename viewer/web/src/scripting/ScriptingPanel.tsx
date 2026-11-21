@@ -1,12 +1,13 @@
 import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { api, type ScriptRequest, type ScriptResult, type TableStats } from "../api";
+import { api, type ScriptJobResult, type ScriptJobStatus, type ScriptRequest, type TableStats } from "../api";
 import { useApi, type AsyncState } from "../useApi";
 import { useFillHeight } from "../useFillHeight";
 import { Icon, type IconName } from "../Icon";
 import { useSetting } from "../settings";
 import { EMPTY, apply, bulk, idOf, resolve, type ScriptableObject, type Selection, type Target } from "./selection";
 import { matchPastedList, type PasteOutcome } from "./pasteList";
+import { JobDone, JobProgress } from "./ScriptJob";
 
 const SqlEditor = lazy(() => import("../SqlEditor"));
 
@@ -60,6 +61,24 @@ const OUTPUTS: [Output, string][] = [
     ["both", "DDL + data"],
     ["data", "data only"],
 ];
+
+// A job that finishes within this shows no progress at all: its script simply appears. Even a
+// selection of two tables pays for the catalog reads, which take two to three seconds against a
+// remote server, and a panel flashing up for that and away again is noise.
+const PROGRESS_AFTER_MS = 4000;
+const POLL_MS = 400;
+
+// The last finished script. sql is null when it was over the editor's limit and went to the
+// downloads instead.
+interface Shown {
+    jobId: string;
+    sql: string | null;
+    info: ScriptJobResult;
+    status: ScriptJobStatus;
+    // The server deletes the file after the kept time, and Download again stops working then.
+    keptUntil: number;
+    expired: boolean;
+}
 
 interface ScriptingPanelProps {
     alias: string;
@@ -115,8 +134,17 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
     const [pasteOutcome, setPasteOutcome] = useState<PasteOutcome | null>(null);
 
     const [step, setStep] = useState<1 | 3>(1);
-    const [result, setResult] = useState<ScriptResult | null>(null);
+    const [result, setResult] = useState<Shown | null>(null);
     const [busy, setBusy] = useState<"" | "script" | "files">("");
+    // The job being watched, and whether it has run long enough to show where it is.
+    const [running, setRunning] = useState<ScriptJobStatus | null>(null);
+    const [showProgress, setShowProgress] = useState(false);
+    const [cancelling, setCancelling] = useState(false);
+    // The id of the job this panel is waiting for. Cleared by Cancel and on unmount, which is how
+    // the polling loop learns to stop.
+    const jobRef = useRef<string | null>(null);
+    const editorLimitMb = useSetting("scripting.editorLimitMb");
+    const keepMinutes = useSetting("scripting.keepMinutes");
     const [error, setError] = useState<string | null>(null);
     const [checking, setChecking] = useState(false);
     const { frame, height } = useFillHeight(420);
@@ -479,39 +507,113 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
         ...options,
     });
 
-    const generate = async () => {
-        setBusy("script");
+    // Starts a job and follows it to the end. Short jobs never show the progress panel: it appears
+    // only once the job has run past PROGRESS_AFTER_MS.
+    const run = async (kind: "script" | "files") => {
+        setBusy(kind);
         setError(null);
+        setCancelling(false);
+        const started = Date.now();
+        let id: string | null = null;
         try {
-            setResult(await api.script(alias, db, request()));
+            id = (await api.startScriptJob(alias, db, { ...request(), output: kind, keepMinutes })).id;
+            jobRef.current = id;
+
+            let status: ScriptJobStatus;
+            for (;;) {
+                status = await api.scriptJob(id);
+                if (jobRef.current !== id) {
+                    return;
+                }
+                setRunning(status);
+                if (status.state !== "running") {
+                    break;
+                }
+                if (Date.now() - started > PROGRESS_AFTER_MS) {
+                    setShowProgress(true);
+                }
+                await wait(POLL_MS);
+                if (jobRef.current !== id) {
+                    return;
+                }
+            }
+
+            if (status.state === "failed") {
+                setError(status.error ?? "Script generation failed.");
+                return;
+            }
+            if (status.state !== "done" || !status.result) {
+                return;
+            }
+
+            const info = status.result;
+            if (kind === "files") {
+                startDownload(api.scriptJobDownloadUrl(id), info.fileName);
+                return;
+            }
+
+            const keptUntil = Date.now() + keepMinutes * 60_000;
+            if (info.bytes <= editorLimitMb * 1024 * 1024) {
+                const sql = await api.scriptJobText(id);
+                setResult({ jobId: id, sql, info, status, keptUntil, expired: false });
+                // Shown in the editor, so there is nothing to download again.
+                void api.deleteScriptJob(id).catch(() => undefined);
+            } else {
+                startDownload(api.scriptJobDownloadUrl(id), info.fileName);
+                setResult({ jobId: id, sql: null, info, status, keptUntil, expired: false });
+            }
             setStep(3);
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-            setResult(null);
+            // A job cancelled under the loop answers 404 to its next poll. That is not an error.
+            if (id === null || jobRef.current === id) {
+                setError(e instanceof Error ? e.message : String(e));
+            }
         } finally {
+            if (jobRef.current === id) {
+                jobRef.current = null;
+            }
             setBusy("");
+            setRunning(null);
+            setShowProgress(false);
+            setCancelling(false);
         }
     };
 
-    const download = async () => {
-        setBusy("files");
-        setError(null);
-        try {
-            const { blob, headers } = await api.scriptFiles(alias, db, request());
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            // The server chooses the format (7-Zip where the host has it, zip otherwise) and says
-            // so in Content-Disposition. Naming it here would put ".zip" on a .7z.
-            link.download = filenameFrom(headers) ?? `${db}-scripts.zip`;
-            link.click();
-            URL.revokeObjectURL(url);
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        } finally {
-            setBusy("");
+    const cancel = () => {
+        const id = jobRef.current;
+        if (!id) {
+            return;
         }
+        setCancelling(true);
+        jobRef.current = null;
+        void api.deleteScriptJob(id).catch(() => undefined);
     };
+
+    // Leaving the panel stops the job it was waiting for. The server would give up on it after a
+    // while anyway, but a read of fifty thousand modules should not run on for nobody.
+    useEffect(
+        () => () => {
+            const id = jobRef.current;
+            if (id) {
+                jobRef.current = null;
+                void api.deleteScriptJob(id).catch(() => undefined);
+            }
+        },
+        [],
+    );
+
+    // Download again stops working when the server deletes the file. Say so at that moment rather
+    // than letting the button fail.
+    useEffect(() => {
+        if (!result || result.sql !== null || result.expired) {
+            return;
+        }
+        const timer = window.setTimeout(
+            () => setResult((current) => (current === result ? { ...current, expired: true } : current)),
+            Math.max(0, result.keptUntil - Date.now()),
+        );
+        return () => window.clearTimeout(timer);
+    }, [result]);
 
     if (inventory.loading) {
         return <div className="state">Reading the object list…</div>;
@@ -537,7 +639,12 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                         <b>2</b> Configure data
                     </button>
                     <span className="stepsep">›</span>
-                    <button className="step" aria-current={step === 3} disabled={!result} onClick={() => setStep(3)}>
+                    <button
+                        className="step"
+                        aria-current={step === 3 || showProgress}
+                        disabled={!result}
+                        onClick={() => setStep(3)}
+                    >
                         <b>3</b> Script
                     </button>
                 </span>
@@ -584,10 +691,10 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                     instead of leaving Generate there on its own. */}
                 <span className="actions">
                     <span className="tool-sep" />
-                    <button className="tool" onClick={download} disabled={blocked || busy !== ""}>
+                    <button className="tool" onClick={() => run("files")} disabled={blocked || busy !== ""}>
                         {busy === "files" ? "Packing…" : "Download as files"}
                     </button>
-                    <button className="tool run" onClick={generate} disabled={blocked || busy !== ""}>
+                    <button className="tool run" onClick={() => run("script")} disabled={blocked || busy !== ""}>
                         <Icon name="play" size={14} />
                         {busy === "script" ? "Scripting…" : "Generate"}
                     </button>
@@ -603,29 +710,49 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                 </div>
             )}
 
-            {step === 3 && result ? (
+            {showProgress ? (
+                <JobProgress
+                    db={db}
+                    status={running}
+                    summary={jobSummary(dataOnly ? 0 : targets.length, withData)}
+                    cancelling={cancelling}
+                    onCancel={cancel}
+                />
+            ) : step === 3 && result ? (
                 <>
-                    {result.missing.length > 0 && (
+                    {result.info.missing.length > 0 && (
                         <div className="warn-note">
-                            {result.missing.length} asked for but no longer in the catalog: {result.missing.join(", ")}
+                            {result.info.missing.length} asked for but no longer in the catalog:{" "}
+                            {result.info.missing.join(", ")}
                         </div>
                     )}
-                    {result.cycleTables.length > 0 && (
+                    {result.info.cycleTables.length > 0 && (
                         <div className="warn-note">
                             The chosen tables reference each other in a cycle, so no insert order satisfies
                             them. The script disables their constraints for the load and re-validates at the end.
                         </div>
                     )}
-                    <div className="script-out">
-                        <Suspense fallback={<div className="editor-placeholder" />}>
-                            <SqlEditor value={result.sql} valueKey="generated" />
-                        </Suspense>
-                    </div>
-                    <div className="status">
-                        <span>{result.scripted} scripted</span>
-                        <span className="grow" />
-                        <span>{result.sql.split("\n").length.toLocaleString("en-US")} lines</span>
-                    </div>
+                    {result.sql === null ? (
+                        <JobDone
+                            result={result.info}
+                            status={result.status}
+                            limitMb={editorLimitMb}
+                            downloadUrl={result.expired ? null : api.scriptJobDownloadUrl(result.jobId)}
+                        />
+                    ) : (
+                        <>
+                            <div className="script-out">
+                                <Suspense fallback={<div className="editor-placeholder" />}>
+                                    <SqlEditor value={result.sql} valueKey={result.jobId} />
+                                </Suspense>
+                            </div>
+                            <div className="status">
+                                <span>{result.info.scripted} scripted</span>
+                                <span className="grow" />
+                                <span>{(result.info.lines ?? 0).toLocaleString("en-US")} lines</span>
+                            </div>
+                        </>
+                    )}
                 </>
             ) : (
                 <>
@@ -1148,10 +1275,28 @@ function idleReason(o: ScriptableObject, mode: Rows, dataOnly: boolean): string 
     return mode === "none" ? "no rows" : null;
 }
 
-// Content-Disposition carries the name the server chose, extension included.
-function filenameFrom(headers: Headers): string | null {
-    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(headers.get("content-disposition") ?? "");
-    return match ? decodeURIComponent(match[1]) : null;
+// Hands a URL to the browser's own download. The server names the file in Content-Disposition,
+// so a 7-Zip archive keeps its .7z.
+function startDownload(url: string, fileName: string) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.click();
+}
+
+function wait(ms: number): Promise<void> {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function jobSummary(objects: number, tablesWithRows: number): string {
+    const parts: string[] = [];
+    if (objects > 0) {
+        parts.push(`${objects.toLocaleString("en-US")} ${objects === 1 ? "object" : "objects"}`);
+    }
+    if (tablesWithRows > 0) {
+        parts.push(`${tablesWithRows.toLocaleString("en-US")} ${tablesWithRows === 1 ? "table" : "tables"} with rows`);
+    }
+    return parts.join(" · ");
 }
 
 function matches(o: ScriptableObject, needle: string): boolean {

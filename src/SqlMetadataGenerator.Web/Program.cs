@@ -24,7 +24,14 @@ internal static class Program
             "shared-queries");
         builder.Services.AddSingleton(new SharedQueryStore(shareDir));
 
+        // Script jobs outlive the request that starts them, so they live here.
+        builder.Services.AddSingleton<ScriptJobs>();
+
         var app = builder.Build();
+
+        // Created now rather than on the first script: it clears what an earlier run left in the
+        // temp folder, and that should not wait until someone scripts again.
+        app.Services.GetRequiredService<ScriptJobs>();
 
         // Say plainly which file was used (or that none was found): opening silently with an
         // empty connection list produced a state that was hard to diagnose.

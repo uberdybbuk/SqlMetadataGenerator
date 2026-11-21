@@ -220,6 +220,28 @@ export const SETTINGS = [
         max: 100000,
         default: 1000,
     },
+    {
+        id: "scripting.editorLimitMb",
+        section: "Scripting",
+        title: "Show In Editor Up To (MB)",
+        description:
+            "A generated script up to this size opens in the editor. A bigger one is downloaded as a .sql file instead: an editor holding megabytes of SQL is slow and nobody reads it there.",
+        kind: "number",
+        min: 1,
+        max: 100,
+        default: 1,
+    },
+    {
+        id: "scripting.keepMinutes",
+        section: "Scripting",
+        title: "Keep For Download Again (Minutes)",
+        description:
+            "How long the server keeps a finished script, so Download again works without generating it again. After that the file is deleted.",
+        kind: "number",
+        min: 1,
+        max: 120,
+        default: 10,
+    },
 ] as const satisfies readonly Setting[];
 
 export type SettingId = (typeof SETTINGS)[number]["id"];
