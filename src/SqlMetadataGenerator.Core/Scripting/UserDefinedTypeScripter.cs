@@ -14,7 +14,7 @@ public static class UserDefinedTypeScripter
 
         var sb = new StringBuilder();
         sb.AppendLine($"{fmt.Kw("CREATE TYPE")} {name} {fmt.Kw("FROM")} {baseType} {nullability}");
-        sb.AppendLine("GO");
+        sb.AppendLine(fmt.Kw("GO"));
         return sb.ToString();
     }
 }

@@ -12,7 +12,7 @@ public static class SynonymScripter
         var sb = new StringBuilder();
         // base_object_name is a multi-part reference and is left exactly as the server returned it.
         sb.AppendLine($"{fmt.Kw("CREATE SYNONYM")} {name} {fmt.Kw("FOR")} {synonym.BaseObjectName}");
-        sb.AppendLine("GO");
+        sb.AppendLine(fmt.Kw("GO"));
         return sb.ToString();
     }
 }

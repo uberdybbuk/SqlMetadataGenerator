@@ -17,7 +17,7 @@ public static class TableTypeScripter
         sb.AppendLine(TableScripter.BuildColumnBody(
             type.Columns, type.PrimaryKey, type.UniqueConstraints, fmt, includeConstraintNames: false));
         sb.AppendLine(")");
-        sb.AppendLine("GO");
+        sb.AppendLine(fmt.Kw("GO"));
         return sb.ToString();
     }
 }

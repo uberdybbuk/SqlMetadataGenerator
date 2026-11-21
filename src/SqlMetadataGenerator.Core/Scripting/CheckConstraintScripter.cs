@@ -18,13 +18,13 @@ public static class CheckConstraintScripter
         sb.AppendLine($"{fmt.Kw("ALTER TABLE")} {tableName}");
         sb.AppendLine($"{withCheck} {fmt.Kw("ADD CONSTRAINT")} {SqlIdentifier.Quote(check.Name)}");
         sb.AppendLine($"{fmt.Kw("CHECK")}{notForRepl} {check.Definition}");
-        sb.AppendLine("GO");
+        sb.AppendLine(fmt.Kw("GO"));
 
         // The second ALTER is only needed when the constraint is disabled (same rule as foreign keys).
         if (check.IsDisabled)
         {
             sb.AppendLine($"{fmt.Kw("ALTER TABLE")} {tableName} {fmt.Kw("NOCHECK CONSTRAINT")} {SqlIdentifier.Quote(check.Name)}");
-            sb.AppendLine("GO");
+            sb.AppendLine(fmt.Kw("GO"));
         }
 
         return sb.ToString();

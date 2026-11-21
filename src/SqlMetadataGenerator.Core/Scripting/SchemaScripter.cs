@@ -21,7 +21,7 @@ public static class SchemaScripter
             sb.AppendLine($"{fmt.Kw("CREATE SCHEMA")} {name}");
         }
 
-        sb.AppendLine("GO");
+        sb.AppendLine(fmt.Kw("GO"));
         return sb.ToString();
     }
 }

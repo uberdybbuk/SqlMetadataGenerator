@@ -40,7 +40,7 @@ public static class ForeignKeyScripter
         }
 
         sb.AppendLine();
-        sb.AppendLine("GO");
+        sb.AppendLine(fmt.Kw("GO"));
 
         // The second ALTER is only needed when the constraint is disabled. The first statement already adds
         // the constraint enabled (and trusted when WITH CHECK), so repeating CHECK CONSTRAINT is normally
@@ -48,7 +48,7 @@ public static class ForeignKeyScripter
         if (fk.IsDisabled)
         {
             sb.AppendLine($"{fmt.Kw("ALTER TABLE")} {tableName} {fmt.Kw("NOCHECK CONSTRAINT")} {SqlIdentifier.Quote(fk.Name)}");
-            sb.AppendLine("GO");
+            sb.AppendLine(fmt.Kw("GO"));
         }
 
         return sb.ToString();

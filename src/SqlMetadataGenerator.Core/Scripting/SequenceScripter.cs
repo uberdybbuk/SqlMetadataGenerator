@@ -33,7 +33,7 @@ public static class SequenceScripter
         sb.AppendLine($"\t{fmt.Kw("MAXVALUE")} {seq.MaxValue}");
         sb.AppendLine($"\t{(seq.IsCycling ? fmt.Kw("CYCLE") : fmt.Kw("NO CYCLE"))}");
         sb.AppendLine($"\t{cache}");
-        sb.AppendLine("GO");
+        sb.AppendLine(fmt.Kw("GO"));
         return sb.ToString();
     }
 }

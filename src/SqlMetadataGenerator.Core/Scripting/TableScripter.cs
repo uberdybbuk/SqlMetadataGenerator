@@ -14,9 +14,9 @@ public static class TableScripter
         if (fmt.EmitSetOptions)
         {
             sb.AppendLine(fmt.Kw("SET ANSI_NULLS ON"));
-            sb.AppendLine("GO");
+            sb.AppendLine(fmt.Kw("GO"));
             sb.AppendLine(fmt.Kw("SET QUOTED_IDENTIFIER ON"));
-            sb.AppendLine("GO");
+            sb.AppendLine(fmt.Kw("GO"));
         }
 
         string tableName = $"{SqlIdentifier.Quote(table.Name.Schema)}.{SqlIdentifier.Quote(table.Name.Name)}";
@@ -24,7 +24,7 @@ public static class TableScripter
         sb.AppendLine("(");
         sb.AppendLine(BuildColumnBody(table.Columns, table.PrimaryKey, table.UniqueConstraints, fmt, includeConstraintNames: true));
         sb.AppendLine($") {fmt.Kw("ON")} [PRIMARY]");
-        sb.AppendLine("GO");
+        sb.AppendLine(fmt.Kw("GO"));
 
         // Indexes (after CREATE TABLE)
         foreach (var index in table.Indexes)

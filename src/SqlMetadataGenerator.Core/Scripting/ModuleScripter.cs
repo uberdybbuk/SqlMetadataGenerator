@@ -12,12 +12,12 @@ public static class ModuleScripter
         if (fmt.EmitSetOptions)
         {
             sb.AppendLine(fmt.Kw("SET ANSI_NULLS ON"));
-            sb.AppendLine("GO");
+            sb.AppendLine(fmt.Kw("GO"));
             sb.AppendLine(fmt.Kw("SET QUOTED_IDENTIFIER ON"));
-            sb.AppendLine("GO");
+            sb.AppendLine(fmt.Kw("GO"));
         }
         sb.AppendLine(definition.TrimEnd());
-        sb.AppendLine("GO");
+        sb.AppendLine(fmt.Kw("GO"));
         return sb.ToString();
     }
 }

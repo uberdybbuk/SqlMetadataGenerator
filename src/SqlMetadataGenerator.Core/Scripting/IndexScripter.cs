@@ -36,7 +36,7 @@ public static class IndexScripter
         }
 
         sb.AppendLine();
-        sb.AppendLine("GO");
+        sb.AppendLine(fmt.Kw("GO"));
         return sb.ToString();
     }
 }
