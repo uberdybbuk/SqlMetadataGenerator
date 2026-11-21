@@ -35,6 +35,12 @@ const OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
     wordWrap: "on",
     contextmenu: false,
     automaticLayout: true,
+    // Monaco frames letters that look like a Latin letter ("ı" looks like "i") as ambiguous.
+    // Only the OS and VS Code locales are exempt by default, so Turkish names in the data got
+    // flagged. Adding "tr" keeps the check for genuinely odd characters but lets Turkish through.
+    unicodeHighlight: {
+        allowedLocales: { _os: true, _vscode: true, tr: true },
+    },
 };
 
 // The application is a single page; there is no point rebuilding the editor on every open.
