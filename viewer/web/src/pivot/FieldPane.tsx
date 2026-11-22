@@ -74,8 +74,8 @@ export function FieldPane({ columns, layout, onLayout, running, runBlocker, onRu
             const stuck = (crumbs?.offsetHeight ?? 0) + 12;
             el.style.setProperty("--pfields-top", `${stuck}px`);
             const top = Math.max(stuck, el.getBoundingClientRect().top);
-            // 24 is the shell's bottom padding, as useFillHeight leaves it.
-            el.style.height = `${Math.max(360, window.innerHeight - top - 24)}px`;
+            // 12 is the tab frame's bottom padding, as useFillHeight leaves it.
+            el.style.height = `${Math.max(360, window.innerHeight - top - 12)}px`;
         };
         fit();
         window.addEventListener("scroll", fit, { passive: true });

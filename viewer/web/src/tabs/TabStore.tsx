@@ -284,6 +284,15 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     const dirty = useMemo(() => new Set(dirtyKey.split("\n").filter(Boolean)), [dirtyKey]);
     const isDirty = useCallback((id: string) => dirty.has(id), [dirty]);
 
+    // Closing or reloading the page asks nothing: every tab and its SQL comes back on the next
+    // visit. That only holds if the last keystrokes are written, and the 300 ms save above may not
+    // have run yet, so the tabs are saved as the page goes.
+    useEffect(() => {
+        const onLeave = () => save(storeRef.current);
+        window.addEventListener("pagehide", onLeave);
+        return () => window.removeEventListener("pagehide", onLeave);
+    }, []);
+
     const value = useMemo<TabsApi>(
         () => ({
             tabs: store.tabs,

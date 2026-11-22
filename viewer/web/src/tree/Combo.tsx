@@ -47,9 +47,13 @@ interface ComboProps {
     emptyText: string;
     keysHint?: boolean;
     onOpen?: () => void;
+    // Set from outside (a keyboard shortcut) to open the list. onOpened clears it again, so the
+    // list does not open a second time when the combo is drawn anew.
+    openNow?: boolean;
+    onOpened?: () => void;
 }
 
-export function Combo({ label, icon, value, placeholder, meta, plain, searchPlaceholder, sections, emptyText, keysHint, onOpen }: ComboProps) {
+export function Combo({ label, icon, value, placeholder, meta, plain, searchPlaceholder, sections, emptyText, keysHint, onOpen, openNow, onOpened }: ComboProps) {
     const navigate = useNavigate();
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
@@ -96,6 +100,15 @@ export function Combo({ label, icon, value, placeholder, meta, plain, searchPlac
         document.addEventListener("pointerdown", onDown);
         return () => document.removeEventListener("pointerdown", onDown);
     }, [open]);
+
+    useEffect(() => {
+        if (openNow) {
+            show();
+            onOpened?.();
+        }
+        // show is redrawn with every render. Only the request itself should open the list.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [openNow]);
 
     // With no filter box the keys still have to reach the list.
     useLayoutEffect(() => {

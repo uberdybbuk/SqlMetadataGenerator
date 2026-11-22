@@ -30,6 +30,11 @@ export type IconName =
     | "link"
     | "settings"
     | "keyboard"
+    | "refresh"
+    | "panel-bottom-close"
+    | "panel-bottom-open"
+    | "panel-left-close"
+    | "panel-left-open"
     | "x";
 
 const PATHS: Record<IconName, string> = {
@@ -73,6 +78,14 @@ const PATHS: Record<IconName, string> = {
         '<path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" /> <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />',
     "keyboard":
         '<path d="M2 8a2 2 0 0 1 2 -2h16a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2z" /> <path d="M6 10l0 .01" /> <path d="M10 10l0 .01" /> <path d="M14 10l0 .01" /> <path d="M18 10l0 .01" /> <path d="M6 14l0 .01" /> <path d="M18 14l0 .01" /> <path d="M10 14l4 .01" />',
+    "refresh":
+        '<path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" /> <path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />',
+    // chevron-down / chevron-up and chevrons-left / chevrons-right: plain arrows pointing where
+    // the panel goes.
+    "panel-bottom-close": '<path d="M6 9l6 6l6 -6" />',
+    "panel-bottom-open": '<path d="M6 15l6 -6l6 6" />',
+    "panel-left-close": '<path d="M11 7l-5 5l5 5" /> <path d="M17 7l-5 5l5 5" />',
+    "panel-left-open": '<path d="M7 7l5 5l-5 5" /> <path d="M13 7l5 5l-5 5" />',
     "x": '<path d="M18 6l-12 12" /> <path d="M6 6l12 12" />',
 };
 
@@ -100,6 +113,11 @@ export const ICON_LABELS: Record<IconName, string> = {
     link: "link",
     settings: "settings",
     keyboard: "keyboard shortcuts",
+    refresh: "refresh",
+    "panel-bottom-close": "hide the results",
+    "panel-bottom-open": "show the results",
+    "panel-left-close": "hide the object tree",
+    "panel-left-open": "show the object tree",
     x: "close",
 };
 

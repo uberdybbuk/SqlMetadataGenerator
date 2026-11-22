@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Icon } from "../Icon";
+import { IS_MAC, isAltKey } from "../shortcuts";
 import { describeRoute } from "./tabRoute";
 import { useTabs, type Tab } from "./TabStore";
 
@@ -35,6 +36,25 @@ export function TabBar() {
         active?.alias && active.db
             ? `/app/${encodeURIComponent(active.alias)}/${encodeURIComponent(active.db)}/query`
             : null;
+
+    // Option/Alt+N opens one from anywhere, the SQL editor included. Not Cmd/Ctrl+N as in SSMS:
+    // the browser keeps that for a new window and never hands it to the page. Taken in the capture
+    // phase and stopped there, so the editor does not also type the "˜" a Mac's Option+N makes.
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (isAltKey(e, "KeyN")) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (newQuery) {
+                    navigate(newQuery);
+                }
+            }
+        };
+        window.addEventListener("keydown", onKey, true);
+        return () => window.removeEventListener("keydown", onKey, true);
+    }, [newQuery, navigate]);
+
+    const newQueryKey = IS_MAC ? "⌥N" : "Alt+N";
 
     return (
         <div className="tabbar" role="tablist" ref={strip}>
@@ -106,7 +126,7 @@ export function TabBar() {
                 type="button"
                 className="tab-new"
                 disabled={!newQuery}
-                title={newQuery ? `New query on ${active?.db}` : "Open a database to start a query"}
+                title={newQuery ? `New query on ${active?.db} (${newQueryKey})` : "Open a database to start a query"}
                 onClick={() => newQuery && navigate(newQuery)}
             >
                 <Icon name="plus" size={15} label="new query" />

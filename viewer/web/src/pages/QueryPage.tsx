@@ -59,11 +59,9 @@ export function QueryPage() {
 
     return (
         <>
-            <h1>Query</h1>
-            <p className="subtitle">
-                <span className="mono">{db}</span> on <span className="mono">{alias}</span>
-                {shared.data?.title && <> · {shared.data.title}</>}
-            </p>
+            {/* No heading: the tab and the breadcrumb already say "Query 1" on which database and
+                server. Only a shared query's title is news, so only that is shown. */}
+            {shared.data?.title && <p className="subtitle">{shared.data.title}</p>}
 
             {shared.error && <div className="error">{shared.error}</div>}
 
@@ -74,6 +72,7 @@ export function QueryPage() {
                 onCancel={() => runner.cancel()}
                 running={runner.loading}
                 onShare={shareLinkFor(alias, db)}
+                autoFocus
             />
         </>
     );

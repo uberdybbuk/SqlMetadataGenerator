@@ -27,9 +27,12 @@ export function useFillHeight(minimum = 320) {
         }
         const measure = () => {
             const top = element.getBoundingClientRect().top + window.scrollY;
-            // 24 is the shell's bottom padding: leaving it out would make the page scroll by exactly
-            // that much, which is the empty strip this layout exists to remove.
-            setHeight(Math.max(minimum, window.innerHeight - top - 24));
+            // The tab frame's bottom padding is read, not assumed: it is 12px on most pages and 0
+            // around the query workbench. Leaving it out would make the page scroll by exactly that
+            // much, which is the empty strip this layout exists to remove.
+            const frame = element.closest(".tab-frame");
+            const below = frame ? parseFloat(getComputedStyle(frame).paddingBottom) || 0 : 0;
+            setHeight(Math.max(minimum, window.innerHeight - top - below));
         };
         measure();
         window.addEventListener("resize", measure);

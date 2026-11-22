@@ -13,6 +13,13 @@ export function isModKey(e: KeyboardEvent, key: string): boolean {
     return mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === key;
 }
 
+// Option on a Mac, Alt elsewhere, with nothing else held. Matched on e.code, the physical key:
+// on a Mac Option turns the letter into another character (⌥N is a dead key for "˜"), so e.key
+// never says "n".
+export function isAltKey(e: KeyboardEvent, code: string): boolean {
+    return e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.code === code;
+}
+
 // Typing into these is not a request for an application shortcut: "?" in a WHERE box is a
 // question mark.
 export function isTyping(target: EventTarget | null): boolean {
@@ -40,6 +47,8 @@ export const SHORTCUTS: ShortcutGroup[] = [
             { keys: ["?"], label: "Show this list" },
             { keys: [`${MOD}B`], label: "Show or hide the object tree" },
             { keys: [`${MOD}P`], label: "Filter the object tree" },
+            { keys: [`${MOD}U`], label: "Change the database" },
+            { keys: [IS_MAC ? "⌥N" : "Alt+N"], label: "New query on the current database" },
         ],
     },
     {

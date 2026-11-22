@@ -504,3 +504,6 @@ shared-queries/
 
 # start.ts: pid file and background log
 .run/
+
+# Mockups and screenshots prepared while working: shown in the editor, never committed.
+.drafts/

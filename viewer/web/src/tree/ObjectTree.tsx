@@ -555,6 +555,32 @@ export function ObjectTree({ alias }: { alias: string }) {
         return () => window.removeEventListener("keydown", onKey, true);
     }, [prefs.hidden]);
 
+    // Cmd/Ctrl+U opens the database picker from anywhere, as SSMS's Available Databases box.
+    // Taken in the capture phase, so Monaco's own Cmd+U (undo the last cursor move) and the
+    // browser's view-source do not get it. Except right after Cmd/Ctrl+K: Cmd+K Cmd+U is the
+    // editor's Uncomment and has to reach the editor.
+    const [pickDatabase, setPickDatabase] = useState(false);
+    useEffect(() => {
+        let afterK = false;
+        const onKey = (e: globalThis.KeyboardEvent) => {
+            if (["Meta", "Control", "Shift", "Alt"].includes(e.key)) {
+                return;
+            }
+            const chord = afterK;
+            afterK = isModKey(e, "k");
+            if (isModKey(e, "u") && !chord) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (prefs.hidden) {
+                    setPrefs((p) => ({ ...p, hidden: false }));
+                }
+                setPickDatabase(true);
+            }
+        };
+        window.addEventListener("keydown", onKey, true);
+        return () => window.removeEventListener("keydown", onKey, true);
+    }, [prefs.hidden]);
+
     // Cmd/Ctrl+B shows and hides the tree, as the side bar in VS Code. Taken in the capture phase
     // so it works from inside the SQL editor too.
     useEffect(() => {
@@ -660,7 +686,7 @@ export function ObjectTree({ alias }: { alias: string }) {
         return (
             <aside className="otree hidden" ref={aside}>
                 <button type="button" className="otree-show" title={`Show the object tree (${MOD}B)`} onClick={() => updatePrefs({ ...prefs, hidden: false })}>
-                    »
+                    <Icon name="panel-left-open" />
                 </button>
                 <TreeHeader compact />
             </aside>
@@ -788,6 +814,8 @@ export function ObjectTree({ alias }: { alias: string }) {
                               : "Reading the server…"
                     }
                     keysHint
+                    openNow={pickDatabase}
+                    onOpened={() => setPickDatabase(false)}
                 />
                 <div className={place.db ? "otree-filter" : "otree-filter off"}>
                     <Icon name="search" size={13} />
@@ -938,16 +966,16 @@ export function ObjectTree({ alias }: { alias: string }) {
                         ? `${place.db}: ${footerDb.value.length.toLocaleString("en-US")} objects · ${footerDb.ms} ms`
                         : ""}
                 </span>
-                <button type="button" className="link-button" title="Read the server and this database again" onClick={refresh}>
-                    ↻ refresh
+                <button type="button" className="icon-button" title="Read the server and this database again" onClick={refresh}>
+                    <Icon name="refresh" />
                 </button>
                 <button
                     type="button"
-                    className="link-button"
+                    className="icon-button"
                     title={`Hide the object tree (${MOD}B)`}
                     onClick={() => updatePrefs({ ...prefs, hidden: true })}
                 >
-                    « hide
+                    <Icon name="panel-left-close" />
                 </button>
             </div>
             <div

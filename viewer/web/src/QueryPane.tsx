@@ -31,6 +31,9 @@ interface QueryPaneProps {
     // there is nothing to share against, which leaves the button out entirely rather than
     // showing one that cannot work.
     onShare?: (sql: string) => Promise<string>;
+    // Puts the cursor in the editor when the pane opens. A query tab wants it; a table's data tab,
+    // where the query is already written, does not.
+    autoFocus?: boolean;
 }
 
 // What the Share button is doing. The link is held so it can be shown after copying: a clipboard
@@ -41,7 +44,7 @@ type ShareState =
     | { kind: "done"; url: string }
     | { kind: "failed"; message: string };
 
-export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }: QueryPaneProps) {
+export function QueryPane({ sql, result, onExecute, onCancel, running, onShare, autoFocus }: QueryPaneProps) {
     // The tab keeps what was typed here, so the text survives a reload. A tab that has a draft
     // opens on it instead of on the query it was given.
     const tab = useCurrentTab();
@@ -266,12 +269,16 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
                         onChange={onEdit}
                         onExecute={() => executeRef.current(runnable())}
                         onSelection={onSelection}
+                        // Only in the tab in front: tabs brought back after a reload all open at
+                        // once, and the keyboard belongs to the one you see.
+                        autoFocus={autoFocus && active}
                     />
                 </Suspense>
             </div>
             {resultsHidden ? (
                 <div className="results-hidden">
                     <button type="button" className="tool" onClick={toggleResults} title={`Show the results (${MOD}R)`}>
+                        <Icon name="panel-bottom-open" label="" aria-hidden />
                         Show results
                     </button>
                 </div>

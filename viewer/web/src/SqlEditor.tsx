@@ -158,9 +158,11 @@ interface SqlEditorProps {
     // a different thing (another table's WHERE, another object's script) and the incoming value is
     // applied unconditionally. Without it, an editor that has focus can never be reloaded.
     valueKey?: string;
+    // Takes the keyboard when it appears: a new query is opened to be typed into.
+    autoFocus?: boolean;
 }
 
-export default function SqlEditor({ value, readOnly = true, onChange, onExecute, onSelection, valueKey }: SqlEditorProps) {
+export default function SqlEditor({ value, readOnly = true, onChange, onExecute, onSelection, valueKey, autoFocus }: SqlEditorProps) {
     const slot = useRef<HTMLDivElement>(null);
     const instance = useRef<Instance | null>(null);
     const dark = useDarkMode();
@@ -232,7 +234,10 @@ export default function SqlEditor({ value, readOnly = true, onChange, onExecute,
                 run: (editor) => comment(editor, "toggle"),
             }),
         ];
+        // A frame later: the host has only just been moved into the page and is laid out then.
+        const focusing = autoFocus ? requestAnimationFrame(() => acquired.editor.focus()) : 0;
         return () => {
+            cancelAnimationFrame(focusing);
             comments.forEach((c) => c.dispose());
             action.dispose();
             selection.dispose();

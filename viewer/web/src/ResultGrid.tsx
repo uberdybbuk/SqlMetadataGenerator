@@ -2,6 +2,7 @@ import { type ReactNode, useContext, useMemo, useState } from "react";
 
 import { DataTable, type Column } from "./DataTable";
 import { formatCell, isNumericType } from "./cell";
+import { Icon } from "./Icon";
 import { ResultsToggle } from "./resultsToggle";
 import { MOD } from "./shortcuts";
 
@@ -152,8 +153,8 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
                     Transpose
                 </button>
                 {toggleResults && (
-                    <button className="tool" onClick={toggleResults} title={`Hide the results (${MOD}R)`}>
-                        Hide
+                    <button className="icon-button" onClick={toggleResults} title={`Hide the results (${MOD}R)`}>
+                        <Icon name="panel-bottom-close" />
                     </button>
                 )}
             </div>
