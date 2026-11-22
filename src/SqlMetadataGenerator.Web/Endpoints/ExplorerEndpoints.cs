@@ -185,9 +185,11 @@ internal static class ExplorerEndpoints
                     return unsupported;
                 }
 
+                // This one table only. Reading the whole database's tables to show one of them
+                // made the tab as slow on a large database as scripting all of it.
                 var reader = new MetadataReader(scope.ConnectionString);
                 var collationTask = reader.ReadDatabaseCollationAsync(ct);
-                var tablesTask = reader.ReadTablesAsync(null, ct);
+                var tablesTask = reader.ReadTablesAsync([new ObjectName(schema, name)], null, null, ct);
                 await Task.WhenAll(collationTask, tablesTask);
 
                 var table = (await tablesTask).FirstOrDefault(t =>
@@ -435,8 +437,14 @@ internal static class ExplorerEndpoints
                     string last = asFiles ? "packing" : "output";
                     job.Progress.AddLast(last, asFiles ? "Packing files" : "Writing the script");
 
+                    // The first thing the job does, and on a remote server not instant: opening the
+                    // connection and reading the server's properties. Shown, so the panel that opens
+                    // with the click has something running from the first moment.
+                    job.Progress.Add("connect", "Connecting");
+                    job.Progress.Start("connect");
                     var reader = new MetadataReader(connectionString, timings);
                     var source = await reader.ReadScriptSourceAsync(ct);
+                    job.Progress.Finish("connect");
                     var format = body.ToScriptFormat(source.Collation);
                     var bundle = await ScriptBundle.BuildAsync(reader, wanted, data, connectionString, format, job.Progress, ct);
 
@@ -509,6 +517,12 @@ internal static class ExplorerEndpoints
                     p.Unit,
                     p.Detail,
                     p.Seconds,
+                    Steps = p.Steps.Select(x => new
+                    {
+                        x.Name,
+                        State = x.State.ToString().ToLowerInvariant(),
+                        x.Seconds,
+                    }),
                 }),
                 job.Error,
                 Result = result is null

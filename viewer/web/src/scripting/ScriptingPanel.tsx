@@ -62,10 +62,6 @@ const OUTPUTS: [Output, string][] = [
     ["data", "data only"],
 ];
 
-// A job that finishes within this shows no progress at all: its script simply appears. Even a
-// selection of two tables pays for the catalog reads, which take two to three seconds against a
-// remote server, and a panel flashing up for that and away again is noise.
-const PROGRESS_AFTER_MS = 4000;
 const POLL_MS = 400;
 
 // The last finished script. sql is null when it was over the editor's limit and went to the
@@ -143,6 +139,8 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
     // The id of the job this panel is waiting for. Cleared by Cancel and on unmount, which is how
     // the polling loop learns to stop.
     const jobRef = useRef<string | null>(null);
+    // Set by Cancel, or by leaving the panel, before the job's id has come back.
+    const cancelEarly = useRef(false);
     const editorLimitMb = useSetting("scripting.editorLimitMb");
     const keepMinutes = useSetting("scripting.keepMinutes");
     const [error, setError] = useState<string | null>(null);
@@ -507,16 +505,24 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
         ...options,
     });
 
-    // Starts a job and follows it to the end. Short jobs never show the progress panel: it appears
-    // only once the job has run past PROGRESS_AFTER_MS.
+    // Starts a job and follows it to the end. The progress panel opens at once, on every job: a
+    // click that shows nothing until the work is done reads as a click that did nothing, and
+    // whether a job will be long is not known when it starts.
     const run = async (kind: "script" | "files") => {
         setBusy(kind);
         setError(null);
         setCancelling(false);
-        const started = Date.now();
+        setRunning(null);
+        setShowProgress(true);
+        cancelEarly.current = false;
         let id: string | null = null;
         try {
             id = (await api.startScriptJob(alias, db, { ...request(), output: kind, keepMinutes })).id;
+            // Cancel was pressed, or the panel left, while the job was still being started.
+            if (cancelEarly.current) {
+                void api.deleteScriptJob(id).catch(() => undefined);
+                return;
+            }
             jobRef.current = id;
 
             let status: ScriptJobStatus;
@@ -528,9 +534,6 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                 setRunning(status);
                 if (status.state !== "running") {
                     break;
-                }
-                if (Date.now() - started > PROGRESS_AFTER_MS) {
-                    setShowProgress(true);
                 }
                 await wait(POLL_MS);
                 if (jobRef.current !== id) {
@@ -581,10 +584,11 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
 
     const cancel = () => {
         const id = jobRef.current;
+        setCancelling(true);
         if (!id) {
+            cancelEarly.current = true;
             return;
         }
-        setCancelling(true);
         jobRef.current = null;
         void api.deleteScriptJob(id).catch(() => undefined);
     };
@@ -593,6 +597,7 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
     // while anyway, but a read of fifty thousand modules should not run on for nobody.
     useEffect(
         () => () => {
+            cancelEarly.current = true;
             const id = jobRef.current;
             if (id) {
                 jobRef.current = null;

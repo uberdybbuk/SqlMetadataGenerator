@@ -1527,6 +1527,32 @@ tr.norows td.empty-note {
     flex: 1 1 auto;
 }
 
+/* A running phase's parallel steps, under its row: the finished ones on one line, the ones still
+   running each on a line with its own clock. */
+.phases .steps-list {
+    grid-column: 2 / 5;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-left: 12px;
+    color: var(--muted);
+}
+
+.phases .step-done,
+.phases .step-open {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.phases .step-open.running {
+    color: var(--text);
+}
+
+.phases .steps-list .t {
+    width: 64px;
+}
+
 .spin {
     display: inline-block;
     width: 10px;

@@ -28,7 +28,19 @@ public sealed class ScriptProgress
         int? Total,
         string? Unit,
         string? Detail,
-        double Seconds);
+        double Seconds,
+        IReadOnlyList<Step> Steps);
+
+    // A part of a phase that runs on its own, like one of the seven queries behind the table read.
+    // A phase that waits on its slowest part can then say which part that is.
+    public sealed record Step(string Name, State State, double Seconds);
+
+    private sealed class StepEntry(string name)
+    {
+        public string Name { get; } = name;
+        public State State { get; set; } = State.Waiting;
+        public Stopwatch Clock { get; } = new();
+    }
 
     private sealed class Entry(string key, string title)
     {
@@ -40,6 +52,7 @@ public sealed class ScriptProgress
         public string? Unit { get; set; }
         public string? Detail { get; set; }
         public Stopwatch Clock { get; } = new();
+        public List<StepEntry> Steps { get; } = [];
     }
 
     private readonly Lock gate = new();
@@ -108,6 +121,41 @@ public sealed class ScriptProgress
             e.Clock.Stop();
         });
 
+    // Lists a phase's steps up front, all waiting, so the whole set shows before any has started.
+    public void AddSteps(string key, IEnumerable<string> names) =>
+        Change(key, e =>
+        {
+            foreach (string name in names)
+            {
+                if (e.Steps.All(x => x.Name != name))
+                {
+                    e.Steps.Add(new StepEntry(name));
+                }
+            }
+        });
+
+    // A reader's step callback wired to one phase: false when a step starts, true when it ends.
+    public Action<string, bool> Stepper(string key) =>
+        (name, finished) => Change(key, e =>
+        {
+            var step = e.Steps.FirstOrDefault(x => x.Name == name);
+            if (step is null)
+            {
+                step = new StepEntry(name);
+                e.Steps.Add(step);
+            }
+            if (finished)
+            {
+                step.State = State.Done;
+                step.Clock.Stop();
+            }
+            else
+            {
+                step.State = State.Running;
+                step.Clock.Start();
+            }
+        });
+
     // A reader's IProgress<int> wired to one phase: each report advances it.
     public IProgress<int> Counter(string key) => new Reporter(this, key);
 
@@ -117,7 +165,9 @@ public sealed class ScriptProgress
         {
             return entries
                 .Concat(tail)
-                .Select(e => new Phase(e.Key, e.Title, e.State, e.Done, e.Total, e.Unit, e.Detail, e.Clock.Elapsed.TotalSeconds))
+                .Select(e => new Phase(
+                    e.Key, e.Title, e.State, e.Done, e.Total, e.Unit, e.Detail, e.Clock.Elapsed.TotalSeconds,
+                    e.Steps.Select(x => new Step(x.Name, x.State, x.Clock.Elapsed.TotalSeconds)).ToList()))
                 .ToList();
         }
     }

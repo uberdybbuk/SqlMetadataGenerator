@@ -92,27 +92,73 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
     ];
 
     // Reads table metadata. When progress is supplied it reports 1 per finished sub-query (7 in total).
-    public async Task<List<TableInfo>> ReadTablesAsync(IProgress<int>? progress = null, CancellationToken ct = default)
+    public Task<List<TableInfo>> ReadTablesAsync(IProgress<int>? progress = null, CancellationToken ct = default) =>
+        ReadTablesAsync(null, progress, null, ct);
+
+    // The id list goes into every statement's text, and SQL Server compiles an IN list of several
+    // thousand constants slowly. Past this many, the whole catalog is read instead, whatever share
+    // of the database that is.
+    private const int MaxTablesById = 5000;
+
+    // only: the tables wanted, or null for all of them. Five tables picked in a database of five
+    // thousand used to read the columns, keys, indexes and constraints of all five thousand, and
+    // the script waited ten seconds on a read whose answer it mostly threw away. With a list, the
+    // names are read first (one light statement), and the other six statements are limited to the
+    // object_ids of the wanted tables with an IN list.
+    //
+    // Whether to filter is decided by the share of the database the selection is: from half of the
+    // tables up, the filter saves little and the plain scan of each catalog view is the cheaper
+    // statement.
+    //
+    // step: told when each sub-query starts (false) and finishes (true), by the names in
+    // TableReads, so a caller can say which ones it is still waiting for.
+    public async Task<List<TableInfo>> ReadTablesAsync(
+        IReadOnlyCollection<ObjectName>? only,
+        IProgress<int>? progress,
+        Action<string, bool>? step,
+        CancellationToken ct)
     {
-        // Report progress whenever a sub-query finishes.
-        async Task<T> Tracked<T>(string what, Task<T> task)
+        async Task<T> Tracked<T>(string what, Func<Task<T>> read)
         {
-            T result = await Measure(what, task);
+            step?.Invoke(what, false);
+            T result = await Measure(what, read());
+            step?.Invoke(what, true);
             progress?.Report(1);
             return result;
         }
 
+        var namesTask = Tracked(TableReads[0], () => ReadTableNamesAsync(ct));
+
+        string? ids = null;
+        var wanted = only is null
+            ? null
+            : new HashSet<string>(only.Select(n => $"{n.Schema}.{n.Name}"), StringComparer.OrdinalIgnoreCase);
+        if (wanted is not null)
+        {
+            var all = await namesTask;
+            var chosen = all.Where(n => wanted.Contains($"{n.Name.Schema}.{n.Name.Name}")).ToList();
+            if (chosen.Count * 2 < all.Count && chosen.Count <= MaxTablesById)
+            {
+                // object_ids are ints from the catalog, so writing them into the statement is safe.
+                // An empty list still has to be valid SQL; no table has object_id 0.
+                ids = chosen.Count == 0 ? "0" : string.Join(",", chosen.Select(n => n.ObjectId));
+            }
+        }
+
         // Run the independent metadata queries at the same time (each opens its own connection).
-        var namesTask = Tracked(TableReads[0], ReadTableNamesAsync(ct));
-        var columnsTask = Tracked(TableReads[1], ReadColumnsAsync(ct));
-        var pkTask = Tracked(TableReads[2], ReadPrimaryKeysAsync(ct));
-        var uniqueTask = Tracked(TableReads[3], ReadUniqueConstraintsAsync(ct));
-        var indexTask = Tracked(TableReads[4], ReadIndexesAsync(ct));
-        var checkTask = Tracked(TableReads[5], ReadCheckConstraintsAsync(ct));
-        var fkTask = Tracked(TableReads[6], ReadForeignKeysAsync(ct));
+        var columnsTask = Tracked(TableReads[1], () => ReadColumnsAsync(ids, ct));
+        var pkTask = Tracked(TableReads[2], () => ReadPrimaryKeysAsync(ids, ct));
+        var uniqueTask = Tracked(TableReads[3], () => ReadUniqueConstraintsAsync(ids, ct));
+        var indexTask = Tracked(TableReads[4], () => ReadIndexesAsync(ids, ct));
+        var checkTask = Tracked(TableReads[5], () => ReadCheckConstraintsAsync(ids, ct));
+        var fkTask = Tracked(TableReads[6], () => ReadForeignKeysAsync(ids, ct));
         await Task.WhenAll(namesTask, columnsTask, pkTask, uniqueTask, indexTask, checkTask, fkTask);
 
         var names = await namesTask;
+        if (wanted is not null)
+        {
+            names = names.Where(n => wanted.Contains($"{n.Name.Schema}.{n.Name.Name}")).ToList();
+        }
         var columnsByObject = await columnsTask;
         var pkByObject = await pkTask;
         var uniqueByObject = await uniqueTask;
@@ -137,6 +183,9 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
 
         return tables;
     }
+
+    // " AND column IN (1,2,3)", or nothing when every table is wanted.
+    private static string In(string column, string? ids) => ids is null ? "" : $" AND {column} IN ({ids})";
 
     // The names of everything the generator can script, and nothing else.
     //
@@ -248,9 +297,9 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
     // LEFT JOINs. Over catalog views the optimizer has no useful row estimates, and on a database
     // of 5,600 tables the joined form ran for minutes while each part on its own is one scan.
     // The same lesson as DataExplorer.ReadTableStatsAsync.
-    private async Task<Dictionary<int, List<ColumnInfo>>> ReadColumnsAsync(CancellationToken ct)
+    private async Task<Dictionary<int, List<ColumnInfo>>> ReadColumnsAsync(string? ids, CancellationToken ct)
     {
-        const string sql = """
+        string sql = $$"""
             SELECT
                 c.object_id,
                 c.name,
@@ -267,14 +316,14 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
             FROM sys.columns c
             JOIN sys.objects o ON c.object_id = o.object_id
             JOIN sys.types ty ON c.user_type_id = ty.user_type_id
-            WHERE o.is_ms_shipped = 0 AND o.type = 'U'
+            WHERE o.is_ms_shipped = 0 AND o.type = 'U'{{In("c.object_id", ids)}}
             ORDER BY c.object_id, c.column_id;
 
-            SELECT object_id, column_id, seed_value, increment_value FROM sys.identity_columns;
+            SELECT object_id, column_id, seed_value, increment_value FROM sys.identity_columns WHERE 1 = 1{{In("object_id", ids)}};
 
-            SELECT object_id, column_id, definition FROM sys.computed_columns;
+            SELECT object_id, column_id, definition FROM sys.computed_columns WHERE 1 = 1{{In("object_id", ids)}};
 
-            SELECT object_id, name, definition FROM sys.default_constraints;
+            SELECT object_id, name, definition FROM sys.default_constraints WHERE 1 = 1{{In("parent_object_id", ids)}};
             """;
 
         var rows = new List<(int ObjectId, int DefaultId, ColumnInfo Column)>();
@@ -381,9 +430,9 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
         CollationName = reader.IsDBNull(15) ? null : reader.GetString(15),
     };
 
-    private async Task<Dictionary<int, PrimaryKeyInfo>> ReadPrimaryKeysAsync(CancellationToken ct)
+    private async Task<Dictionary<int, PrimaryKeyInfo>> ReadPrimaryKeysAsync(string? ids, CancellationToken ct)
     {
-        const string sql = """
+        string sql = $$"""
             SELECT
                 i.object_id,
                 i.name,
@@ -395,7 +444,7 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
             JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
             JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
             JOIN sys.objects o ON i.object_id = o.object_id
-            WHERE i.is_primary_key = 1 AND o.is_ms_shipped = 0
+            WHERE i.is_primary_key = 1 AND o.is_ms_shipped = 0{{In("i.object_id", ids)}}
             ORDER BY i.object_id, ic.key_ordinal;
             """;
 
@@ -425,9 +474,9 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
             });
     }
 
-    private async Task<Dictionary<int, List<UniqueConstraintInfo>>> ReadUniqueConstraintsAsync(CancellationToken ct)
+    private async Task<Dictionary<int, List<UniqueConstraintInfo>>> ReadUniqueConstraintsAsync(string? ids, CancellationToken ct)
     {
-        const string sql = """
+        string sql = $$"""
             SELECT
                 i.object_id,
                 i.index_id,
@@ -439,7 +488,7 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
             JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
             JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
             JOIN sys.objects o ON i.object_id = o.object_id
-            WHERE i.is_unique_constraint = 1 AND o.is_ms_shipped = 0 AND o.type = 'U'
+            WHERE i.is_unique_constraint = 1 AND o.is_ms_shipped = 0 AND o.type = 'U'{{In("i.object_id", ids)}}
             ORDER BY i.object_id, i.index_id, ic.key_ordinal;
             """;
 
@@ -479,11 +528,11 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
         return map;
     }
 
-    private async Task<Dictionary<int, List<IndexInfo>>> ReadIndexesAsync(CancellationToken ct)
+    private async Task<Dictionary<int, List<IndexInfo>>> ReadIndexesAsync(string? ids, CancellationToken ct)
     {
         // Primary keys and unique constraints are handled separately (PK inline; unique constraints are a later step).
         // Rowstore indexes only: type 1 = clustered, 2 = nonclustered.
-        const string sql = """
+        string sql = $$"""
             SELECT
                 i.object_id,
                 i.index_id,
@@ -501,7 +550,7 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
             JOIN sys.objects o ON i.object_id = o.object_id
             WHERE i.is_primary_key = 0 AND i.is_unique_constraint = 0
               AND i.type IN (1, 2)
-              AND o.is_ms_shipped = 0 AND o.type = 'U'
+              AND o.is_ms_shipped = 0 AND o.type = 'U'{{In("i.object_id", ids)}}
             ORDER BY i.object_id, i.index_id, ic.is_included_column, ic.key_ordinal, ic.index_column_id;
             """;
 
@@ -572,9 +621,9 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
         };
     }
 
-    private async Task<Dictionary<int, List<ForeignKeyInfo>>> ReadForeignKeysAsync(CancellationToken ct)
+    private async Task<Dictionary<int, List<ForeignKeyInfo>>> ReadForeignKeysAsync(string? ids, CancellationToken ct)
     {
-        const string sql = """
+        string sql = $$"""
             SELECT
                 fk.parent_object_id,
                 fk.object_id,
@@ -595,7 +644,7 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
             JOIN sys.tables rt ON fk.referenced_object_id = rt.object_id
             JOIN sys.schemas rs ON rt.schema_id = rs.schema_id
             JOIN sys.objects o ON fk.parent_object_id = o.object_id
-            WHERE o.is_ms_shipped = 0
+            WHERE o.is_ms_shipped = 0{{In("fk.parent_object_id", ids)}}
             ORDER BY fk.parent_object_id, fk.object_id, fkc.constraint_column_id;
             """;
 
@@ -665,9 +714,9 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
         };
     }
 
-    public async Task<Dictionary<int, List<CheckConstraintInfo>>> ReadCheckConstraintsAsync(CancellationToken ct = default)
+    private async Task<Dictionary<int, List<CheckConstraintInfo>>> ReadCheckConstraintsAsync(string? ids, CancellationToken ct)
     {
-        const string sql = """
+        string sql = $$"""
             SELECT
                 cc.parent_object_id,
                 cc.name,
@@ -677,7 +726,7 @@ public sealed class MetadataReader(string connectionString, Action<string, TimeS
                 cc.is_not_for_replication
             FROM sys.check_constraints cc
             JOIN sys.objects o ON cc.parent_object_id = o.object_id
-            WHERE o.is_ms_shipped = 0 AND o.type = 'U'
+            WHERE o.is_ms_shipped = 0 AND o.type = 'U'{{In("cc.parent_object_id", ids)}}
             ORDER BY cc.parent_object_id, cc.name;
             """;
 

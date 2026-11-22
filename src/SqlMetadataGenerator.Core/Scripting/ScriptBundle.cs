@@ -165,9 +165,17 @@ public static class ScriptBundle
         if (wantsTableMetadata)
         {
             progress?.Start(TablesPhase, MetadataReader.TableReads.Count, "queries");
+            progress?.AddSteps(TablesPhase, MetadataReader.TableReads);
         }
+        // Only the tables this script needs: the ones whose definition was asked for and the ones
+        // whose rows were. Reading every table's metadata to script five of them was most of the
+        // wait on a large database.
+        var neededTables = (byKind.TryGetValue("tables", out var tableObjects) ? tableObjects : [])
+            .Select(o => new ObjectName(o.Schema, o.Name))
+            .Concat(data.Select(d => new ObjectName(d.Schema, d.Name)))
+            .ToList();
         var tablesTask = wantsTableMetadata
-            ? reader.ReadTablesAsync(progress?.Counter(TablesPhase), ct)
+            ? reader.ReadTablesAsync(neededTables, progress?.Counter(TablesPhase), progress?.Stepper(TablesPhase), ct)
             : Empty<TableInfo>();
         var tablesDone = wantsTableMetadata
             ? FinishWhen(TablesPhase, () => Count(tablesTask.Result.Count, "tables"), tablesTask)

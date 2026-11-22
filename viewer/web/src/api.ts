@@ -177,6 +177,15 @@ export interface ScriptJobPhase {
     unit: string | null;
     detail: string | null;
     seconds: number;
+    // The parts of a phase that run side by side, such as the seven queries behind the table
+    // read. Empty for a phase with no such parts.
+    steps: ScriptJobStep[];
+}
+
+export interface ScriptJobStep {
+    name: string;
+    state: "waiting" | "running" | "done";
+    seconds: number;
 }
 
 export interface ScriptJobStatus {

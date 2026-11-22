@@ -35,7 +35,10 @@ export function JobProgress({ db, status, summary, cancelling, onCancel }: JobPr
 }
 
 function PhaseRow({ phase }: { phase: ScriptJobPhase }) {
-    const counted = phase.state === "running" && phase.total !== null && phase.total > 1;
+    const steps = phase.state === "running" ? (phase.steps ?? []) : [];
+    // A phase made of parallel steps says which of them it is waiting for. That answers more than
+    // a bar standing at six of seven.
+    const counted = phase.state === "running" && phase.total !== null && phase.total > 1 && steps.length === 0;
     return (
         <>
             <span className={"ic " + phase.state}>
@@ -50,7 +53,32 @@ function PhaseRow({ phase }: { phase: ScriptJobPhase }) {
                     {phase.state === "running" && phase.detail && <span className="mono">{phase.detail}</span>}
                 </span>
             )}
+            {steps.length > 0 && <Steps steps={steps} />}
         </>
+    );
+}
+
+// Finished steps on one line with their times, then each one still running on a line of its own
+// with its clock, so the slow query is the one that stands out.
+function Steps({ steps }: { steps: ScriptJobPhase["steps"] }) {
+    const done = steps.filter((s) => s.state === "done");
+    const open = steps.filter((s) => s.state !== "done");
+    return (
+        <span className="steps-list">
+            {done.length > 0 && (
+                <span className="step-done">
+                    <span className="ic done">✓</span>
+                    <span>{done.map((s) => `${s.name} ${duration(s.seconds)}`).join(" · ")}</span>
+                </span>
+            )}
+            {open.map((s) => (
+                <span key={s.name} className={"step-open " + s.state}>
+                    <span className={"ic " + s.state}>{s.state === "running" ? <span className="spin" /> : "○"}</span>
+                    <span className="grow">{s.name}</span>
+                    <span className="t">{s.state === "running" ? duration(s.seconds) : ""}</span>
+                </span>
+            ))}
+        </span>
     );
 }
 
