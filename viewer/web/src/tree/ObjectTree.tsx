@@ -6,7 +6,11 @@ import { formatMb } from "../format";
 import { useApi } from "../useApi";
 import { Icon, type IconName } from "../Icon";
 import { setSetting, useSetting } from "../settings";
+import { isModKey, MOD } from "../shortcuts";
 import { Combo, type ComboItem, type ComboSection } from "./Combo";
+import { TreeHeader } from "./TreeHeader";
+import { describeRoute } from "../tabs/tabRoute";
+import { useTabs } from "../tabs/TabStore";
 
 // The object tree on the left of every page inside a server, after SSMS's Object Explorer. It
 // lists one database's objects: two pickers at the top say which server and which database. With
@@ -343,17 +347,12 @@ function savePrefs(prefs: Prefs): void {
     }
 }
 
-// Typing into these is not a request for the tree's filter.
-function isTyping(target: EventTarget | null): boolean {
-    const el = target as HTMLElement | null;
-    return !!el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || !!el.closest(".monaco-editor"));
-}
-
 // ---------------------------------------------------------------- component
 
 export function ObjectTree({ alias }: { alias: string }) {
     const { pathname } = useLocation();
     const navigate = useNavigate();
+    const tabs = useTabs();
     const grouped = useSetting("tree.groupBySchema");
     const [settled, bump] = useReducer((n: number) => n + 1, 0);
     const [prefs, setPrefs] = useState(loadPrefs);
@@ -369,7 +368,15 @@ export function ObjectTree({ alias }: { alias: string }) {
     const drag = useRef<{ x: number; width: number } | null>(null);
     const scrolledTo = useRef<string | null>(null);
 
-    const place = useMemo(() => locate(pathname), [pathname]);
+    // The tree stays on screen while a tab with no server is in front (the connection list, the
+    // settings), and it keeps showing where its own server's last tab was rather than closing up.
+    const ownPath = pathname.split("/").filter(Boolean).map(decodeURIComponent)[1] === alias;
+    const [lastOwnPath, setLastOwnPath] = useState(() => (ownPath ? pathname : `/app/${encodeURIComponent(alias)}`));
+    if (ownPath && pathname !== lastOwnPath) {
+        setLastOwnPath(pathname);
+    }
+    const treePath = ownPath ? pathname : lastOwnPath;
+    const place = useMemo(() => locate(treePath), [treePath]);
     const current = currentId(place, grouped);
     const [connectionsWanted, setConnectionsWanted] = useState(false);
     // Asked for when the picker first opens. Adding a connection happens on a page without this
@@ -460,6 +467,14 @@ export function ObjectTree({ alias }: { alias: string }) {
         bump();
     };
 
+    const keepTab = (href: string) => {
+        const key = describeRoute(href).key;
+        const tab = tabs.tabs.find((t) => t.key === key);
+        if (tab) {
+            tabs.pin(tab.id);
+        }
+    };
+
     const activate = (row: Row) => {
         if (row.note === "error" && row.retryKey) {
             retry(row.retryKey);
@@ -488,19 +503,6 @@ export function ObjectTree({ alias }: { alias: string }) {
             list.current.scrollTop = 0;
         }
     }, [place.db]);
-
-    // Under the breadcrumb bar, down to the bottom of the window. The bar wraps on a narrow
-    // window, so its height is measured.
-    useLayoutEffect(() => {
-        const crumbs = document.querySelector<HTMLElement>(".crumbs");
-        const measure = () => aside.current?.style.setProperty("--tree-top", `${crumbs?.offsetHeight ?? 0}px`);
-        measure();
-        const observer = new ResizeObserver(measure);
-        if (crumbs) {
-            observer.observe(crumbs);
-        }
-        return () => observer.disconnect();
-    }, [prefs.hidden]);
 
     const scrollToIndex = (index: number) => {
         const el = list.current;
@@ -531,23 +533,42 @@ export function ObjectTree({ alias }: { alias: string }) {
         }
     }, [current, revealKey, rows]);
 
-    // "/" anywhere outside a text field goes to the filter, as in GitHub or VS Code's explorer.
+    // Cmd/Ctrl+P goes to the filter from anywhere, the SQL editor included, as VS Code's quick
+    // open. Not "/": on a Turkish keyboard that is Shift+7. Taken in the capture phase so the
+    // browser's print dialog never opens. What is already in the box is selected, so typing
+    // replaces it.
     useEffect(() => {
         const onKey = (e: globalThis.KeyboardEvent) => {
-            if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
+            if (isModKey(e, "p")) {
                 e.preventDefault();
+                const focus = () => filterBox.current?.select();
                 if (prefs.hidden) {
                     // The box is not on the page yet; it is once the tree is drawn again.
                     setPrefs((p) => ({ ...p, hidden: false }));
-                    requestAnimationFrame(() => filterBox.current?.focus());
+                    requestAnimationFrame(focus);
                 } else {
-                    filterBox.current?.focus();
+                    focus();
                 }
             }
         };
-        document.addEventListener("keydown", onKey);
-        return () => document.removeEventListener("keydown", onKey);
+        window.addEventListener("keydown", onKey, true);
+        return () => window.removeEventListener("keydown", onKey, true);
     }, [prefs.hidden]);
+
+    // Cmd/Ctrl+B shows and hides the tree, as the side bar in VS Code. Taken in the capture phase
+    // so it works from inside the SQL editor too.
+    useEffect(() => {
+        const onKey = (e: globalThis.KeyboardEvent) => {
+            if (isModKey(e, "b")) {
+                e.preventDefault();
+                const next = { ...prefs, hidden: !prefs.hidden };
+                setPrefs(next);
+                savePrefs(next);
+            }
+        };
+        window.addEventListener("keydown", onKey, true);
+        return () => window.removeEventListener("keydown", onKey, true);
+    }, [prefs]);
 
     const onListKey = (e: KeyboardEvent<HTMLDivElement>) => {
         const row = rows[focusIndex];
@@ -638,9 +659,10 @@ export function ObjectTree({ alias }: { alias: string }) {
     if (prefs.hidden) {
         return (
             <aside className="otree hidden" ref={aside}>
-                <button type="button" className="otree-show" title="Show the object tree" onClick={() => updatePrefs({ ...prefs, hidden: false })}>
+                <button type="button" className="otree-show" title={`Show the object tree (${MOD}B)`} onClick={() => updatePrefs({ ...prefs, hidden: false })}>
                     »
                 </button>
+                <TreeHeader compact />
             </aside>
         );
     }
@@ -737,6 +759,7 @@ export function ObjectTree({ alias }: { alias: string }) {
 
     return (
         <aside className="otree" ref={aside} style={{ width: prefs.width }}>
+            <TreeHeader />
             <div className="otree-head">
                 <Combo
                     label="Server"
@@ -797,7 +820,7 @@ export function ObjectTree({ alias }: { alias: string }) {
                             }
                         }}
                     />
-                    {!search && <kbd>/</kbd>}
+                    {!search && <kbd>{MOD}P</kbd>}
                 </div>
                 <div className={place.db ? "otree-mode" : "otree-mode off"} role="group" aria-label="Grouping">
                     <button type="button" className={grouped ? "" : "on"} onClick={() => setSetting("tree.groupBySchema", false)}>
@@ -873,7 +896,16 @@ export function ObjectTree({ alias }: { alias: string }) {
                             title: row.label,
                             style: { top: index * ROW, paddingLeft: 4 + row.depth * 14 },
                             onMouseDown: () => setFocused(row.id),
-                            onDoubleClick: () => row.expandable && toggle(row.id),
+                            // A double click keeps the object's tab: the single click before it
+                            // opened it in the preview tab, which the next click would replace.
+                            onDoubleClick: () => {
+                                if (row.expandable) {
+                                    toggle(row.id);
+                                }
+                                if (row.href) {
+                                    keepTab(row.href);
+                                }
+                            },
                         };
                         // The whole row is the link, not just its text: the target is the line,
                         // as in a file explorer. A real anchor, so Cmd-click opens a new tab.
@@ -909,7 +941,12 @@ export function ObjectTree({ alias }: { alias: string }) {
                 <button type="button" className="link-button" title="Read the server and this database again" onClick={refresh}>
                     ↻ refresh
                 </button>
-                <button type="button" className="link-button" onClick={() => updatePrefs({ ...prefs, hidden: true })}>
+                <button
+                    type="button"
+                    className="link-button"
+                    title={`Hide the object tree (${MOD}B)`}
+                    onClick={() => updatePrefs({ ...prefs, hidden: true })}
+                >
                     « hide
                 </button>
             </div>

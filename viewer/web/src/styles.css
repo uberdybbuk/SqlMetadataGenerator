@@ -74,23 +74,187 @@ a:hover {
     padding: 0 24px 24px;
 }
 
-/* ---- Breadcrumb: what each part IS is spelled out in words ---- */
-/* The trail stays put while a long table scrolls: where you are is exactly what you lose first
-   on a page of 11 million rows. It needs an opaque background of its own, and a z-index above the
-   sticky table headers, which also stick to the top and would otherwise cut through it. */
-.crumbs {
+/* ---- The tab bar and the breadcrumb under it ---- */
+/* One sticky block: the tabs and the trail stay put while a long table scrolls, since where you
+   are is exactly what you lose first on a page of 11 million rows. It needs an opaque background
+   of its own, and a z-index above the sticky table headers, which also stick to the top and would
+   otherwise cut through it. The 12px above it lines the tabs up with the top of the tree. */
+.tab-head {
     position: sticky;
     top: 0;
     z-index: 10;
     background: var(--bg);
+    padding-top: 12px;
+    margin-bottom: 12px;
+}
+
+.tabbar {
+    display: flex;
+    align-items: stretch;
+    height: 34px;
+    background: var(--head);
+    border: 1px solid var(--border);
+    border-radius: 6px 6px 0 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+}
+
+.tab {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    max-width: 240px;
+    padding: 0 6px 0 11px;
+    border-right: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12.5px;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+.tab:hover {
+    color: var(--text);
+}
+
+.tab.active {
+    background: var(--bg);
+    color: var(--text);
+}
+
+/* The accent line marks the active tab, as in VS Code. */
+.tab.active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 2px;
+    background: var(--accent);
+}
+
+/* A preview tab is the one the next click in the tree will replace. */
+.tab.preview .tab-title {
+    font-style: italic;
+}
+
+.tab-icon {
+    display: inline-flex;
+    width: 14px;
+    justify-content: center;
+}
+
+.tab-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--mono);
+    font-size: 12px;
+}
+
+.tab-db {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+}
+
+.tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    visibility: hidden;
+}
+
+.tab:hover .tab-close,
+.tab.active .tab-close,
+.tab.dirty .tab-close {
+    visibility: visible;
+}
+
+.tab-close:hover {
+    background: var(--border);
+    color: var(--text);
+}
+
+/* Unsaved SQL: a dot where the cross is, and the cross back on hover, as VS Code shows it. */
+.tab-dot {
+    display: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.tab.dirty .tab-dot {
+    display: block;
+}
+
+.tab.dirty .tab-close .icon {
+    display: none;
+}
+
+.tab.dirty .tab-close:hover .tab-dot {
+    display: none;
+}
+
+.tab.dirty .tab-close:hover .icon {
+    display: block;
+}
+
+.tab-spinner {
+    width: 11px;
+    height: 11px;
+    border: 2px solid var(--accent-soft);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: tab-spin 0.8s linear infinite;
+}
+
+@keyframes tab-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.tab-new {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    padding: 0 10px;
+    border: none;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.tab-new:hover:not(:disabled) {
+    color: var(--text);
+}
+
+.tab-new:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+/* ---- Breadcrumb: what each part IS is spelled out in words ---- */
+.crumbs {
     display: flex;
     align-items: baseline;
     gap: 8px;
     flex-wrap: wrap;
-    padding: 18px 0;
+    padding: 8px 0 9px;
     font-size: 13px;
     border-bottom: 1px solid var(--border);
-    margin-bottom: 12px;
 }
 
 .crumbs .crumb {
@@ -349,12 +513,25 @@ input[type="search"]:focus {
 }
 
 .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     font-size: 11px;
+    line-height: 16px;
     font-family: var(--mono);
     border: 1px solid var(--border);
     border-radius: 4px;
-    padding: 1px 6px;
+    padding: 0 6px;
     color: var(--muted);
+    white-space: nowrap;
+}
+
+/* Several pills in one cell: one row, the same height, a gap between them. */
+.pills {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    vertical-align: middle;
 }
 
 .trunc {
@@ -443,12 +620,6 @@ h1.with-icon {
     display: flex;
     align-items: center;
     gap: 10px;
-}
-
-.pill.with-icon {
-    display: inline-flex;
-    gap: 4px;
-    align-items: center;
 }
 
 
@@ -2224,10 +2395,10 @@ body.resizing .dgresizer::after {
 }
 
 /* ---- Pivot: laid out as Excel's pivot table ---- */
-/* The matrix and its SQL on the left; the field list and the four areas on the right. */
+/* The field list and the four areas on the left; the matrix and its SQL on the right. */
 .pivot {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 300px;
+    grid-template-columns: 300px minmax(0, 1fr);
     gap: 16px;
     align-items: start;
     margin-top: 12px;
@@ -2814,11 +2985,6 @@ body.resizing .dgresizer::after {
 }
 
 /* ---- Settings: laid out after VS Code's settings editor ---- */
-.crumbs .settings-link {
-    margin-left: auto;
-    color: var(--muted);
-}
-
 /* Not the full width: a description line across a wide monitor is too long to read, and the
    controls drift far from their labels. Centred, as VS Code's settings editor is. */
 .settings {
@@ -3115,11 +3281,11 @@ body.resizing .dgresizer::after {
     min-width: 0;
 }
 
-/* Under the breadcrumb bar and down to the window's foot, scrolling on its own. */
+/* From the top of the window to its foot, scrolling on its own. */
 .otree {
     position: sticky;
-    top: calc(var(--tree-top, 0px) + 12px);
-    height: calc(100vh - var(--tree-top, 0px) - 36px);
+    top: 12px;
+    height: calc(100vh - 36px);
     flex: none;
     display: flex;
     flex-direction: column;
@@ -3144,6 +3310,46 @@ body.resizing .dgresizer::after {
     color: var(--muted);
     cursor: pointer;
     padding: 0;
+}
+
+/* The application's name and the settings, above the pickers. */
+.otree-app {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.otree-app-home {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.otree-app-settings {
+    display: inline-flex;
+    color: var(--muted);
+}
+
+.otree-app-settings:hover {
+    color: var(--text);
+}
+
+/* Under a collapsed tree: the two links stacked below the show button. */
+.otree-app.compact {
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 0;
+    border: none;
+}
+
+.otree-empty {
+    width: 240px;
+}
+
+.otree-hint {
+    padding: 12px 10px;
+    color: var(--muted);
 }
 
 .otree-head {
@@ -3386,7 +3592,8 @@ body.resizing .dgresizer::after {
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 0 6px;
-    background: var(--bg);
+    /* The panel's white, as every other text box: on the page's grey it read as disabled. */
+    background: var(--panel);
     color: var(--muted);
 }
 
@@ -3396,8 +3603,10 @@ body.resizing .dgresizer::after {
     pointer-events: none;
 }
 
+/* One ring around the whole box, icon and hint included. */
 .otree-filter:focus-within {
     border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
 }
 
 .otree-filter input {
@@ -3409,6 +3618,11 @@ body.resizing .dgresizer::after {
     color: var(--text);
     font: inherit;
     padding: 4px 0;
+}
+
+/* The global search-box ring would draw a second frame inside the first. */
+.otree-filter input:focus {
+    outline: none;
 }
 
 .otree-filter kbd {
@@ -3727,4 +3941,113 @@ a.otree-row {
 .pmatrix .sort-arrow {
     font-size: 10px;
     color: var(--accent);
+}
+
+/* ---- Results hidden (Cmd/Ctrl+R): the editor takes the height, a thin bar brings them back ---- */
+.workbench > .editor-pane.full {
+    flex: 1 1 0;
+}
+
+.results-hidden {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 6px;
+    flex: 0 0 auto;
+}
+
+.results-hidden .tool {
+    padding: 2px 10px;
+    font-size: 11px;
+}
+
+/* The keyboard and settings buttons above the tree. */
+.otree-app-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.otree-app.compact .otree-app-tools {
+    flex-direction: column;
+}
+
+button.otree-app-settings {
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+}
+
+/* ---- Keyboard shortcuts popup ("?") ---- */
+.shortcuts {
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100vh - 64px);
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+    color: var(--text);
+}
+
+.shortcuts::backdrop {
+    background: rgb(0 0 0 / 0.35);
+}
+
+.shortcuts-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 14px 18px 18px;
+}
+
+.shortcuts-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.shortcuts-close {
+    display: inline-flex;
+    padding: 4px;
+    border: none;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.shortcuts-close:hover {
+    color: var(--text);
+}
+
+/* Fixed layout, so the key column has the same width in every section. */
+.shortcuts table {
+    width: 100%;
+    margin-top: 6px;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 13px;
+}
+
+.shortcuts td {
+    padding: 3px 0;
+    border: none;
+    vertical-align: middle;
+}
+
+.shortcuts .shortcuts-keys {
+    width: 150px;
+    white-space: nowrap;
+}
+
+.shortcuts kbd {
+    display: inline-block;
+    min-width: 20px;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--head);
+    font-family: var(--mono);
+    font-size: 12px;
+    text-align: center;
 }

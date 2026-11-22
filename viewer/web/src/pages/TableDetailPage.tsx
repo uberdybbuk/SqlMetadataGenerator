@@ -76,11 +76,7 @@ function TableDetail() {
 
     return (
         <>
-            <h1 className="mono with-icon">
-                <Icon name="table" size={22} />
-                {schema}.{name}
-            </h1>
-
+            {/* No heading: the tab and the breadcrumb already name the table. */}
             {/* The tabs wait on no request: the skeleton shows at once and the content fills in. */}
             <div className="toolbar">
                 <button className="chip" aria-pressed={!pivoting && tab === "data"} onClick={() => show("data")}>
@@ -229,7 +225,9 @@ function DataTab({
         />
     ) : (
         <div className="result">
-            <div className="state">Cancelled.</div>
+            <div className="state">
+                {runner.cancelledAfterMs !== null ? `Cancelled after ${(runner.cancelledAfterMs / 1000).toFixed(1)} s.` : "Cancelled."}
+            </div>
         </div>
     );
 
@@ -257,17 +255,12 @@ function ScriptTab({ script }: { script: AsyncState<{ sql: string }> }) {
     return (
         <>
             {script.error && <div className="error">{script.error}</div>}
-            <div className="badges">
-                <span
-                    className="badge"
-                    title="Produced by the same Scripting layer that writes the .sql files, so this is exactly what the generator would output."
-                >
-                    {script.loading ? "reading metadata…" : "as the generator would write it"}
-                </span>
-            </div>
             <div className="editor-wrap tall fill" ref={frame} style={height ? { height } : undefined}>
                 <Suspense fallback={<div className="editor-placeholder" />}>
-                    <SqlEditor value={script.data?.sql ?? ""} />
+                    {/* The script costs a whole-database metadata read, so the wait is said inside the
+                        editor itself: a line above it would vanish when the script lands and pull
+                        the editor up under the cursor. */}
+                    <SqlEditor value={script.data?.sql ?? (script.loading ? "-- Reading metadata…" : "")} />
                 </Suspense>
             </div>
         </>
@@ -311,17 +304,18 @@ function DetailTab({ detail }: { detail: AsyncState<TableDetail> }) {
                 ]
                     .filter(Boolean)
                     .join(" "),
+            // One flex row, so the pills share a height and a baseline and keep a gap between them.
             render: (c) => (
-                <>
+                <span className="pills">
                     {c.primaryKeyOrdinal !== null && (
-                        <span className="pill with-icon">
+                        <span className="pill">
                             <Icon name="key" size={12} />
                             pk {c.primaryKeyOrdinal}
                         </span>
                     )}
-                    {c.isIdentity && <span className="pill"> identity</span>}
-                    {c.isComputed && <span className="pill"> computed</span>}
-                </>
+                    {c.isIdentity && <span className="pill">identity</span>}
+                    {c.isComputed && <span className="pill">computed</span>}
+                </span>
             ),
         },
         {
@@ -421,19 +415,17 @@ const indexColumns: Column<IndexSummary>[] = [
                 .filter(Boolean)
                 .join(" "),
         render: (i) => (
-            <>
+            <span className="pills">
                 <span className="muted">{i.typeDesc.toLowerCase()}</span>
                 {i.isPrimaryKey && (
-                    <span className="pill with-icon">
+                    <span className="pill">
                         <Icon name="key" size={12} />
                         pk
                     </span>
                 )}
-                {i.isUniqueConstraint && <span className="pill"> unique constraint</span>}
-                {!i.isPrimaryKey && !i.isUniqueConstraint && i.isUnique && (
-                    <span className="pill"> unique</span>
-                )}
-            </>
+                {i.isUniqueConstraint && <span className="pill">unique constraint</span>}
+                {!i.isPrimaryKey && !i.isUniqueConstraint && i.isUnique && <span className="pill">unique</span>}
+            </span>
         ),
     },
     {

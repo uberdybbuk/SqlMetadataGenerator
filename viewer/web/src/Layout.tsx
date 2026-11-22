@@ -1,28 +1,15 @@
-import { useEffect } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 
+import { AppRoutes } from "./routes";
+import { ShortcutHelp } from "./ShortcutHelp";
 import { ObjectTree } from "./tree/ObjectTree";
+import { TreeHeader } from "./tree/TreeHeader";
+import { TabBar } from "./tabs/TabBar";
+import { describeRoute, SECTION_LABELS } from "./tabs/tabRoute";
+import { CurrentTabProvider, useTabs, type Tab } from "./tabs/TabStore";
 
-export const HOME = "🏠";
-export const APP_NAME = "SQL Browser";
-export const SETTINGS_ROUTE = "/app/_settings";
-
-// Readable equivalents of the type segment in the URL (tables, views ...).
-// The keys match the ObjectFilter.ValidTypes vocabulary: the CLI, the manifest and the URL speak one language.
-const SECTION_LABELS: Record<string, string> = {
-    tables: "Tables",
-    views: "Views",
-    procedures: "Procedures",
-    functions: "Functions",
-    triggers: "Triggers",
-    synonyms: "Synonyms",
-    sequences: "Sequences",
-    types: "Types",
-    schemas: "Schemas",
-    scripting: "Scripting",
-    diagram: "Diagram",
-    query: "Query",
-};
+import { APP_NAME, HOME, SETTINGS_ROUTE } from "./appInfo";
 
 interface Crumb {
     label: string;
@@ -84,6 +71,13 @@ function buildCrumbs(pathname: string): Crumb[] {
         return crumbs;
     }
 
+    // A query tab is one page, "Query 2", not a list called Query with an entry called 2. A link
+    // to the bare /query would open a new query rather than go anywhere up the trail.
+    if (section === "query") {
+        crumbs.push({ label: schema ? `Query ${decodeURIComponent(schema)}` : "Query", href: pathname });
+        return crumbs;
+    }
+
     crumbs.push({
         label: SECTION_LABELS[section] ?? section,
         href: `/app/${a}/${d}/${section}`,
@@ -110,29 +104,31 @@ function buildCrumbs(pathname: string): Crumb[] {
     return crumbs;
 }
 
-function Breadcrumbs() {
-    const { pathname } = useLocation();
+// The active tab's trail, under the tab bar. One for the window rather than one per tab: it is
+// part of the sticky head, and pages that sit under that head measure it.
+function Breadcrumbs({ pathname }: { pathname: string }) {
     const crumbs = buildCrumbs(pathname);
 
-    // The tab title carries the same trail as the breadcrumb, so a window picker or a bookmark
+    // The window title carries the same trail as the breadcrumb, so a window picker or a bookmark
     // says where in the tree you are, not just which application this is.
-    // The tab has less room than the bar, so the trail keeps the house alone where the
+    // The title has less room than the bar, so the trail keeps the house alone where the
     // breadcrumb spells the application out.
     const trail = crumbs.map((crumb, i) => (i === 0 ? HOME : crumb.label)).join(" / ");
     useEffect(() => {
         document.title = crumbs.length > 1 ? trail : `${HOME} ${APP_NAME}`;
     }, [trail, crumbs.length]);
 
-    // On the home page the trail would be a single house sitting above a heading that already
-    // says the same thing. A breadcrumb with one crumb tells you nothing anyway.
-    if (crumbs.length < 2) {
+    // The house is left out: the way home is above the tree. A trail of a single crumb is left out
+    // too, since it would only repeat the tab's own title.
+    const shown = crumbs.slice(1);
+    if (shown.length < 2) {
         return null;
     }
 
     return (
         <nav className="crumbs" aria-label="Breadcrumb">
-            {crumbs.map((crumb, index) => {
-                const last = index === crumbs.length - 1;
+            {shown.map((crumb, index) => {
+                const last = index === shown.length - 1;
                 return (
                     <span key={crumb.href} className="crumb">
                         {last ? (
@@ -152,14 +148,28 @@ function Breadcrumbs() {
                     </span>
                 );
             })}
-            {pathname !== SETTINGS_ROUTE && (
-                <Link className="settings-link" to={SETTINGS_ROUTE}>
-                    Settings
-                </Link>
-            )}
         </nav>
     );
 }
+
+// One open tab: its page, drawn for the tab's own location. Hidden tabs stay
+// mounted, so a query keeps running and an editor keeps its text while another tab is in front.
+//
+// Memoised on the tab object, which the store only replaces when that tab changes: switching
+// tabs or typing in one must not re-render all the others.
+const TabFrame = memo(function TabFrame({ tab, active }: { tab: Tab; active: boolean }) {
+    const location = useMemo(
+        () => ({ pathname: tab.pathname, search: tab.search, hash: "", state: tab.state ?? null, key: tab.id }),
+        [tab.pathname, tab.search, tab.state, tab.id],
+    );
+    return (
+        <section className="tab-frame" hidden={!active} role="tabpanel">
+            <CurrentTabProvider id={tab.id} active={active}>
+                <AppRoutes location={location} />
+            </CurrentTabProvider>
+        </section>
+    );
+});
 
 export function Layout() {
     // Monaco is a separate ~2.6 MB chunk. Rather than waiting for it to download on the first
@@ -180,26 +190,66 @@ export function Layout() {
         };
     }, []);
 
-    // Inside a server the object tree sits on the left. The connection list, the connection form
-    // and the settings have no server to show. Keyed by server, so moving to another one starts
-    // a fresh tree rather than one with the last server's nodes open.
+    const tabs = useTabs();
     const { pathname } = useLocation();
-    const [app, alias] = pathname.split("/").filter(Boolean);
-    const server = app === "app" && alias && !alias.startsWith("_") ? decodeURIComponent(alias) : null;
+
+    // The tree shows the active tab's server. A tab with no server (the connection list, the
+    // settings) leaves the last one in place rather than emptying the column.
+    const server = describeRoute(pathname).alias ?? null;
+    const [lastServer, setLastServer] = useState<string | null>(server);
+    if (server && server !== lastServer) {
+        setLastServer(server);
+    }
+    const treeServer = server ?? lastServer;
+    // Keyed by server, so moving to another one starts a fresh tree rather than one with the
+    // last server's nodes open. Held as one element so a change of tab does not redraw it.
+    const tree = useMemo(
+        () =>
+            treeServer ? (
+                <ObjectTree key={treeServer} alias={treeServer} />
+            ) : (
+                <aside className="otree otree-empty">
+                    <TreeHeader />
+                    <div className="otree-hint">Open a server from the connection list.</div>
+                </aside>
+            ),
+        [treeServer],
+    );
+
+    // The window scrolls, not the tab, so each tab's scroll position is kept here and given back
+    // when the tab comes to the front again.
+    const scrolls = useRef(new Map<string, number>());
+    const activeRef = useRef(tabs.activeId);
+    useLayoutEffect(() => {
+        activeRef.current = tabs.activeId;
+        window.scrollTo(0, (tabs.activeId && scrolls.current.get(tabs.activeId)) || 0);
+    }, [tabs.activeId]);
+    useEffect(() => {
+        const onScroll = () => {
+            if (activeRef.current) {
+                scrolls.current.set(activeRef.current, window.scrollY);
+            }
+        };
+        window.addEventListener("scroll", onScroll, { passive: true });
+        return () => window.removeEventListener("scroll", onScroll);
+    }, []);
 
     return (
         <div className="shell">
-            <Breadcrumbs />
-            {server ? (
-                <div className="with-tree">
-                    <ObjectTree key={server} alias={server} />
-                    <main className="with-tree-main">
-                        <Outlet />
-                    </main>
-                </div>
-            ) : (
-                <Outlet />
-            )}
+            <div className="with-tree">
+                {tree}
+                <main className="with-tree-main">
+                    {/* Sticks to the top as one block, so a page has one height to stay under. */}
+                    <div className="tab-head">
+                        <TabBar />
+                        <Breadcrumbs pathname={pathname} />
+                    </div>
+                    {tabs.tabs.map((tab) => (
+                        <TabFrame key={tab.id} tab={tab} active={tab.id === tabs.activeId} />
+                    ))}
+                </main>
+            </div>
+            <ShortcutHelp />
         </div>
     );
 }

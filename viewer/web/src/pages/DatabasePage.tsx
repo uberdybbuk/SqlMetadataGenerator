@@ -12,7 +12,7 @@ import { ScriptingPanel } from "../scripting/ScriptingPanel";
 import { DiagramPanel } from "../diagram/DiagramPanel";
 import { EMPTY, type Selection } from "../scripting/selection";
 import { useSetting } from "../settings";
-import { SETTINGS_ROUTE } from "../Layout";
+import { SETTINGS_ROUTE } from "../appInfo";
 
 // How many rows the "Largest tables" block shows before the link to the full list. Enough that a
 // mid-sized database is covered here and the link is for the long tail, rather than the block

@@ -42,15 +42,15 @@ export function SettingsPage() {
     const sections = useRef(new Map<string, HTMLElement>());
     const page = useRef<HTMLDivElement>(null);
     const head = useRef<HTMLDivElement>(null);
-    // Where the list's content starts on screen once the search header has stuck: the breadcrumb
-    // bar plus the header. Headings are scrolled to it and measured against it.
+    // Where the list's content starts on screen once the search header has stuck: the tab head
+    // plus the search header. Headings are scrolled to it and measured against it.
     const stuckBottom = useRef(0);
 
-    // The search header sticks under the breadcrumb bar, as VS Code's does, so jumping to a
+    // The search header sticks under the tab bar and breadcrumb, as VS Code's does, so jumping to a
     // category never scrolls the search box away. Both heights are measured rather than written
     // into the stylesheet: the breadcrumb wraps on a narrow window and the header's height follows.
     useLayoutEffect(() => {
-        const crumbs = document.querySelector<HTMLElement>(".crumbs");
+        const crumbs = document.querySelector<HTMLElement>(".tab-head");
         const measure = () => {
             const top = crumbs?.offsetHeight ?? 0;
             const height = head.current?.offsetHeight ?? 0;

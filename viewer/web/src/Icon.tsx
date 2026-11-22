@@ -27,7 +27,10 @@ export type IconName =
     | "plus"
     | "edit"
     | "trash"
-    | "link";
+    | "link"
+    | "settings"
+    | "keyboard"
+    | "x";
 
 const PATHS: Record<IconName, string> = {
     "plus": '<path d="M12 5l0 14" /> <path d="M5 12l14 0" />',
@@ -66,6 +69,11 @@ const PATHS: Record<IconName, string> = {
         '<path d="M9 15l6 -6" /> <path d="M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464" /> <path d="M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463" />',
     "search":
         '<path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0" /> <path d="M21 21l-6 -6" />',
+    "settings":
+        '<path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" /> <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />',
+    "keyboard":
+        '<path d="M2 8a2 2 0 0 1 2 -2h16a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2z" /> <path d="M6 10l0 .01" /> <path d="M10 10l0 .01" /> <path d="M14 10l0 .01" /> <path d="M18 10l0 .01" /> <path d="M6 14l0 .01" /> <path d="M18 14l0 .01" /> <path d="M10 14l4 .01" />',
+    "x": '<path d="M18 6l-12 12" /> <path d="M6 6l12 12" />',
 };
 
 // The labels map to the same concepts as the ObjectFilter.ValidTypes vocabulary.
@@ -90,6 +98,9 @@ export const ICON_LABELS: Record<IconName, string> = {
     edit: "edit",
     trash: "delete",
     link: "link",
+    settings: "settings",
+    keyboard: "keyboard shortcuts",
+    x: "close",
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {

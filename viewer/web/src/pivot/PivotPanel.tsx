@@ -304,6 +304,17 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
 
     return (
         <div className="pivot">
+            <FieldPane
+                columns={columns}
+                layout={layout}
+                onLayout={setLayout}
+                running={running}
+                runBlocker={runBlocker}
+                onRun={() => void run()}
+                autoRun={autoRun}
+                onAutoRun={(on) => setSetting("pivot.autoRun", on)}
+            />
+
             <div className="pivot-main">
                 <div className="pfilterline">
                     <FilterBar
@@ -472,17 +483,6 @@ export function PivotPanel({ alias, db, schema, name }: { alias: string; db: str
                         ))}
                 </div>
             </div>
-
-            <FieldPane
-                columns={columns}
-                layout={layout}
-                onLayout={setLayout}
-                running={running}
-                runBlocker={runBlocker}
-                onRun={() => void run()}
-                autoRun={autoRun}
-                onAutoRun={(on) => setSetting("pivot.autoRun", on)}
-            />
         </div>
     );
 }

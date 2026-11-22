@@ -1,5 +1,7 @@
 import { useLayoutEffect, useState } from "react";
 
+import { useTabActive } from "./tabs/TabStore";
+
 // A pane that reaches the bottom of the window, whatever sits above it.
 //
 // The height is MEASURED rather than assumed: the header above it differs per page and wraps on a
@@ -15,9 +17,12 @@ import { useLayoutEffect, useState } from "react";
 export function useFillHeight(minimum = 320) {
     const [element, setElement] = useState<HTMLDivElement | null>(null);
     const [height, setHeight] = useState<number | null>(null);
+    // A hidden tab has nothing to measure: everything in it is at zero. It is measured again when
+    // it comes to the front, since the window may have been resized in the meantime.
+    const active = useTabActive();
 
     useLayoutEffect(() => {
-        if (!element) {
+        if (!element || !active) {
             return;
         }
         const measure = () => {
@@ -36,7 +41,7 @@ export function useFillHeight(minimum = 320) {
             window.removeEventListener("resize", measure);
             observer.disconnect();
         };
-    }, [element, minimum]);
+    }, [element, minimum, active]);
 
     return { frame: setElement, element, height };
 }

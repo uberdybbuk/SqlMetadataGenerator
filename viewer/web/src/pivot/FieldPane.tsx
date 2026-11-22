@@ -61,12 +61,12 @@ export function FieldPane({ columns, layout, onLayout, running, runBlocker, onRu
     const pane = useRef<HTMLElement>(null);
 
     // Down to the window's foot at every scroll position. The pane starts below the matrix's
-    // toolbar and sticks under the breadcrumb once the page scrolls, so the room it has changes
+    // toolbar and sticks under the tab bar and breadcrumb once the page scrolls, so the room it has changes
     // as the page moves; it is measured on every scroll rather than once. The column list takes
     // whatever the areas below it leave.
     useLayoutEffect(() => {
         const el = pane.current;
-        const crumbs = document.querySelector<HTMLElement>(".crumbs");
+        const crumbs = document.querySelector<HTMLElement>(".tab-head");
         if (!el) {
             return;
         }

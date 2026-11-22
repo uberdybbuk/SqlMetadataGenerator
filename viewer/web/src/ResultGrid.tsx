@@ -1,7 +1,9 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useContext, useMemo, useState } from "react";
 
 import { DataTable, type Column } from "./DataTable";
 import { formatCell, isNumericType } from "./cell";
+import { ResultsToggle } from "./resultsToggle";
+import { MOD } from "./shortcuts";
 
 // The general component for showing a query result. Not just for the table preview: free-form
 // queries, WHERE validation and generation reports will all use it later, which is why it knows
@@ -53,6 +55,8 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
     // column of its own. For a wide row — a log table with twenty fields — that is the
     // difference between reading a record and scrolling sideways hunting for it.
     const [transposed, setTransposed] = useState(false);
+    // Inside a query pane, the results can make way for the editor.
+    const toggleResults = useContext(ResultsToggle);
 
     const gridRows: GridRow[] = useMemo(
         () => rows.map((values, index) => ({ index, values })),
@@ -147,6 +151,11 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
                 >
                     Transpose
                 </button>
+                {toggleResults && (
+                    <button className="tool" onClick={toggleResults} title={`Hide the results (${MOD}R)`}>
+                        Hide
+                    </button>
+                )}
             </div>
 
             {tab === "results" ? (

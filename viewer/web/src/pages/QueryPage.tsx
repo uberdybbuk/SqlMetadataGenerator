@@ -48,9 +48,11 @@ export function QueryPage() {
     ) : (
         <div className="result">
             <div className="state">
-                {shared.loading
-                    ? "Opening the shared query…"
-                    : "Write a query and press Execute (Alt+X, F5)."}
+                {runner.cancelledAfterMs !== null
+                    ? `Cancelled after ${(runner.cancelledAfterMs / 1000).toFixed(1)} s.`
+                    : shared.loading
+                      ? "Opening the shared query…"
+                      : "Write a query and press Execute (Alt+X, F5)."}
             </div>
         </div>
     );

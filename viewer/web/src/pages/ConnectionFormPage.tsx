@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { api, type ConnectionRequest, type ConnectionSummary, type Provider } from "../api";
+import { useCurrentTab } from "../tabs/TabStore";
 import { useApi } from "../useApi";
 import { Icon } from "../Icon";
 
@@ -68,6 +69,9 @@ type TestState =
 
 function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
     const navigate = useNavigate();
+    // The form is done once saved: its tab closes and the connection list takes its place.
+    const tab = useCurrentTab();
+    const leave = () => (tab ? tab.close("/app") : navigate("/app"));
 
     const [alias, setAlias] = useState(existing?.alias ?? "");
     const [description, setDescription] = useState(existing?.description ?? "");
@@ -164,7 +168,7 @@ function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
             } else {
                 await api.addConnection(request());
             }
-            navigate("/app");
+            leave();
         } catch (err) {
             setSaveError(err instanceof Error ? err.message : String(err));
             setSaving(false);
@@ -179,7 +183,7 @@ function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
         setSaveError(null);
         try {
             await api.deleteConnection(existing.alias);
-            navigate("/app");
+            leave();
         } catch (err) {
             setSaveError(err instanceof Error ? err.message : String(err));
             setSaving(false);

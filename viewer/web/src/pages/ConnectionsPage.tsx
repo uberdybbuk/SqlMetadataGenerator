@@ -4,7 +4,7 @@ import { api } from "../api";
 import { useApi } from "../useApi";
 import { plural } from "../format";
 import { Icon } from "../Icon";
-import { APP_NAME, SETTINGS_ROUTE } from "../Layout";
+import { APP_NAME, SETTINGS_ROUTE } from "../appInfo";
 import { CONNECTIONS_ROUTE } from "./ConnectionFormPage";
 
 export function ConnectionsPage() {

@@ -1,6 +1,9 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Icon } from "./Icon";
+import { ResultsToggle } from "./resultsToggle";
+import { isModKey, MOD } from "./shortcuts";
+import { useCurrentTab } from "./tabs/TabStore";
 import { useFillHeight } from "./useFillHeight";
 
 const SqlEditor = lazy(() => import("./SqlEditor"));
@@ -39,20 +42,39 @@ type ShareState =
     | { kind: "failed"; message: string };
 
 export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }: QueryPaneProps) {
-    const [text, setText] = useState(sql);
+    // The tab keeps what was typed here, so the text survives a reload. A tab that has a draft
+    // opens on it instead of on the query it was given.
+    const tab = useCurrentTab();
+    const tabRef = useRef(tab);
+    tabRef.current = tab;
+    const active = tab?.active ?? true;
+
+    const [text, setText] = useState(tab?.draft ?? sql);
     // Once someone has typed, the incoming sql prop stops being an instruction and becomes just
     // the query this pane happened to open with. The preview's text arrives a moment after the
     // pane mounts, and it must not land on top of a query being written.
-    const edited = useRef(false);
+    const edited = useRef(tab?.draft !== undefined);
     useEffect(() => {
         if (!edited.current) {
             setText(sql);
         }
     }, [sql]);
 
+    // The shortcut handler is attached once; a ref keeps it reading the current text without
+    // re-binding the listener on every keystroke. It is written on the keystroke itself, not
+    // only when React gets round to re-rendering: Execute pressed straight after a paste (or a
+    // burst of typing while other tabs keep the page busy) otherwise ran the text from before
+    // it, which for a new query was nothing at all.
+    const textRef = useRef(text);
+    textRef.current = text;
+
+    // Typing in a preview tab keeps it: the next click in the tree must not throw the text away.
     const onEdit = useCallback((next: string) => {
         edited.current = true;
+        textRef.current = next;
         setText(next);
+        tabRef.current?.setDraft(next);
+        tabRef.current?.pin();
     }, []);
     const [share, setShare] = useState(readShare);
     // The pane reaches the bottom of the window whatever sits above it. Shared with the scripting
@@ -100,11 +122,6 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
         }
     }, [share]);
 
-    // The shortcut handler is attached once; a ref keeps it reading the current text without
-    // re-binding the listener on every keystroke.
-    const textRef = useRef(text);
-    textRef.current = text;
-
     // As in SSMS: with text selected, Execute runs the selection alone; with nothing selected,
     // the whole editor. Only whether there IS a selection is state, for the button's label; the
     // text itself is read when Execute is pressed.
@@ -116,6 +133,18 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
     }, []);
     const runnable = () => (selection.current.trim() !== "" ? selection.current : textRef.current);
 
+    // Cmd/Ctrl+R hides the results and gives the editor the whole height, as in SSMS. Per pane and
+    // not remembered: it is a moment's room to write, not a way of working.
+    const [resultsHidden, setResultsHidden] = useState(false);
+    const toggleResults = useCallback(() => setResultsHidden((hidden) => !hidden), []);
+    // A query is run to see what it returns, so running one brings the results back.
+    const execute = (sql: string) => {
+        setResultsHidden(false);
+        onExecute(sql);
+    };
+    const executeRef = useRef(execute);
+    executeRef.current = execute;
+
     // The shortcuts are the ones a SQL Server user already has in their fingers. F5 has to be
     // taken off the browser, which would otherwise reload the page and lose the result entirely.
     //
@@ -123,11 +152,21 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
     // "≈", because Option is the layout's alt-graph key. Reading e.key looked right in a synthetic
     // test and did nothing at all under a real keyboard.
     useEffect(() => {
+        // Every open tab keeps its pane mounted. Only the one in front may take the keys.
+        if (!active) {
+            return;
+        }
         const onKey = (e: KeyboardEvent) => {
             const execute = e.key === "F5" || (e.altKey && e.code === "KeyX");
             if (execute) {
                 e.preventDefault();
-                onExecute(runnable());
+                executeRef.current(runnable());
+                return;
+            }
+            // Cmd+R would otherwise reload the page and lose the result.
+            if (isModKey(e, "r")) {
+                e.preventDefault();
+                toggleResults();
                 return;
             }
             if (e.key === "Escape" && running) {
@@ -135,9 +174,10 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
                 onCancel();
             }
         };
-        window.addEventListener("keydown", onKey);
-        return () => window.removeEventListener("keydown", onKey);
-    }, [onExecute, onCancel, running]);
+        // Capture phase, so the editor does not get the keys first.
+        window.addEventListener("keydown", onKey, true);
+        return () => window.removeEventListener("keydown", onKey, true);
+    }, [onCancel, running, active, toggleResults]);
 
     const [shared, setShared] = useState<ShareState>({ kind: "idle" });
     // A link made from an older version of the text would be a quiet lie, so editing clears it.
@@ -168,7 +208,7 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
                 <button
                     type="button"
                     className="tool run"
-                    onClick={() => onExecute(runnable())}
+                    onClick={() => execute(runnable())}
                     title={hasSelection ? "Execute the selected text only (Alt+X, F5)" : "Execute (Alt+X, F5)"}
                 >
                     <Icon name="play" size={14} />
@@ -214,25 +254,41 @@ export function QueryPane({ sql, result, onExecute, onCancel, running, onShare }
                 </div>
             )}
             {shared.kind === "failed" && <div className="error">{shared.message}</div>}
-            <div className="pane" ref={editorPane} style={{ height: `${share}%` }}>
+            <div
+                className={resultsHidden ? "pane editor-pane full" : "pane editor-pane"}
+                ref={editorPane}
+                style={resultsHidden ? undefined : { height: `${share}%` }}
+            >
                 <Suspense fallback={<div className="editor-placeholder" />}>
                     <SqlEditor
                         value={text}
                         readOnly={false}
                         onChange={onEdit}
-                        onExecute={() => onExecute(runnable())}
+                        onExecute={() => executeRef.current(runnable())}
                         onSelection={onSelection}
                     />
                 </Suspense>
             </div>
-            <div
-                className="splitter"
-                onMouseDown={startDrag}
-                role="separator"
-                aria-orientation="horizontal"
-                aria-label="Resize query and results"
-            />
-            <div className="pane result-pane">{result}</div>
+            {resultsHidden ? (
+                <div className="results-hidden">
+                    <button type="button" className="tool" onClick={toggleResults} title={`Show the results (${MOD}R)`}>
+                        Show results
+                    </button>
+                </div>
+            ) : (
+                <>
+                    <div
+                        className="splitter"
+                        onMouseDown={startDrag}
+                        role="separator"
+                        aria-orientation="horizontal"
+                        aria-label="Resize query and results"
+                    />
+                    <div className="pane result-pane">
+                        <ResultsToggle.Provider value={toggleResults}>{result}</ResultsToggle.Provider>
+                    </div>
+                </>
+            )}
         </div>
     );
 }
