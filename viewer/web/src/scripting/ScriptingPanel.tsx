@@ -1,10 +1,21 @@
-import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+    Suspense,
+    lazy,
+    memo,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type Dispatch,
+    type SetStateAction,
+} from "react";
 
 import { api, type ScriptJobResult, type ScriptJobStatus, type ScriptRequest, type TableStats } from "../api";
 import { useApi, type AsyncState } from "../useApi";
 import { useFillHeight } from "../useFillHeight";
 import { Icon, type IconName } from "../Icon";
-import { useSetting } from "../settings";
+import { getSetting, setSetting, useSetting } from "../settings";
 import { EMPTY, apply, bulk, idOf, resolve, type ScriptableObject, type Selection, type Target } from "./selection";
 import { matchPastedList, type PasteOutcome } from "./pasteList";
 import { JobDone, JobProgress } from "./ScriptJob";
@@ -51,7 +62,24 @@ const KIND_LABEL: Record<string, string> = {
 // What comes with a table's definition. "none" is the DEFAULT and has no button of its own:
 // neither toggle lit means no rows, which is the safe thing to have asked for by accident, and
 // clicking the lit one turns it off again.
-type Rows = "none" | "all" | "query";
+export type Rows = "none" | "all" | "query";
+
+// What each table in the set brings besides its definition. Held by the page next to the
+// selection, for the same reason: they are the work of the person building the set, and leaving
+// for the overview must not throw them away while keeping the objects they belong to.
+export interface DataChoices {
+    modes: Record<string, Rows>;
+    wheres: Record<string, string>;
+    // The row cap, per table. Absent means no TOP. It rides with the WHERE rather than being its
+    // own row mode: "the first 100" and "the ones matching this" are the same question asked of
+    // the same statement, and one of them can be left blank.
+    tops: Record<string, number | null>;
+    // Tables the size warning was told to let through with every row. Kept per table rather than
+    // as a higher limit: a table nobody could count is always "too big", and no limit fixes that.
+    allowed: Record<string, true>;
+}
+
+export const NO_CHOICES: DataChoices = { modes: {}, wheres: {}, tops: {}, allowed: {} };
 const ROW_MODES: Rows[] = ["all", "query"];
 
 // What the script carries. "data" leaves every definition out and keeps only the rows: the
@@ -83,6 +111,8 @@ interface ScriptingPanelProps {
     // your set because you glanced at the treemap is one nobody trusts to leave.
     selection: Selection;
     onSelection: (next: Selection) => void;
+    choices: DataChoices;
+    onChoices: Dispatch<SetStateAction<DataChoices>>;
     // Row counts, so a table's size is known BEFORE "all rows" is chosen rather than after the
     // download starts. Approximate (sys.partitions), which is the right precision for a warning.
     // The page's own read, handed down: on a large database it is a slow query, and opening
@@ -90,7 +120,7 @@ interface ScriptingPanelProps {
     stats: AsyncState<TableStats[]>;
 }
 
-export function ScriptingPanel({ alias, db, selection, onSelection, stats }: ScriptingPanelProps) {
+export function ScriptingPanel({ alias, db, selection, onSelection, choices, onChoices, stats }: ScriptingPanelProps) {
     const inventory = useApi(() => api.scriptable(alias, db), [alias, db]);
 
     // Ticked on the left but not yet moved. Its own rule set over the same engine, so ticking a
@@ -110,12 +140,22 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
     const [ticked, setTicked] = useState<Set<string>>(() => new Set());
     const [tickAnchor, setTickAnchor] = useState<number | null>(null);
 
-    const [rowsMode, setRowsMode] = useState<Record<string, Rows>>({});
-    const [wheres, setWheres] = useState<Record<string, string>>({});
-    // The row cap, per table. Absent means no TOP. It rides with the WHERE rather than being its
-    // own row mode: "the first 100" and "the ones matching this" are the same question asked of
-    // the same statement, and one of them can be left blank.
-    const [tops, setTops] = useState<Record<string, number | null>>({});
+    const { modes: rowsMode, wheres, tops, allowed } = choices;
+    const setRowsMode = useCallback(
+        (update: (current: Record<string, Rows>) => Record<string, Rows>) =>
+            onChoices((c) => ({ ...c, modes: update(c.modes) })),
+        [onChoices],
+    );
+    const setWheres = useCallback(
+        (update: (current: Record<string, string>) => Record<string, string>) =>
+            onChoices((c) => ({ ...c, wheres: update(c.wheres) })),
+        [onChoices],
+    );
+    const setTops = useCallback(
+        (update: (current: Record<string, number | null>) => Record<string, number | null>) =>
+            onChoices((c) => ({ ...c, tops: update(c.tops) })),
+        [onChoices],
+    );
     const [counted, setCounted] = useState<Record<string, number>>({});
     const [active, setActive] = useState<string | null>(null);
 
@@ -256,6 +296,12 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
     // Ticks on objects that have since left the set count for nothing.
     const tickedObjects = useMemo(() => targets.filter((o) => ticked.has(idOf(o))), [targets, ticked]);
 
+    // The header boxes look only at the rows the filter shows. On the left, a row already in the
+    // set is not something to stage, so it is left out of both the count and the click.
+    const stageable = useMemo(() => visible.filter((o) => !inSet.has(idOf(o))), [visible, inSet]);
+    const sourceHead = headState(stageable.filter((o) => stagedIds.has(idOf(o))).length, stageable.length);
+    const chosenHead = headState(chosenVisible.filter((o) => ticked.has(idOf(o))).length, chosenVisible.length);
+
     useEffect(() => {
         if (focus === null || !list.current) {
             return;
@@ -364,12 +410,12 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
         setActive((current) => (current !== null && gone.has(current) ? null : current));
     }, [tickedObjects, objects, inSet, onSelection]);
 
-    const tickBulk = (action: "select" | "invert") => {
+    const tickBulk = (action: "select" | "deselect" | "invert") => {
         setTicked((current) => {
             const next = new Set(current);
             for (const o of chosenVisible) {
                 const id = idOf(o);
-                if (action === "select" || !next.has(id)) {
+                if (action === "select" || (action === "invert" && !next.has(id))) {
                     next.add(id);
                 } else {
                     next.delete(id);
@@ -379,10 +425,32 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
         });
     };
 
-    const chooseMode = useCallback((id: string, next: Rows) => {
-        setRowsMode((c) => ({ ...c, [id]: next }));
-        setActive(id);
-    }, []);
+    const chooseMode = useCallback(
+        (id: string, next: Rows) => {
+            setRowsMode((c) => ({ ...c, [id]: next }));
+            setActive(id);
+        },
+        [setRowsMode],
+    );
+
+    // The Rows header's buttons: the ticked tables when there are any, otherwise every table the
+    // filter shows. Procedures and views have no rows to bring and are passed over.
+    const bulkTables = useMemo(
+        () => (tickedObjects.length > 0 ? tickedObjects : chosenVisible).filter((o) => o.kind === "tables"),
+        [tickedObjects, chosenVisible],
+    );
+    const bulkScope =
+        `${bulkTables.length} ${tickedObjects.length > 0 ? "ticked" : "shown"} ` +
+        (bulkTables.length === 1 ? "table" : "tables");
+    const setModeFor = (scope: ScriptableObject[], next: Rows) => {
+        setRowsMode((c) => {
+            const updated = { ...c };
+            for (const o of scope) {
+                updated[idOf(o)] = next;
+            }
+            return updated;
+        });
+    };
 
     const onRowClick = useCallback(
         (o: ScriptableObject, index: number, event: React.MouseEvent) => {
@@ -480,7 +548,7 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
         () =>
             targets.filter((o) => {
                 const id = idOf(o);
-                if (modeOf(id) !== "all") {
+                if (modeOf(id) !== "all" || allowed[id]) {
                     return false;
                 }
                 const estimate = rowCounts.get(id);
@@ -488,8 +556,21 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                 // the one failure that silently produces the enormous script this warning exists for.
                 return estimate === null || (estimate !== undefined && estimate > warnRows);
             }),
-        [targets, modeOf, rowCounts, warnRows],
+        [targets, modeOf, rowCounts, warnRows, allowed],
     );
+
+    // A table named in the warning: show it in the set and open it in the inspector. The set's
+    // filter is cleared when it hides that row, since a jump to a row you cannot see is no jump.
+    const jumpTo = (o: ScriptableObject) => {
+        const id = idOf(o);
+        if (!chosenVisible.some((v) => idOf(v) === id)) {
+            filterChosen({ search: "", kind: "" });
+        }
+        setActive(id);
+        requestAnimationFrame(() => {
+            document.querySelector(`tr[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "nearest" });
+        });
+    };
 
     const request = (): ScriptRequest => ({
         // Data only sends no definitions at all. The server takes rows for a table that is not
@@ -714,9 +795,51 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
             {error && <div className="error">{error}</div>}
             {unbounded.length > 0 && (
                 <div className="warn-note">
-                    {unbounded.length === 1 ? "This table has" : "These tables have"} more than{" "}
-                    {warnRows.toLocaleString("en-US")} rows, so <b>all</b> is probably not what you want:{" "}
-                    {unbounded.map((o) => o.schema + "." + o.name).join(", ")}. Use <b>top</b> or <b>query</b> instead.
+                    <div>
+                        {unbounded.length === 1 ? "This table has" : "These tables have"} more than{" "}
+                        {warnRows.toLocaleString("en-US")} rows, or a count nobody could read, so <b>all</b> is
+                        probably not what you want:{" "}
+                        {unbounded.map((o, i) => {
+                            const estimate = rowCounts.get(idOf(o));
+                            return (
+                                <span key={idOf(o)}>
+                                    {i > 0 && ", "}
+                                    <button className="linkish mono" onClick={() => jumpTo(o)}>
+                                        {o.schema}.{o.name}
+                                    </button>
+                                    {estimate === null || estimate === undefined
+                                        ? " (count unknown)"
+                                        : ` (~${estimate.toLocaleString("en-US")})`}
+                                </span>
+                            );
+                        })}
+                        .
+                    </div>
+                    <div className="warn-actions">
+                        <label>
+                            Warn above{" "}
+                            <WarnLimit value={warnRows} />
+                            {" "}rows
+                        </label>
+                        <button
+                            className="tool"
+                            title="Script every row of these tables anyway, for this script set"
+                            onClick={() =>
+                                onChoices((c) => {
+                                    const next = { ...c.allowed };
+                                    for (const o of unbounded) {
+                                        next[idOf(o)] = true;
+                                    }
+                                    return { ...c, allowed: next };
+                                })
+                            }
+                        >
+                            Allow all rows for {unbounded.length === 1 ? "it" : `these ${unbounded.length}`}
+                        </button>
+                        <button className="tool" onClick={() => setModeFor(unbounded, "query")}>
+                            Switch {unbounded.length === 1 ? "it" : "them"} to query
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -838,6 +961,22 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                             )}
 
                             <div className="picker-rows" role="listbox" tabIndex={0} ref={list} onKeyDown={onKeyDown}>
+                                <div className="ohead">
+                                    <HeadTick
+                                        state={sourceHead}
+                                        disabled={stageable.length === 0}
+                                        label="Tick every object the filter shows"
+                                        onClick={() =>
+                                            setStaged(
+                                                bulk(objects, stagedIds, stageable, sourceHead === "true" ? "deselect" : "select"),
+                                            )
+                                        }
+                                    />
+                                    <span>Object</span>
+                                    <span className="grow" />
+                                    <span className="kindcol">Kind</span>
+                                    <span className="rowcol">Rows</span>
+                                </div>
                                 {visible.slice(0, RENDER_CAP).map((o, index) => {
                                     const id = idOf(o);
                                     const chosen = inSet.has(id);
@@ -872,7 +1011,7 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                                 })}
                                 {visible.length > RENDER_CAP && (
                                     <div className="state">
-                                        Showing the first {RENDER_CAP} of {visible.length}. The buttons below act on all
+                                        Showing the first {RENDER_CAP} of {visible.length}. The box at the top ticks all
                                         of them.
                                     </div>
                                 )}
@@ -899,18 +1038,8 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                                 <span className="grow" />
                                 <button
                                     className="tool"
-                                    disabled={visible.length === 0}
-                                    onClick={() => setStaged(bulk(objects, stagedIds, visible, "select"))}
-                                >
-                                    All {visible.length}
-                                </button>
-                                <button className="tool" disabled={stagedObjects.length === 0} onClick={() => setStaged(EMPTY)}>
-                                    None
-                                </button>
-                                <button
-                                    className="tool"
-                                    disabled={visible.length === 0}
-                                    onClick={() => setStaged(bulk(objects, stagedIds, visible, "invert"))}
+                                    disabled={stageable.length === 0}
+                                    onClick={() => setStaged(bulk(objects, stagedIds, stageable, "invert"))}
                                 >
                                     Invert
                                 </button>
@@ -967,11 +1096,43 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                                         <table className="setgrid">
                                             <thead>
                                                 <tr>
-                                                    <th className="tick" />
+                                                    <th className="tick">
+                                                        <HeadTick
+                                                            state={chosenHead}
+                                                            disabled={chosenVisible.length === 0}
+                                                            label="Tick every object the filter shows"
+                                                            onClick={() => tickBulk(chosenHead === "true" ? "deselect" : "select")}
+                                                        />
+                                                    </th>
                                                     <th className="num">#</th>
                                                     <th>Object</th>
                                                     <th>Kind</th>
-                                                    <th>Rows</th>
+                                                    <th>
+                                                        <span className="bulkrows">
+                                                            Rows
+                                                            {bulkTables.length > 0 && (
+                                                                <>
+                                                                    <span
+                                                                        className={"bulkto" + (tickedObjects.length > 0 ? " on" : "")}
+                                                                        title={bulkScope}
+                                                                    >
+                                                                        {bulkTables.length} →
+                                                                    </span>
+                                                                    <span className="seg">
+                                                                        {(["none", ...ROW_MODES] as Rows[]).map((m) => (
+                                                                            <button
+                                                                                key={m}
+                                                                                title={`Set the ${bulkScope} to ${m}`}
+                                                                                onClick={() => setModeFor(bulkTables, m)}
+                                                                            >
+                                                                                {m}
+                                                                            </button>
+                                                                        ))}
+                                                                    </span>
+                                                                </>
+                                                            )}
+                                                        </span>
+                                                    </th>
                                                     <th className="num">Count</th>
                                                     <th />
                                                 </tr>
@@ -1001,8 +1162,8 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                                         </table>
                                         {chosenVisible.length > RENDER_CAP && (
                                             <div className="state">
-                                                Showing the first {RENDER_CAP} of {chosenVisible.length}. The buttons below
-                                                act on all of them.
+                                                Showing the first {RENDER_CAP} of {chosenVisible.length}. The box at the
+                                                top ticks all of them.
                                             </div>
                                         )}
                                         {chosenVisible.length === 0 && <div className="state">Nothing matches.</div>}
@@ -1021,20 +1182,6 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                                         « Remove {tickedObjects.length > 0 ? tickedObjects.length : ""}
                                     </button>
                                     <span className="grow" />
-                                    <button
-                                        className="tool"
-                                        disabled={chosenVisible.length === 0}
-                                        onClick={() => tickBulk("select")}
-                                    >
-                                        All {chosenVisible.length}
-                                    </button>
-                                    <button
-                                        className="tool"
-                                        disabled={tickedObjects.length === 0}
-                                        onClick={() => setTicked(new Set())}
-                                    >
-                                        None
-                                    </button>
                                     <button
                                         className="tool"
                                         disabled={chosenVisible.length === 0}
@@ -1190,7 +1337,7 @@ const SetRow = memo(function SetRow({
     const table = object.kind === "tables";
     const classes = [active ? "active" : "", idle ? "idle" : ""].filter(Boolean).join(" ");
     return (
-        <tr className={classes || undefined} onClick={() => onPick(id)}>
+        <tr className={classes || undefined} data-id={id} onClick={() => onPick(id)}>
             <td className="tick">
                 <span
                     role="checkbox"
@@ -1313,6 +1460,74 @@ function jobSummary(objects: number, tablesWithRows: number): string {
         parts.push(`${tablesWithRows.toLocaleString("en-US")} ${tablesWithRows === 1 ? "table" : "tables"} with rows`);
     }
     return parts.join(" · ");
+}
+
+// The warning's own copy of the "Warn Above Rows" setting. Typed into here, it changes the setting
+// itself, so the person never has to leave a half-built set to raise it. Kept as text while
+// typing: a number box that rewrote "1" to the minimum on every keystroke could not be typed in.
+function WarnLimit({ value }: { value: number }) {
+    const [text, setText] = useState(String(value));
+    useEffect(() => setText(String(value)), [value]);
+    const commit = () => {
+        const n = Number(text.replace(/[,\s]/g, ""));
+        if (Number.isInteger(n) && n > 0) {
+            setSetting("scripting.warnRows", n);
+        }
+        setText(String(getSetting("scripting.warnRows")));
+    };
+    return (
+        <input
+            className="warn-limit"
+            inputMode="numeric"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                    commit();
+                }
+            }}
+        />
+    );
+}
+
+type HeadState = "true" | "false" | "mixed";
+
+function headState(ticked: number, total: number): HeadState {
+    if (ticked === 0) {
+        return "false";
+    }
+    return ticked === total ? "true" : "mixed";
+}
+
+// The box over a list's tick column. Full when every shown row is ticked, a dash when some are.
+// A click on a full box clears the shown rows, otherwise it ticks them all. Rows the filter hides
+// keep whatever they had. With nothing to tick (everything shown is already in the set, or the
+// filter shows nothing) it is greyed out rather than a box that does nothing.
+interface HeadTickProps {
+    state: HeadState;
+    disabled: boolean;
+    label: string;
+    onClick: () => void;
+}
+
+function HeadTick({ state, disabled, label, onClick }: HeadTickProps) {
+    return (
+        <span
+            role="checkbox"
+            aria-checked={state}
+            aria-disabled={disabled}
+            aria-label={label}
+            title={disabled ? undefined : label}
+            className="tri"
+            onClick={(e) => {
+                e.stopPropagation();
+                if (!disabled) {
+                    onClick();
+                }
+            }}
+        />
+    );
 }
 
 interface Matcher {

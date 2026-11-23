@@ -1504,6 +1504,61 @@ tr.norows td.empty-note {
     transform: none;
 }
 
+/* Some of the shown rows ticked: a dash instead of a tick. */
+.tri[aria-checked="mixed"] {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.tri[aria-checked="mixed"]::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    top: 5px;
+    height: 2px;
+    background: #fff;
+}
+
+.tri[aria-disabled="true"] {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.tri[aria-disabled="true"]:hover {
+    border-color: var(--head-line);
+}
+
+/* The object list's header: the same columns as a row, so the box sits over the row boxes. */
+.ohead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: -4px;
+    padding: 4px 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.ohead .kindcol,
+.ohead .rowcol {
+    font-size: 10px;
+}
+
+.setgrid th.tick .tri {
+    display: block;
+    margin: 0 auto;
+}
+
 .picker-foot {
     display: flex;
     align-items: center;
@@ -2049,6 +2104,56 @@ tr.norows td.empty-note {
     color: var(--warn);
     font-size: 12px;
     flex: 0 0 auto;
+}
+
+/* A table name in the warning: a jump to its row in the set. */
+.warn-note .linkish {
+    border: none;
+    background: none;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.warn-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.warn-limit {
+    width: 72px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The Rows header: its own all / query / none for many tables at once. */
+.bulkrows {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.bulkrows .bulkto {
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+}
+
+/* Ticked rows are the target, not the whole filter: say so in the accent colour. */
+.bulkrows .bulkto.on {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.bulkrows .seg button {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 10px;
 }
 
 /* ---- Connection cards: edit and add ---- */

@@ -8,11 +8,12 @@ import { formatKb, formatRows, plural } from "../format";
 import { labelColorFor, rampFor, sampleRamp, useDarkMode } from "../theme";
 import { DataTable, type Column } from "../DataTable";
 import { Icon, type IconName } from "../Icon";
-import { ScriptingPanel } from "../scripting/ScriptingPanel";
+import { NO_CHOICES, ScriptingPanel, type DataChoices } from "../scripting/ScriptingPanel";
 import { DiagramPanel } from "../diagram/DiagramPanel";
 import { EMPTY, type Selection } from "../scripting/selection";
 import { useSetting } from "../settings";
 import { SETTINGS_ROUTE } from "../appInfo";
+import { useCurrentTab } from "../tabs/TabStore";
 
 // How many rows the "Largest tables" block shows before the link to the full list. Enough that a
 // mid-sized database is covered here and the link is for the long tail, rather than the block
@@ -56,9 +57,26 @@ export function DatabasePage() {
     // throw the selection away. It is dropped when the database changes, where the object
     // identities it names stop meaning anything.
     const [selection, setSelection] = useState<Selection>(EMPTY);
+    // all / query / top per table, kept here for the same reason as the selection.
+    const [choices, setChoices] = useState<DataChoices>(NO_CHOICES);
     // Moving to another database is where the rules stop meaning anything: they name schemas and
     // objects, and the same name in another database is a different object.
-    useEffect(() => setSelection(EMPTY), [alias, db]);
+    useEffect(() => {
+        setSelection(EMPTY);
+        setChoices(NO_CHOICES);
+    }, [alias, db]);
+
+    // A script set is something changed in this tab, so the tab stops being the preview one.
+    // Otherwise opening Settings (or anything from the tree) would replace the tab and the set
+    // with it.
+    const tab = useCurrentTab();
+    const pinTab = tab?.pin;
+    const building = selection.rules.length > 0;
+    useEffect(() => {
+        if (building) {
+            pinTab?.();
+        }
+    }, [building, pinTab]);
 
     // Schemas and tables the settings keep off the treemap (huge log tables, typically). The
     // "show" chip brings them back for the moment without touching the setting. It remembers
@@ -188,6 +206,8 @@ export function DatabasePage() {
                     db={db}
                     selection={selection}
                     onSelection={setSelection}
+                    choices={choices}
+                    onChoices={setChoices}
                     stats={tables}
                 />
             )}
