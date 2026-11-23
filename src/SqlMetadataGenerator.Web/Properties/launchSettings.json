@@ -2,7 +2,7 @@
     "profiles": {
         "SqlMetadataGenerator.Web": {
             "commandName": "Project",
-            "applicationUrl": "http://localhost:7751",
+            "applicationUrl": "http://localhost:8701",
             "environmentVariables": {
                 "ASPNETCORE_ENVIRONMENT": "Development"
             }

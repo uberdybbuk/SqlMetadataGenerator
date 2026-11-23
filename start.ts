@@ -18,8 +18,8 @@ import { connect } from "node:net";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
-const API_PORT = 7751;
-const UI_PORT = 7750;
+const API_PORT = 8701;
+const UI_PORT = 8700;
 // The first run builds the API, which can take a while on a cold machine.
 const READY_TIMEOUT_MS = 120_000;
 const STOP_TIMEOUT_MS = 10_000;
