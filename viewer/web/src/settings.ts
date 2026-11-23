@@ -78,7 +78,7 @@ export const SETTINGS = [
         title: "Line Numbers",
         description: "Show line numbers on the left edge of the editor.",
         kind: "boolean",
-        default: false,
+        default: true,
     },
     {
         id: "editor.wordWrap",

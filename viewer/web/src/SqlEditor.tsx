@@ -23,7 +23,7 @@ const OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
     readOnly: true,
     domReadOnly: true,
     minimap: { enabled: false },
-    lineNumbers: "off",
+    lineNumbers: "on",
     folding: false,
     scrollBeyondLastLine: false,
     renderLineHighlight: "none",
