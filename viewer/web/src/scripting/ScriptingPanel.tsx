@@ -99,12 +99,14 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
 
     const [kind, setKind] = useState<string>("");
     const [search, setSearch] = useState("");
+    const [regex, setRegex] = useState(false);
     const [focus, setFocus] = useState<number | null>(null);
 
     // The set's own filter and ticks. Plain ids rather than a rule set: they only ever feed one
     // Remove, which rebuilds the selection's rules from what is left.
     const [chosenKind, setChosenKind] = useState<string>("");
     const [chosenSearch, setChosenSearch] = useState("");
+    const [chosenRegex, setChosenRegex] = useState(false);
     const [ticked, setTicked] = useState<Set<string>>(() => new Set());
     const [tickAnchor, setTickAnchor] = useState<number | null>(null);
 
@@ -200,11 +202,11 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
     const inSet = useMemo(() => resolve(objects, selection), [objects, selection]);
     const stagedIds = useMemo(() => resolve(objects, staged), [objects, staged]);
 
-    const needle = search.trim().toLowerCase();
+    const matcher = useMemo(() => buildMatcher(search, regex), [search, regex]);
     const visible = useMemo(
         () =>
-            sorted.filter((o) => (!kind || o.kind === kind) && matches(o, needle)),
-        [sorted, kind, needle],
+            sorted.filter((o) => (!kind || o.kind === kind) && matcher.test(o)),
+        [sorted, kind, matcher],
     );
 
     const stagedObjects = useMemo(
@@ -245,10 +247,10 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
         return kinds.filter((k) => present.has(k));
     }, [targets, kinds]);
 
-    const chosenNeedle = chosenSearch.trim().toLowerCase();
+    const chosenMatcher = useMemo(() => buildMatcher(chosenSearch, chosenRegex), [chosenSearch, chosenRegex]);
     const chosenVisible = useMemo(
-        () => targets.filter((o) => (!chosenKind || o.kind === chosenKind) && matches(o, chosenNeedle)),
-        [targets, chosenKind, chosenNeedle],
+        () => targets.filter((o) => (!chosenKind || o.kind === chosenKind) && chosenMatcher.test(o)),
+        [targets, chosenKind, chosenMatcher],
     );
 
     // Ticks on objects that have since left the set count for nothing.
@@ -338,9 +340,12 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
     }, [chosenVisible, tickAnchor]);
 
     // A shift range is counted in rows of the filtered list, so a new filter starts a new range.
-    const filterChosen = (next: { search?: string; kind?: string }) => {
+    const filterChosen = (next: { search?: string; regex?: boolean; kind?: string }) => {
         if (next.search !== undefined) {
             setChosenSearch(next.search);
+        }
+        if (next.regex !== undefined) {
+            setChosenRegex(next.regex);
         }
         if (next.kind !== undefined) {
             setChosenKind(next.kind);
@@ -767,6 +772,9 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                             <FilterHead
                                 search={search}
                                 onSearch={setSearch}
+                                regex={regex}
+                                onRegex={setRegex}
+                                regexError={matcher.error}
                                 shown={visible.length}
                                 total={objects.length}
                                 kinds={kinds}
@@ -937,6 +945,9 @@ export function ScriptingPanel({ alias, db, selection, onSelection, stats }: Scr
                                 <FilterHead
                                     search={chosenSearch}
                                     onSearch={(search) => filterChosen({ search })}
+                                    regex={chosenRegex}
+                                    onRegex={(regex) => filterChosen({ regex })}
+                                    regexError={chosenMatcher.error}
                                     shown={chosenVisible.length}
                                     total={targets.length}
                                     kinds={chosenKinds}
@@ -1304,16 +1315,38 @@ function jobSummary(objects: number, tablesWithRows: number): string {
     return parts.join(" · ");
 }
 
-function matches(o: ScriptableObject, needle: string): boolean {
-    if (!needle) {
-        return true;
+interface Matcher {
+    test: (o: ScriptableObject) => boolean;
+    error?: string;
+}
+
+// Both modes look at "schema.name". Plain text is a case-insensitive substring. Regex mode is
+// case-insensitive too, and unanchored, so "\d" finds every name with a digit in it and
+// "^dbo\..*_bck" narrows to one schema. A pattern that does not compile matches nothing, so a
+// half-typed "[0-9" does not flash the whole list back.
+function buildMatcher(search: string, regex: boolean): Matcher {
+    const text = search.trim();
+    if (!text) {
+        return { test: () => true };
     }
-    return (o.schema + "." + o.name).toLowerCase().includes(needle);
+    if (!regex) {
+        const needle = text.toLowerCase();
+        return { test: (o) => (o.schema + "." + o.name).toLowerCase().includes(needle) };
+    }
+    try {
+        const pattern = new RegExp(text, "i");
+        return { test: (o) => pattern.test(o.schema + "." + o.name) };
+    } catch (e) {
+        return { test: () => false, error: e instanceof Error ? e.message : String(e) };
+    }
 }
 
 interface FilterHeadProps {
     search: string;
     onSearch: (next: string) => void;
+    regex: boolean;
+    onRegex: (next: boolean) => void;
+    regexError?: string;
     shown: number;
     total: number;
     kinds: string[];
@@ -1323,17 +1356,26 @@ interface FilterHeadProps {
 
 // The search box and type chips over a list. Both panes have one, so a set of thousands can be
 // narrowed down the same way the inventory is.
-function FilterHead({ search, onSearch, shown, total, kinds, kind, onKind }: FilterHeadProps) {
+function FilterHead({ search, onSearch, regex, onRegex, regexError, shown, total, kinds, kind, onKind }: FilterHeadProps) {
     return (
         <div className="pane-head">
             <div className="searchrow">
                 <input
                     type="search"
-                    className="search"
-                    placeholder="Search…"
+                    className={"search" + (regexError ? " invalid" : "")}
+                    placeholder={regex ? "Regex, e.g. \\d or ^dbo\\..*_bck$" : "Search…"}
+                    title={regexError}
                     value={search}
                     onChange={(e) => onSearch(e.target.value)}
                 />
+                <button
+                    className="chip regex-toggle mono"
+                    aria-pressed={regex}
+                    title={regex ? "Regex on: click for plain text" : "Search with a regular expression"}
+                    onClick={() => onRegex(!regex)}
+                >
+                    .*
+                </button>
                 <span className="ratio">
                     {shown} / {total}
                 </span>

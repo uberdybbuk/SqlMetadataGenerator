@@ -1369,6 +1369,18 @@ tr.norows td.empty-note {
     flex: 1 1 auto;
 }
 
+/* The pattern does not compile; the message is on the input's tooltip. */
+.searchrow .search.invalid {
+    border-color: var(--danger);
+    background: var(--danger-soft);
+}
+
+.searchrow .regex-toggle {
+    flex: 0 0 auto;
+    font-size: 12px;
+    padding: 2px 8px;
+}
+
 /* Matching / total. The pair is the point: one number alone cannot say whether a filter is on. */
 .ratio {
     flex: 0 0 auto;
