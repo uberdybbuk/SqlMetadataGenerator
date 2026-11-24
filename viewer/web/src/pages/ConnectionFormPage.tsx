@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { api, type ConnectionRequest, type ConnectionSummary, type Provider } from "../api";
 import { useCurrentTab } from "../tabs/TabStore";
+import { forgetServer } from "../tree/ObjectTree";
 import { useApi } from "../useApi";
 import { Icon } from "../Icon";
 
@@ -163,11 +164,15 @@ function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
         setSaving(true);
         setSaveError(null);
         try {
+            const body = request();
             if (existing) {
-                await api.updateConnection(existing.alias, request());
+                await api.updateConnection(existing.alias, body);
+                forgetServer(existing.alias);
             } else {
-                await api.addConnection(request());
+                await api.addConnection(body);
             }
+            // A new alias can reuse the name of one deleted earlier in this session.
+            forgetServer(body.alias);
             leave();
         } catch (err) {
             setSaveError(err instanceof Error ? err.message : String(err));
@@ -183,6 +188,7 @@ function ConnectionForm({ existing }: { existing: ConnectionSummary | null }) {
         setSaveError(null);
         try {
             await api.deleteConnection(existing.alias);
+            forgetServer(existing.alias);
             leave();
         } catch (err) {
             setSaveError(err instanceof Error ? err.message : String(err));

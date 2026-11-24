@@ -82,6 +82,23 @@ function ensure<T>(key: string, fetcher: () => Promise<T>, done: () => void): vo
     ).finally(done);
 }
 
+// Mounted trees, told when the cache under them was emptied from outside.
+const listeners = new Set<() => void>();
+
+// Drops everything read through a connection. Called when the connection itself is saved or
+// deleted: the entry may now point at another host, and an answer (or a failure) read through the
+// old one must not outlive it. The tree stays mounted behind the connection form, so it is told.
+export function forgetServer(alias: string): void {
+    for (const key of [...cache.keys()]) {
+        if (key.split(SEP)[1] === alias) {
+            cache.delete(key);
+        }
+    }
+    for (const listener of listeners) {
+        listener();
+    }
+}
+
 const serverKey = (alias: string) => ["server", alias].join(SEP);
 const namesKey = (alias: string, db: string) => ["names", alias, db].join(SEP);
 
@@ -420,6 +437,13 @@ export function ObjectTree({ alias }: { alias: string }) {
     }, [alias, place.db, unreadable, settled]);
 
     useEffect(() => {
+        listeners.add(bump);
+        return () => {
+            listeners.delete(bump);
+        };
+    }, []);
+
+    useEffect(() => {
         if (place.db) {
             rememberDatabase(alias, place.db);
         }
@@ -458,14 +482,7 @@ export function ObjectTree({ alias }: { alias: string }) {
         bump();
     };
 
-    const refresh = () => {
-        for (const key of [...cache.keys()]) {
-            if (key.split(SEP)[1] === alias) {
-                cache.delete(key);
-            }
-        }
-        bump();
-    };
+    const refresh = () => forgetServer(alias);
 
     const keepTab = (href: string) => {
         const key = describeRoute(href).key;
