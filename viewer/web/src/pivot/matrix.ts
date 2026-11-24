@@ -232,17 +232,26 @@ export function formatLabel(value: Cell, field: LayoutField | undefined): string
     }
     const grain: PivotGrain | undefined = field?.grain;
     if (grain && grain !== "none" && typeof value === "string") {
-        const year = value.slice(0, 4);
-        const month = Number(value.slice(5, 7));
+        // Day and longer arrive as an ISO date or timestamp, the time units as text the server
+        // already cut after the unit ("2026-10-05 11"). Both read the same once the 'T' is gone.
+        const text = value.replace("T", " ");
+        const year = text.slice(0, 4);
+        const month = Number(text.slice(5, 7));
         switch (grain) {
             case "year":
                 return year;
             case "quarter":
                 return `${year} Q${Math.floor((month - 1) / 3) + 1}`;
             case "month":
-                return value.slice(0, 7);
+                return text.slice(0, 7);
+            case "day":
+                return text.slice(0, 10);
+            case "hour":
+                return `${text.slice(0, 13)}:00`;
+            case "minute":
+                return text.slice(0, 16);
             default:
-                return value.slice(0, 10);
+                return text.slice(0, 19);
         }
     }
     return String(value);

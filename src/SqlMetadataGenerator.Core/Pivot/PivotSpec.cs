@@ -2,7 +2,7 @@ namespace SqlMetadataGenerator.Pivot;
 
 // What to group by, and how. Granularity applies to date and time columns only: grouping a
 // datetime2 as it stands yields one group per microsecond, which is not an analysis, so a date
-// field is always rolled up to a period.
+// field is always rolled up to a period, from a year down to a second.
 public enum DateGrain
 {
     None,
@@ -10,6 +10,9 @@ public enum DateGrain
     Quarter,
     Month,
     Day,
+    Hour,
+    Minute,
+    Second,
 }
 
 public enum Aggregate

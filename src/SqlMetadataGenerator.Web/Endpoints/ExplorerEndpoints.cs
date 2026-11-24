@@ -851,7 +851,10 @@ internal static class ExplorerEndpoints
             "quarter" => DateGrain.Quarter,
             "month" => DateGrain.Month,
             "day" => DateGrain.Day,
-            _ => throw new InvalidOperationException($"Unknown period '{grain}'. Use year, quarter, month or day."),
+            "hour" => DateGrain.Hour,
+            "minute" => DateGrain.Minute,
+            "second" => DateGrain.Second,
+            _ => throw new InvalidOperationException($"Unknown period '{grain}'. Use year, quarter, month, day, hour, minute or second."),
         };
 
         private static Aggregate ParseAggregate(string? agg) => agg?.Trim().ToLowerInvariant() switch

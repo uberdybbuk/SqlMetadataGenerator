@@ -24,7 +24,11 @@ import {
 // field is dragged between. Ticking puts a field where Excel would; dragging puts it exactly where
 // it is dropped.
 
-const GRAINS: PivotGrain[] = ["year", "quarter", "month", "day"];
+// A date column has no time of day, so it stops at the day; the time units are offered only on a
+// column that carries one.
+const DATE_GRAINS: PivotGrain[] = ["year", "quarter", "month", "day"];
+const TIME_GRAINS: PivotGrain[] = [...DATE_GRAINS, "hour", "minute", "second"];
+const grainsOf = (typeName: string | undefined) => (typeName?.toLowerCase() === "date" ? DATE_GRAINS : TIME_GRAINS);
 
 const AREAS: { area: Area; title: string; hint: string }[] = [
     { area: "filters", title: "Filters", hint: "Drop to filter by value" },
@@ -248,7 +252,7 @@ export function FieldPane({ columns, layout, onLayout, running, runBlocker, onRu
                                                         })
                                                     }
                                                 >
-                                                    {GRAINS.map((g) => (
+                                                    {grainsOf(columns.find((c) => c.name === f.column)?.typeName).map((g) => (
                                                         <option key={g} value={g}>
                                                             by {g}
                                                         </option>

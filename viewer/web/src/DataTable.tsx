@@ -9,6 +9,8 @@ import {
     useState,
 } from "react";
 
+import { useCellPeek } from "./CellPeek";
+import { formatCellText } from "./cell";
 import { buildHtml, buildPlainText, type CopyRegion } from "./clipboard";
 
 // The one grid in the app. Sorting, column widths and selection all live here, so that a header
@@ -42,6 +44,8 @@ export interface Column<T> {
     className?: string;
     // A cell class that varies by row (e.g. to paint a NULL cell).
     cellClassName?: (row: T) => string | undefined;
+    // Shown under the full value when a cut-off cell is opened, e.g. that the server truncated it.
+    peekNote?: string;
     // The header is drawn as-is: it is not wrapped in a sort/selection button and its
     // width is not measured. For columns that carry their own control, like the row
     // number — otherwise a button ends up nested inside a button.
@@ -118,6 +122,11 @@ export function DataTable<T>({
     // A new set of rows or columns is a new table; the old selection points at nothing.
     useEffect(() => setSelection(NO_SELECTION), [rows, columnKeys]);
 
+    // The full text of a cut-off cell, on hover. See CellPeek.tsx.
+    const peek = useCellPeek();
+    const { reset: resetPeek } = peek;
+    useEffect(() => resetPeek(), [rows, columnKeys, resetPeek]);
+
     // Every kind of selection clears the others: clicking a cell drops the previous row,
     // column or select-all, and that cell becomes the active selection.
     const selectRow = useCallback((key: string, additive: boolean) => {
@@ -159,6 +168,9 @@ export function DataTable<T>({
         const copy = [...rows].sort((a, b) => compare(column.sortValue!(a), column.sortValue!(b)) * direction);
         return limit ? copy.slice(0, limit) : copy;
     }, [rows, columns, sort, limit]);
+
+    // For the cell popup, which knows a cell only by the row key written on it.
+    const byKey = useMemo(() => new Map(sorted.map((row) => [rowKey(row), row])), [sorted, rowKey]);
 
     // The row number is the position in what is ON SCREEN, so it still reads 1..n after a sort.
     const position = useMemo(() => {
@@ -367,141 +379,180 @@ export function DataTable<T>({
     // across the window is worse than honest empty space beside it.
     const tableWidth = fixed ? (growKey ? Math.max(totalWidth ?? 0, avail) : totalWidth) : undefined;
 
+    // One listener on the body instead of one per cell. The row number column is left out: it
+    // never holds anything worth opening.
+    function hoverCell(event: MouseEvent<HTMLTableSectionElement>) {
+        const cell = (event.target as HTMLElement).closest("td");
+        if (!cell) {
+            return;
+        }
+        const column = allColumns.find((c) => c.key === cell.dataset.col);
+        const key = cell.dataset.row;
+        const row = key === undefined ? undefined : byKey.get(key);
+        if (!column || column.key === GUTTER || key === undefined || row === undefined) {
+            peek.hoverCell(cell, null);
+            return;
+        }
+        // The raw value, not what the cell shows: the screen caps long text (see formatCell),
+        // and the popup exists precisely to show the rest. NULL has nothing more to show.
+        const header = copyHeaderOf(column);
+        const hasRaw = column.copyValue !== undefined || column.sortValue !== undefined;
+        const raw = hasRaw ? copyValueOf(column, row) : undefined;
+        if (raw === null) {
+            peek.hoverCell(cell, null);
+            return;
+        }
+        peek.hoverCell(cell, {
+            label: header.name,
+            row: position.get(key) ?? 0,
+            type: column.copyType,
+            note: column.peekNote,
+            text: raw === undefined ? undefined : formatCellText(raw, header.typeName),
+        });
+    }
+
     return (
-        <div
-            className={dense ? "table-wrap dense" : "table-wrap"}
-            ref={wrapRef}
-            // Focusable so that a click in the grid takes focus away from the editor, which is what
-            // the copy handler goes by. Focused explicitly: Safari does not focus a clicked button,
-            // and a click on a plain cell would otherwise leave focus wherever it was.
-            tabIndex={-1}
-            onClick={() => {
-                const wrap = wrapRef.current;
-                if (wrap && !wrap.contains(document.activeElement)) {
-                    wrap.focus({ preventScroll: true });
-                }
-            }}
-        >
-            <table
-                ref={tableRef}
-                style={fixed ? { tableLayout: "fixed", width: tableWidth } : undefined}
+        <>
+            <div
+                className={dense ? "table-wrap dense" : "table-wrap"}
+                ref={wrapRef}
+                // Focusable so that a click in the grid takes focus away from the editor, which is what
+                // the copy handler goes by. Focused explicitly: Safari does not focus a clicked button,
+                // and a click on a plain cell would otherwise leave focus wherever it was.
+                tabIndex={-1}
+                onClick={() => {
+                    const wrap = wrapRef.current;
+                    if (wrap && !wrap.contains(document.activeElement)) {
+                        wrap.focus({ preventScroll: true });
+                    }
+                }}
             >
-                {fixed && (
-                    <colgroup>
-                        {allColumns.map((c) => (
-                            <col key={c.key} style={c.plain ? undefined : { width: laidOut![c.key] }} />
-                        ))}
-                    </colgroup>
-                )}
-                <thead>
-                    <tr>
-                        {allColumns.map((column) => {
-                            const active = sort?.key === column.key;
-                            const arrow = active ? (sort!.desc ? "↓" : "↑") : "⇅";
-                            const selected = selection.all || selection.cols.has(column.key);
-                            return (
-                                <th
-                                    key={column.key}
-                                    className={[
-                                        column.numeric ? "num" : "",
-                                        column.key === GUTTER ? "rownum-head" : "",
-                                        selected ? "selected" : "",
-                                    ]
-                                        .filter(Boolean)
-                                        .join(" ")}
-                                    aria-sort={active ? (sort!.desc ? "descending" : "ascending") : undefined}
-                                    // Attached unconditionally: the card can come from the column's
-                                    // info OR be baked into a plain header (the corner cell), and a
-                                    // card with no coordinates lands in the top-left of the page.
-                                    onMouseEnter={placeInfoCard}
-                                >
-                                    {column.plain ? (
-                                        column.header
-                                    ) : (
-                                        // The name selects and the arrow sorts: two separate buttons.
-                                        <span className={column.sortValue ? "sort sortable" : "sort"}>
-                                            <button
-                                                type="button"
-                                                className="hname pick"
-                                                onClick={(e) => selectColumn(column.key, e.metaKey || e.ctrlKey)}
-                                            >
-                                                {column.header}
-                                            </button>
-                                            {column.sortValue && (
+                <table
+                    ref={tableRef}
+                    style={fixed ? { tableLayout: "fixed", width: tableWidth } : undefined}
+                >
+                    {fixed && (
+                        <colgroup>
+                            {allColumns.map((c) => (
+                                <col key={c.key} style={c.plain ? undefined : { width: laidOut![c.key] }} />
+                            ))}
+                        </colgroup>
+                    )}
+                    <thead>
+                        <tr>
+                            {allColumns.map((column) => {
+                                const active = sort?.key === column.key;
+                                const arrow = active ? (sort!.desc ? "↓" : "↑") : "⇅";
+                                const selected = selection.all || selection.cols.has(column.key);
+                                return (
+                                    <th
+                                        key={column.key}
+                                        className={[
+                                            column.numeric ? "num" : "",
+                                            column.key === GUTTER ? "rownum-head" : "",
+                                            selected ? "selected" : "",
+                                        ]
+                                            .filter(Boolean)
+                                            .join(" ")}
+                                        aria-sort={active ? (sort!.desc ? "descending" : "ascending") : undefined}
+                                        // Attached unconditionally: the card can come from the column's
+                                        // info OR be baked into a plain header (the corner cell), and a
+                                        // card with no coordinates lands in the top-left of the page.
+                                        onMouseEnter={placeInfoCard}
+                                    >
+                                        {column.plain ? (
+                                            column.header
+                                        ) : (
+                                            // The name selects and the arrow sorts: two separate buttons.
+                                            <span className={column.sortValue ? "sort sortable" : "sort"}>
                                                 <button
                                                     type="button"
-                                                    className={active ? "arrow sortbtn active" : "arrow sortbtn"}
-                                                    onClick={() => toggleSort(column)}
-                                                    aria-label="Sort"
+                                                    className="hname pick"
+                                                    onClick={(e) => selectColumn(column.key, e.metaKey || e.ctrlKey)}
                                                 >
-                                                    {arrow}
+                                                    {column.header}
                                                 </button>
-                                            )}
-                                        </span>
-                                    )}
-                                    {column.info && <span className="colinfo">{column.info}</span>}
-                                    {resizable && !column.plain && (
-                                        <span
-                                            className="resizer"
-                                            onMouseDown={(e) => startResize(column.key, e)}
-                                            role="separator"
-                                            aria-orientation="vertical"
-                                            aria-label={`Resize column`}
-                                        />
-                                    )}
-                                </th>
+                                                {column.sortValue && (
+                                                    <button
+                                                        type="button"
+                                                        className={active ? "arrow sortbtn active" : "arrow sortbtn"}
+                                                        onClick={() => toggleSort(column)}
+                                                        aria-label="Sort"
+                                                    >
+                                                        {arrow}
+                                                    </button>
+                                                )}
+                                            </span>
+                                        )}
+                                        {column.info && <span className="colinfo">{column.info}</span>}
+                                        {resizable && !column.plain && (
+                                            <span
+                                                className="resizer"
+                                                onMouseDown={(e) => startResize(column.key, e)}
+                                                role="separator"
+                                                aria-orientation="vertical"
+                                                aria-label={`Resize column`}
+                                            />
+                                        )}
+                                    </th>
+                                );
+                            })}
+                        </tr>
+                    </thead>
+                    <tbody onMouseOver={hoverCell} onMouseLeave={peek.leaveGrid}>
+                        {sorted.map((row) => {
+                            const key = rowKey(row);
+                            const rowSelected = selection.all || selection.rows.has(key);
+                            return (
+                                <tr key={key} className={rowSelected ? "selected" : undefined}>
+                                    {allColumns.map((column) => {
+                                        const isGutter = column.key === GUTTER;
+                                        return (
+                                            <td
+                                                key={column.key}
+                                                data-row={key}
+                                                data-col={column.key}
+                                                onClick={
+                                                    isGutter
+                                                        ? (e) => selectRow(key, e.metaKey || e.ctrlKey)
+                                                        : (e) => selectCell(key, column.key, e.metaKey || e.ctrlKey)
+                                                }
+                                                className={[
+                                                    column.numeric ? "num" : "",
+                                                    column.className ?? "",
+                                                    column.cellClassName?.(row) ?? "",
+                                                    isGutter
+                                                        ? rowSelected
+                                                            ? "selected"
+                                                            : ""
+                                                        : isCellSelected(selection, key, column.key)
+                                                          ? "selected"
+                                                          : "",
+                                                ]
+                                                    .filter(Boolean)
+                                                    .join(" ")}
+                                            >
+                                                {column.render(row)}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
                             );
                         })}
-                    </tr>
-                </thead>
-                <tbody>
-                    {sorted.map((row) => {
-                        const key = rowKey(row);
-                        const rowSelected = selection.all || selection.rows.has(key);
-                        return (
-                            <tr key={key} className={rowSelected ? "selected" : undefined}>
-                                {allColumns.map((column) => {
-                                    const isGutter = column.key === GUTTER;
-                                    return (
-                                        <td
-                                            key={column.key}
-                                            onClick={
-                                                isGutter
-                                                    ? (e) => selectRow(key, e.metaKey || e.ctrlKey)
-                                                    : (e) => selectCell(key, column.key, e.metaKey || e.ctrlKey)
-                                            }
-                                            className={[
-                                                column.numeric ? "num" : "",
-                                                column.className ?? "",
-                                                column.cellClassName?.(row) ?? "",
-                                                isGutter
-                                                    ? rowSelected
-                                                        ? "selected"
-                                                        : ""
-                                                    : isCellSelected(selection, key, column.key)
-                                                      ? "selected"
-                                                      : "",
-                                            ]
-                                                .filter(Boolean)
-                                                .join(" ")}
-                                        >
-                                            {column.render(row)}
-                                        </td>
-                                    );
-                                })}
+                        {sorted.length === 0 && (
+                            <tr className="norows">
+                                <td colSpan={allColumns.length} className="empty-note">
+                                    {emptyNote}
+                                </td>
                             </tr>
-                        );
-                    })}
-                    {sorted.length === 0 && (
-                        <tr className="norows">
-                            <td colSpan={allColumns.length} className="empty-note">
-                                {emptyNote}
-                            </td>
-                        </tr>
-                    )}
-                </tbody>
-            </table>
-        </div>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+            {/* Outside the wrapper: the popup is portalled to the body, but React still bubbles its
+                events up this tree, and the wrapper's click handler would take focus on every click. */}
+            {peek.element}
+        </>
     );
 }
 

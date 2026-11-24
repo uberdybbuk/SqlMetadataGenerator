@@ -42,44 +42,51 @@ public static class PivotQuery
         }
 
         var columns = shape.Columns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
-        var headers = new List<string>();
-        var selects = new List<string>();
-        var rowBy = new List<string>();
-        var columnBy = new List<string>();
+        string Q(string name) => Quote(provider, name);
 
-        foreach (var (fields, target) in new[] { (spec.Rows, rowBy), (spec.Columns, columnBy) })
+        // A date field's period is computed ONCE, as a named column of the src CTE, and everything
+        // after that refers to it by name. Written inline, the same DATEFROMPARTS(...) would be
+        // repeated in the SELECT, the GROUP BY, every GROUPING() and the ORDER BY, and the
+        // statement on screen would be unreadable. The name has to differ from the table's own
+        // columns, since src carries those too.
+        var periods = new List<(string Name, string Expression)>();
+        var outputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rowKeys = new List<Key>();
+        var columnKeys = new List<Key>();
+        foreach (var (fields, target) in new[] { (spec.Rows, rowKeys), (spec.Columns, columnKeys) })
         {
             foreach (var field in fields)
             {
                 var column = Resolve(columns, field.Column);
-                string expression = GroupExpression(provider, column, field.Grain);
-                target.Add(expression);
-                selects.Add($"{expression} AS {Alias(provider, Header(field))}");
-                headers.Add(Header(field));
+                string source = column.Name;
+                if (field.Grain != DateGrain.None)
+                {
+                    string expression = PeriodExpression(provider, column, field.Grain);
+                    var period = periods.FirstOrDefault(p => p.Expression == expression);
+                    if (period.Name is null)
+                    {
+                        period = (Distinct(Header(field), n => columns.ContainsKey(n) || periods.Any(p => p.Name.Equals(n, StringComparison.OrdinalIgnoreCase))), expression);
+                        periods.Add(period);
+                    }
+                    source = period.Name;
+                }
+                // Result column names have to be unique: a CTE refuses two columns of one name.
+                string name = Distinct(source, outputs.Contains);
+                outputs.Add(name);
+                target.Add(new Key(source, name));
             }
         }
+        var keys = rowKeys.Concat(columnKeys).ToList();
 
+        var measureNames = new List<string>();
         foreach (var measure in spec.Values)
         {
-            selects.Add($"{MeasureExpression(provider, columns, measure)} AS {Alias(provider, Header(measure))}");
-            headers.Add(Header(measure));
-        }
-
-        var groupBy = rowBy.Concat(columnBy).ToList();
-
-        // One GROUPING flag per field. It is what tells a subtotal row apart from a group whose
-        // value genuinely is NULL — without it the two are indistinguishable in the result.
-        if (spec.Totals)
-        {
-            for (int i = 0; i < groupBy.Count; i++)
-            {
-                selects.Add($"GROUPING({groupBy[i]}) AS {Alias(provider, "__level" + i)}");
-                headers.Add("__level" + i);
-            }
+            string name = Distinct(Header(measure), outputs.Contains);
+            outputs.Add(name);
+            measureNames.Add(name);
         }
 
         int limit = Math.Clamp(spec.Limit, 1, spec.Columns.Count > 0 ? MaxCells : MaxLimit);
-
         string table = Qualify(provider, shape.Schema, shape.Name);
 
         var conditions = new List<string>();
@@ -101,10 +108,8 @@ public static class PivotQuery
         // covers exactly the groups on screen, whichever measure is shown, Excel's behaviour. A
         // HAVING on the pivot itself would also be applied to every total row, and the grand total
         // would go on counting the groups it had dropped.
-        var keeps = new List<string>();
-        var kept = new List<string>();
-        string baseWhere = conditions.Count > 0 ? $"\n    WHERE {string.Join("\n      AND ", conditions)}" : "";
-        foreach (var (fields, by) in new[] { (spec.Rows, rowBy), (spec.Columns, columnBy) })
+        var filtered = new List<(int Index, PivotMeasure Measure, PivotValueFilter Filter, List<Key> Keys)>();
+        foreach (var (fields, axis) in new[] { (spec.Rows, rowKeys), (spec.Columns, columnKeys) })
         {
             for (int i = 0; i < fields.Count; i++)
             {
@@ -117,47 +122,66 @@ public static class PivotQuery
                 {
                     throw new InvalidOperationException($"{Header(measure)} is not a number, so '{fields[i].Column}' cannot be filtered by it.");
                 }
-
-                string name = $"__keep{keeps.Count}";
-                var keys = by.Take(i + 1).ToList();
-                var keyColumns = keys.Select((k, j) => $"{k} AS __k{j}");
-                keeps.Add(
-                    $"{name} AS (\n    SELECT {string.Join(", ", keyColumns)}\n    FROM {table}{baseWhere}\n"
-                    + $"    GROUP BY {string.Join(", ", keys)}\n"
-                    + $"    HAVING {MeasureExpression(provider, columns, measure)} {Operator(valueFilter.Op)} {valueFilter.Value.ToString(CultureInfo.InvariantCulture)}\n)");
-                // NULL is a group like any other in a pivot, so a NULL key has to find its own
-                // group too; = alone never matches it.
-                var matches = keys.Select((k, j) => $"({name}.__k{j} = {k} OR ({name}.__k{j} IS NULL AND {k} IS NULL))");
-                kept.Add($"EXISTS (SELECT 1 FROM {name} WHERE {string.Join(" AND ", matches)})");
+                filtered.Add((filtered.Count, measure, valueFilter, axis.Take(i + 1).ToList()));
             }
         }
-        conditions.AddRange(kept);
 
-        var sql = new StringBuilder();
-        if (keeps.Count > 0)
+        // The rows the pivot reads: the table, filtered, with each period as a column. Only worth a
+        // CTE when there is a period to add, or a value filter that has to read the same rows again.
+        bool withSource = periods.Count > 0 || filtered.Count > 0;
+        string from = withSource ? "src" : table;
+        var ctes = new List<string>();
+        if (withSource)
         {
-            sql.AppendLine("WITH " + string.Join(",\n", keeps));
-        }
-        sql.Append("SELECT ");
-        if (provider == DatabaseProvider.SqlServer)
-        {
-            sql.Append(CultureInfo.InvariantCulture, $"TOP {limit} ");
-        }
-        sql.AppendLine();
-        sql.AppendLine("    " + string.Join(",\n    ", selects));
-        sql.AppendLine($"FROM {table}");
-        if (conditions.Count > 0)
-        {
-            sql.AppendLine($"WHERE {string.Join("\n  AND ", conditions)}");
+            var src = new StringBuilder();
+            // PostgreSQL computes a CTE that is read more than once into a temporary result first:
+            // here that would be a copy of the whole table. NOT MATERIALIZED lets it fold src into
+            // each query that reads it, as SQL Server always does.
+            src.AppendLine(provider == DatabaseProvider.Postgres && filtered.Count > 0 ? "src AS NOT MATERIALIZED (" : "src AS (");
+            src.AppendLine("    SELECT " + string.Join(",\n        ", periods.Select(p => $"{p.Expression} AS {Q(p.Name)}").Prepend("*")));
+            src.AppendLine($"    FROM {table}");
+            if (conditions.Count > 0)
+            {
+                src.AppendLine($"    WHERE {string.Join("\n      AND ", conditions)}");
+            }
+            src.Append(')');
+            ctes.Add(src.ToString());
+            conditions.Clear();
         }
 
+        foreach (var (index, measure, valueFilter, by) in filtered)
+        {
+            string names = string.Join(", ", by.Select(k => Q(k.Source)));
+            ctes.Add(
+                $"keep{index} AS (\n    SELECT {names}\n    FROM src\n    GROUP BY {names}\n"
+                + $"    HAVING {MeasureExpression(provider, columns, measure)} {Operator(valueFilter.Op)} {valueFilter.Value.ToString(CultureInfo.InvariantCulture)}\n)");
+            // NULL is a group like any other in a pivot, so a NULL key has to find its own group
+            // too; = alone never matches it.
+            var matches = by.Select(k => $"(k.{Q(k.Source)} = src.{Q(k.Source)} OR (k.{Q(k.Source)} IS NULL AND src.{Q(k.Source)} IS NULL))");
+            conditions.Add($"EXISTS (SELECT 1 FROM keep{index} AS k WHERE {string.Join(" AND ", matches)})");
+        }
+
+        // The grouping itself, with one GROUPING flag per field when there are totals. The flag is
+        // what tells a subtotal row apart from a group whose value genuinely is NULL — without it
+        // the two are indistinguishable in the result.
+        string Level(int i) => Q("__level" + i);
+        var selects = keys.Select(k => k.Source.Equals(k.Name, StringComparison.Ordinal) ? Q(k.Source) : $"{Q(k.Source)} AS {Q(k.Name)}").ToList();
+        selects.AddRange(spec.Values.Select((m, i) => $"{MeasureExpression(provider, columns, m)} AS {Q(measureNames[i])}"));
+        if (spec.Totals)
+        {
+            selects.AddRange(keys.Select((k, i) => $"GROUPING({Q(k.Source)}) AS {Level(i)}"));
+        }
+
+        string groupBy;
+        var rowBy = rowKeys.Select(k => Q(k.Source)).ToList();
+        var columnBy = columnKeys.Select(k => Q(k.Source)).ToList();
         if (!spec.Totals)
         {
-            sql.AppendLine($"GROUP BY {string.Join(", ", groupBy)}");
+            groupBy = $"GROUP BY {string.Join(", ", rowBy.Concat(columnBy))}";
         }
         else if (columnBy.Count == 0)
         {
-            sql.AppendLine($"GROUP BY ROLLUP({string.Join(", ", rowBy)})");
+            groupBy = $"GROUP BY ROLLUP({string.Join(", ", rowBy)})";
         }
         else
         {
@@ -173,23 +197,25 @@ public static class PivotQuery
                     sets.Add("(" + string.Join(", ", rowBy.Take(r).Concat(columnBy.Take(c))) + ")");
                 }
             }
-            sql.AppendLine($"GROUP BY GROUPING SETS (\n    {string.Join(",\n    ", sets)}\n)");
+            groupBy = $"GROUP BY GROUPING SETS (\n    {string.Join(",\n    ", sets)}\n)";
         }
 
-        // Total rows FIRST. Excel puts the grand total at the bottom, but the row cap truncates the
-        // tail, and the one row that must never be dropped is the total. The screen puts them back
-        // where a reader expects them.
+        // The order, in the result's own column names. Total rows FIRST: Excel puts the grand total
+        // at the bottom, but the row cap truncates the tail, and the one row that must never be
+        // dropped is the total. The screen puts them back where a reader expects them.
         var order = new List<string>();
         if (spec.Totals)
         {
-            foreach (string expression in groupBy)
-            {
-                order.Add($"GROUPING({expression}) DESC");
-            }
+            order.AddRange(keys.Select((_, i) => $"{Level(i)} DESC"));
         }
         // Then each field's own sort, outermost first. The screen orders the groups itself; this
         // decides which groups survive the row cap, so "smallest first" keeps the smallest.
-        foreach (var (fields, by, other) in new[] { (spec.Rows, rowBy, columnBy), (spec.Columns, columnBy, rowBy) })
+        // A field's GROUPING flag is __level<n>, rows first, then columns.
+        foreach (var (fields, axis, first, otherFirst, otherCount) in new[]
+        {
+            (spec.Rows, rowKeys, 0, rowKeys.Count, columnKeys.Count),
+            (spec.Columns, columnKeys, rowKeys.Count, 0, rowKeys.Count),
+        })
         {
             for (int i = 0; i < fields.Count; i++)
             {
@@ -200,11 +226,12 @@ public static class PivotQuery
                 string direction = sort.Descending ? "DESC" : "ASC";
                 if (sort.Measure is not { } index)
                 {
-                    order.Add($"{by[i]} {direction}");
+                    order.Add($"{Q(axis[i].Name)} {direction}");
                     continue;
                 }
 
-                string value = MeasureExpression(provider, columns, MeasureAt(spec, index, fields[i].Column));
+                MeasureAt(spec, index, fields[i].Column);
+                string value = Q(measureNames[index]);
                 if (!spec.Totals)
                 {
                     order.Add($"{value} {direction}");
@@ -213,30 +240,86 @@ public static class PivotQuery
                 // A group is ordered by its own total, which sits on the result row for exactly its
                 // level: its fields grouped, the next one rolled up, the other axis rolled up
                 // entirely. The window carries that number to every row inside the group.
-                var exact = new List<string> { $"GROUPING({by[i]}) = 0" };
-                if (i + 1 < by.Count)
+                var exact = new List<string> { $"{Level(first + i)} = 0" };
+                if (i + 1 < axis.Count)
                 {
-                    exact.Add($"GROUPING({by[i + 1]}) = 1");
+                    exact.Add($"{Level(first + i + 1)} = 1");
                 }
-                if (other.Count > 0)
+                if (otherCount > 0)
                 {
-                    exact.Add($"GROUPING({other[0]}) = 1");
+                    exact.Add($"{Level(otherFirst)} = 1");
                 }
                 order.Add(
                     $"MAX(CASE WHEN {string.Join(" AND ", exact)} THEN {value} END) "
-                    + $"OVER (PARTITION BY {string.Join(", ", by.Take(i + 1))}) {direction}");
+                    + $"OVER (PARTITION BY {string.Join(", ", axis.Take(i + 1).Select(k => Q(k.Name)))}) {direction}");
             }
         }
-        order.Add($"{MeasureExpression(provider, columns, spec.Values[0])} DESC");
-        sql.AppendLine($"ORDER BY {string.Join(", ", order)}");
+        // The last word goes to the first measure, unless a field's sort already ordered by it:
+        // SQL Server refuses a column that appears twice in an ORDER BY.
+        string fallback = Q(measureNames[0]);
+        if (!order.Any(o => o.StartsWith(fallback + " ", StringComparison.Ordinal)))
+        {
+            order.Add($"{fallback} DESC");
+        }
+
+        string top = provider == DatabaseProvider.SqlServer ? string.Create(CultureInfo.InvariantCulture, $"TOP {limit} ") : "";
+        string where = conditions.Count > 0 ? $"WHERE {string.Join("\n  AND ", conditions)}\n" : "";
+
+        // With totals the grouping goes into a CTE of its own, so the ORDER BY can read the
+        // GROUPING flags and the measures by name. SQL Server takes a result column's name in the
+        // ORDER BY only on its own, never inside an expression such as the window above.
+        var sql = new StringBuilder();
+        if (spec.Totals)
+        {
+            string body = $"SELECT\n    {string.Join(",\n    ", selects)}\nFROM {from}\n{where}{groupBy}";
+            ctes.Add("grouped AS (\n" + Indent(body) + "\n)");
+            sql.AppendLine("WITH " + string.Join(",\n", ctes));
+            sql.AppendLine($"SELECT {top}*");
+            sql.AppendLine("FROM grouped");
+        }
+        else
+        {
+            if (ctes.Count > 0)
+            {
+                sql.AppendLine("WITH " + string.Join(",\n", ctes));
+            }
+            sql.AppendLine($"SELECT {top}".TrimEnd());
+            sql.AppendLine("    " + string.Join(",\n    ", selects));
+            sql.AppendLine($"FROM {from}");
+            sql.Append(where);
+            sql.AppendLine(groupBy);
+        }
+        sql.AppendLine("ORDER BY\n    " + string.Join(",\n    ", order));
 
         if (provider == DatabaseProvider.Postgres)
         {
             sql.AppendLine(CultureInfo.InvariantCulture, $"LIMIT {limit}");
         }
 
+        var headers = keys.Select(k => k.Name).Concat(measureNames).ToList();
+        if (spec.Totals)
+        {
+            headers.AddRange(keys.Select((_, i) => "__level" + i));
+        }
         return new Built(sql.ToString().TrimEnd() + ";", headers, spec.Rows.Count, spec.Columns.Count, spec.Values.Count, limit);
     }
+
+    // A row or column field as the statement knows it: Source is the column it groups by (the
+    // table's own, or a period src adds), Name its column in the result.
+    private sealed record Key(string Source, string Name);
+
+    private static string Distinct(string name, Func<string, bool> taken)
+    {
+        string candidate = name;
+        for (int n = 2; taken(candidate); n++)
+        {
+            candidate = $"{name} ({n})";
+        }
+        return candidate;
+    }
+
+    private static string Indent(string text) =>
+        string.Join("\n", text.Split('\n').Select(line => "    " + line));
 
     // A filter's values arrive as text and are written into the statement as literals, so each one
     // is checked against the column's type first: a number has to parse as one, and anything else
@@ -378,33 +461,36 @@ public static class PivotQuery
     private static string Quote(DatabaseProvider provider, string name) =>
         provider == DatabaseProvider.Postgres ? PgIdentifier.Quote(name) : SqlIdentifier.Quote(name);
 
-    // An alias always gets quoted, because it carries spaces and parentheses by design.
-    private static string Alias(DatabaseProvider provider, string name) =>
-        provider == DatabaseProvider.Postgres ? PgIdentifier.Quote(name) : $"[{name.Replace("]", "]]")}]";
-
-    private static string GroupExpression(DatabaseProvider provider, ColumnSummary column, DateGrain grain)
+    // A date column rolled up to a period. Day and longer come back as a date, the period's first
+    // day. Hour, minute and second come back as ISO text cut after the unit, 'yyyy-mm-dd hh:mi',
+    // which groups and sorts the same as the time itself. The text form is what keeps SQL Server
+    // simple: DATETRUNC only exists from 2022, the DATEADD/DATEDIFF trick overflows an int at
+    // seconds, and style 120 truncates rather than rounds, so 23:59:59.997 stays in its own day.
+    private static string PeriodExpression(DatabaseProvider provider, ColumnSummary column, DateGrain grain)
     {
         string quoted = Quote(provider, column.Name);
-        if (grain == DateGrain.None)
-        {
-            return quoted;
-        }
 
         if (!IsDate(column.TypeName))
         {
             throw new InvalidOperationException($"'{column.Name}' is {column.TypeName}; a date period needs a date column.");
         }
+        if (grain is DateGrain.Hour or DateGrain.Minute or DateGrain.Second && !HasTime(column.TypeName))
+        {
+            throw new InvalidOperationException($"'{column.Name}' is {column.TypeName} and has no time of day to group by the {grain.ToString().ToLowerInvariant()}.");
+        }
 
         if (provider == DatabaseProvider.Postgres)
         {
-            string unit = grain switch
+            return grain switch
             {
-                DateGrain.Year => "year",
-                DateGrain.Quarter => "quarter",
-                DateGrain.Month => "month",
-                _ => "day",
+                DateGrain.Year => $"date_trunc('year', {quoted})::date",
+                DateGrain.Quarter => $"date_trunc('quarter', {quoted})::date",
+                DateGrain.Month => $"date_trunc('month', {quoted})::date",
+                DateGrain.Day => $"{quoted}::date",
+                DateGrain.Hour => $"to_char({quoted}, 'YYYY-MM-DD HH24')",
+                DateGrain.Minute => $"to_char({quoted}, 'YYYY-MM-DD HH24:MI')",
+                _ => $"to_char({quoted}, 'YYYY-MM-DD HH24:MI:SS')",
             };
-            return $"date_trunc('{unit}', {quoted})::date";
         }
 
         return grain switch
@@ -412,7 +498,10 @@ public static class PivotQuery
             DateGrain.Year => $"DATEFROMPARTS(YEAR({quoted}), 1, 1)",
             DateGrain.Quarter => $"DATEFROMPARTS(YEAR({quoted}), (DATEPART(quarter, {quoted}) - 1) * 3 + 1, 1)",
             DateGrain.Month => $"DATEFROMPARTS(YEAR({quoted}), MONTH({quoted}), 1)",
-            _ => $"CAST({quoted} AS date)",
+            DateGrain.Day => $"CAST({quoted} AS date)",
+            DateGrain.Hour => $"CONVERT(varchar(13), {quoted}, 120)",
+            DateGrain.Minute => $"CONVERT(varchar(16), {quoted}, 120)",
+            _ => $"CONVERT(varchar(19), {quoted}, 120)",
         };
     }
 
@@ -445,6 +534,8 @@ public static class PivotQuery
     private static bool IsDate(string typeName) => typeName.ToLowerInvariant() is
         "date" or "datetime" or "datetime2" or "smalldatetime" or "datetimeoffset" or
         "timestamp" or "timestamptz" or "timestamp without time zone" or "timestamp with time zone";
+
+    private static bool HasTime(string typeName) => IsDate(typeName) && !typeName.Equals("date", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsIntegral(string typeName) => typeName.ToLowerInvariant() is
         "tinyint" or "smallint" or "int" or "integer" or "bigint";

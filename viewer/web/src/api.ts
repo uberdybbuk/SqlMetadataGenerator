@@ -310,7 +310,7 @@ export interface PreviewResult {
 // The pivot. The spec travels as a STRUCTURE, never as SQL: the server looks every column up in
 // the table's own shape and composes the GROUP BY itself, so nothing here is pasted into a
 // statement as a name.
-export type PivotGrain = "none" | "year" | "quarter" | "month" | "day";
+export type PivotGrain = "none" | "year" | "quarter" | "month" | "day" | "hour" | "minute" | "second";
 export type PivotAgg = "count" | "countDistinct" | "sum" | "avg" | "min" | "max";
 
 export type PivotOp = "gt" | "ge" | "lt" | "le" | "eq" | "ne";

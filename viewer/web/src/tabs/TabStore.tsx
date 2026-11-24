@@ -26,6 +26,8 @@ export interface Tab {
     // what matters of it is copied into the draft when the tab opens.
     state?: unknown;
     preview: boolean;
+    // A name the person gave the tab. Shown instead of the title the URL gives it.
+    name?: string;
 }
 
 interface Store {
@@ -39,7 +41,7 @@ interface Store {
 }
 
 interface StoredTabs {
-    tabs: { id: string; pathname: string; search: string; preview: boolean }[];
+    tabs: { id: string; pathname: string; search: string; preview: boolean; name?: string }[];
     activeId: string | null;
     drafts: Record<string, string>;
 }
@@ -72,7 +74,7 @@ function load(): Store {
 
 function save(store: Store): void {
     const stored: StoredTabs = {
-        tabs: store.tabs.map(({ id, pathname, search, preview }) => ({ id, pathname, search, preview })),
+        tabs: store.tabs.map(({ id, pathname, search, preview, name }) => ({ id, pathname, search, preview, name })),
         activeId: store.activeId,
         drafts: store.drafts,
     };
@@ -170,6 +172,11 @@ export interface TabsApi {
     // Closes without asking. Whoever lets a person close a tab asks first when isDirty says so.
     close: (id: string, then?: string) => void;
     pin: (id: string) => void;
+    // Moves a tab so that it ends up in front of the tab at `before` in the current order, or
+    // last when `before` is the length of the list.
+    move: (id: string, before: number) => void;
+    // Gives a tab its own name and keeps it. An empty name gives back the title from the URL.
+    rename: (id: string, name: string) => void;
     draft: (id: string) => string | undefined;
     setDraft: (id: string, text: string) => void;
     setBusy: (id: string, busy: boolean) => void;
@@ -256,6 +263,29 @@ export function TabsProvider({ children }: { children: ReactNode }) {
         setStore((s) => (s.tabs.some((t) => t.id === id && t.preview) ? { ...s, tabs: s.tabs.map((t) => (t.id === id ? { ...t, preview: false } : t)) } : s));
     }, []);
 
+    const move = useCallback((id: string, before: number) => {
+        setStore((s) => {
+            const from = s.tabs.findIndex((t) => t.id === id);
+            // Dropped on its own place, on either side: nothing moves.
+            if (from < 0 || before === from || before === from + 1) {
+                return s;
+            }
+            const tabs = [...s.tabs];
+            const [tab] = tabs.splice(from, 1);
+            tabs.splice(before > from ? before - 1 : before, 0, tab);
+            return { ...s, tabs };
+        });
+    }, []);
+
+    const rename = useCallback((id: string, name: string) => {
+        const trimmed = name.trim() || undefined;
+        setStore((s) =>
+            s.tabs.some((t) => t.id === id && (t.name !== trimmed || t.preview))
+                ? { ...s, tabs: s.tabs.map((t) => (t.id === id ? { ...t, name: trimmed, preview: false } : t)) }
+                : s,
+        );
+    }, []);
+
     const draft = useCallback((id: string) => storeRef.current.drafts[id], []);
 
     const setDraft = useCallback((id: string, text: string) => {
@@ -303,11 +333,13 @@ export function TabsProvider({ children }: { children: ReactNode }) {
             activate,
             close,
             pin,
+            move,
+            rename,
             draft,
             setDraft,
             setBusy,
         }),
-        [store.tabs, store.activeId, busy, isDirty, activate, close, pin, draft, setDraft, setBusy],
+        [store.tabs, store.activeId, busy, isDirty, activate, close, pin, move, rename, draft, setDraft, setBusy],
     );
 
     return <TabsContext.Provider value={value}>{children}</TabsContext.Provider>;

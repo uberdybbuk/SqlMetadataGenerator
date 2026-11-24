@@ -92,6 +92,9 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
             key: `row-${r}`,
             header: String(r + 1),
             render: (field) => formatCell(field.values[r], field.column.typeName),
+            // No sorting across rows of different types, but the raw value is still what gets
+            // copied and what the cell popup shows.
+            copyValue: (field) => field.values[r],
             cellClassName: (field) =>
                 [
                     field.values[r] === null ? "isnull" : null,
@@ -129,6 +132,7 @@ export function ResultGrid({ columns, rows, elapsedMs, messages, limitNote }: Re
         className: isNumericType(column.typeName) ? undefined : "mono",
         // The background of a NULL cell is painted, so "no value" is never confused with "empty value".
         cellClassName: (row) => (row.values[i] === null ? "isnull" : undefined),
+        peekNote: column.truncated ? "Truncated to 256 characters for this preview." : undefined,
     }));
 
     return (
